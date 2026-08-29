@@ -45,7 +45,7 @@ export function RunsPage() {
     };
   }, [params]);
 
-  const { items, meta, loading, error, refresh } = useRuns(query);
+  const { items, meta, loading, error } = useRuns(query);
   useAsyncErrorToast(error, '加载运行列表失败');
 
   // 版本下拉
@@ -110,11 +110,6 @@ export function RunsPage() {
         eyebrow="Runs"
         title="运行记录"
         desc="所有历史运行的完整列表；支持按版本 / 阶段 / 状态筛选，点击任一运行查看详情。"
-        right={
-          <Button variant="secondary" onClick={() => refresh()}>
-            🔄 刷新
-          </Button>
-        }
       />
 
       <section className="card">

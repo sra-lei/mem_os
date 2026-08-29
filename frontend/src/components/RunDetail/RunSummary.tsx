@@ -1,7 +1,6 @@
 import type { RunSummary } from '@/types';
 import { StatusBadge, PhaseBadge } from '../UI/Badge';
 import { RateBar } from '../UI/RateBar';
-import { Button } from '../UI/Button';
 import { Link } from 'react-router-dom';
 import {
   fmtDate,
@@ -11,7 +10,7 @@ import {
   fmtLatency,
 } from '@/utils/format';
 
-export function RunSummary({ run, onRefresh }: { run: RunSummary; onRefresh?: () => void }) {
+export function RunSummary({ run }: { run: RunSummary }) {
   const tone = run.pass_rate >= 0.9 ? 'success' : run.pass_rate >= 0.7 ? 'warning' : 'danger';
   const total = run.total_cases;
   const p = run.passed;
@@ -36,11 +35,6 @@ export function RunSummary({ run, onRefresh }: { run: RunSummary; onRefresh?: ()
             <StatusBadge status={run.status ?? 'completed'} />
             <span className="muted mono">开始 {fmtDate(run.start_time)}</span>
             <span className="muted mono">耗时 {duration}</span>
-            {onRefresh ? (
-              <Button variant="ghost" size="sm" onClick={onRefresh}>
-                刷新
-              </Button>
-            ) : null}
           </div>
           {run.error_message ? (
             <div className="callout callout--danger">

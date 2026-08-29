@@ -80,7 +80,7 @@ export function CaseHistoryPage() {
         right={
           defAsync.data ? (
             <Link to={`/cases/${defAsync.data.case_id}`}>
-              <Button variant="secondary">刷新</Button>
+              <Button variant="secondary">查看用例详情</Button>
             </Link>
           ) : null
         }

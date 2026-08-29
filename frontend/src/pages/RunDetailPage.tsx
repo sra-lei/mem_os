@@ -10,7 +10,7 @@ import type { TestCaseResult } from '@/types';
 
 export function RunDetailPage() {
   const { runId } = useParams<{ runId: string }>();
-  const { run, results, byCategory, loading, error, refresh } = useRunDetail(runId);
+  const { run, results, byCategory, loading, error } = useRunDetail(runId);
   useAsyncErrorToast(error, '加载运行详情失败');
 
   const [compareId, setCompareId] = useState<string | number | null>(null);
@@ -49,7 +49,7 @@ export function RunDetailPage() {
         </>
       ) : run ? (
         <>
-          <RunSummary run={run} onRefresh={refresh} />
+          <RunSummary run={run} />
 
           <div className="grid-2">
             <section className="card">
@@ -60,11 +60,6 @@ export function RunDetailPage() {
               <CardHeader
                 title="结果分布"
                 subtitle={`通过 ${run.passed} / 失败 ${run.failed} / 总 ${run.total_cases}`}
-                action={
-                  <Button variant="ghost" size="sm" onClick={() => refresh()}>
-                    刷新
-                  </Button>
-                }
               />
               <PassFailPieChart run={run} />
             </section>

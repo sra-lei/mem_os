@@ -1,25 +1,14 @@
-import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { ParamKeyValuePair } from 'react-router-dom';
 import { useDashboard } from '@/hooks/useDashboard';
 import { StatsGrid } from '@/components/Stats';
 import { TrendLineChart, CategoryChart } from '@/components/Charts';
 import { FailingCasesList, RecentRunsList } from '@/components/List';
-import { TableSkeleton, Skeleton, Button, useAsyncErrorToast } from '@/components/UI';
+import { TableSkeleton, Skeleton, useAsyncErrorToast } from '@/components/UI';
 
 export function DashboardPage() {
-  const { stats, loading, error, refresh } = useDashboard();
-  const [refreshing, setRefreshing] = useState(false);
+  const { stats, loading, error } = useDashboard();
   useAsyncErrorToast(error, '仪表盘加载失败');
-
-  const onRefresh = async () => {
-    setRefreshing(true);
-    try {
-      await refresh();
-    } finally {
-      setRefreshing(false);
-    }
-  };
 
   return (
     <div className="page">
@@ -27,11 +16,6 @@ export function DashboardPage() {
         eyebrow="Dashboard"
         title="总览仪表盘"
         desc="最近运行的整体质量、阶段表现与失败用例一览，快速定位需要重点关注的版本或阶段。"
-        right={
-          <Button variant="secondary" loading={refreshing} onClick={onRefresh}>
-            🔄 刷新数据
-          </Button>
-        }
       />
 
       {loading && !stats ? (
