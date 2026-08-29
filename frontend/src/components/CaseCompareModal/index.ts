@@ -1,0 +1,1 @@
+export { CaseCompareModal } from './CaseCompareModal';

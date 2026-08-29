@@ -1,0 +1,51 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+build/
+dist/
+wheels/
+*.egg-info/
+*.egg
+*.so
+.eggs/
+
+# Virtual environments / caches
+.venv/
+venv/
+ENV/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# ---- SQLite / runtime data ----
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# ---- Node / Vite / TS (frontend) ----
+**/node_modules/
+**/.npm-cache/
+**/.yarn/
+**/.pnpm-store/
+
+# Vite & tsc build outputs
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
+
+# Build artifacts are covered by `dist/` above
+frontend/dist/
+
+# ---- OS / editor / logs ----
+.DS_Store
+Thumbs.db
+*.log
+.tmp/
+.temp/
+*.swp
+*.swo
+.idea/
+.vscode/*
+!.vscode/extensions.json

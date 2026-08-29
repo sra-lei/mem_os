@@ -1,0 +1,106 @@
+/* =========================================================
+ * Design Tokens · EvalView
+ * 所有颜色/间距/阴影/圆角均集中在这里，便于换肤或 Phase 4 的主题切换。
+ * 所有 tsx/chart 主题统一通过 CSS 变量读取（见 utils/color.ts + registerChart.ts）
+ * =======================================================*/
+
+:root {
+  color-scheme: light;
+
+  /* Brand colors */
+  --color-brand-primary: #4a6cf7;
+  --color-brand-secondary: #8a5cf7;
+
+  /* Functional */
+  --color-success: #12b76a;
+  --color-warning: #f79009;
+  --color-danger: #d92d20;
+  --color-info: #0ea5e9;
+  --color-text-link: #4a6cf7;
+
+  /* Phase-specific */
+  --color-phase-memory: #8a5cf7;
+  --color-phase-prompt: #0ea5e9;
+  --color-phase-answer: #f79009;
+  --color-phase-all: #4a6cf7;
+
+  /* Text */
+  --color-text-primary: #1a2132;
+  --color-text-secondary: #5a667a;
+  --color-text-tertiary: #8b94a9;
+  --color-text-inverse: #ffffff;
+
+  /* Surfaces */
+  --color-bg-app: #f5f7fb;
+  --color-bg-elevated: #ffffff;
+  --color-bg-subtle: #f0f2f8;
+  --color-bg-hover: #eaeef6;
+  --color-surface-inverse: #1a2132;
+
+  /* Borders & dividers */
+  --color-border: #e3e6ef;
+  --color-border-subtle: #eef0f5;
+  --color-border-strong: #c8cfdd;
+
+  /* Focus / selection */
+  --color-focus-ring: rgba(74, 108, 247, 0.28);
+
+  /* Overlay */
+  --color-overlay: rgba(26, 33, 50, 0.48);
+
+  /* Spacing scale (4px base) */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 20px;
+  --s-6: 24px;
+  --s-8: 32px;
+  --s-10: 40px;
+  --s-12: 48px;
+  --s-16: 64px;
+
+  /* Radius */
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-xl: 20px;
+  --r-pill: 999px;
+
+  /* Shadows */
+  --shadow-xs: 0 1px 2px rgba(16, 24, 40, 0.05);
+  --shadow-sm: 0 2px 8px rgba(16, 24, 40, 0.06);
+  --shadow-md: 0 8px 24px rgba(16, 24, 40, 0.08);
+  --shadow-lg: 0 16px 48px rgba(16, 24, 40, 0.16);
+  --shadow-modal: 0 24px 72px rgba(16, 24, 40, 0.28);
+
+  /* Type */
+  --font-sans: 'Inter', 'PingFang SC', 'Microsoft YaHei', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, 'Courier New', monospace;
+
+  --fs-xs: 12px;
+  --fs-sm: 13px;
+  --fs-base: 14px;
+  --fs-md: 15px;
+  --fs-lg: 16px;
+  --fs-xl: 20px;
+  --fs-2xl: 24px;
+  --fs-3xl: 32px;
+  --fs-4xl: 44px;
+
+  --lh-tight: 1.2;
+  --lh-snug: 1.4;
+  --lh-base: 1.6;
+
+  /* Transitions */
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --dur-fast: 120ms;
+  --dur-base: 200ms;
+  --dur-slow: 360ms;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* 预留：暂时不做完整 dark theme，仅做轻微反向。 */
+  }
+}

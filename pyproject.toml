@@ -1,0 +1,12 @@
+[project]
+name = "memos"
+version = "0.1.0"
+description = "MemOS - Memory Operating System with Evaluation Dashboard"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.27.0",
+    "sqlmodel>=0.0.16",
+    "pydantic>=2.6.0",
+]
