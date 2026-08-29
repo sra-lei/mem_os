@@ -6,6 +6,7 @@ import { DashboardPage } from './DashboardPage';
 import { RunsPage } from './RunsPage';
 import { RunDetailPage } from './RunDetailPage';
 import { CasesPage } from './CasesPage';
+import { CaseDetailPage } from './CaseDetailPage';
 import { CaseHistoryPage } from './CaseHistoryPage';
 
 export function ErrorPage({ code = 404, title = '页面不存在' }: { code?: number; title?: string }) {
@@ -65,6 +66,14 @@ export const routes: RouteObject[] = [
   },
   {
     path: '/cases/:caseId',
+    element: (
+      <AppLayout>
+        <CaseDetailPage />
+      </AppLayout>
+    ),
+  },
+  {
+    path: '/cases/:caseId/history',
     element: (
       <AppLayout>
         <CaseHistoryPage />

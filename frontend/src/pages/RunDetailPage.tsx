@@ -13,9 +13,9 @@ export function RunDetailPage() {
   const { run, results, byCategory, loading, error, refresh } = useRunDetail(runId);
   useAsyncErrorToast(error, '加载运行详情失败');
 
-  const [compareId, setCompareId] = useState<number | null>(null);
+  const [compareId, setCompareId] = useState<string | number | null>(null);
   const compare: TestCaseResult | null = useMemo(
-    () => (compareId ? results.find((r) => r.id === compareId) ?? null : null),
+    () => (compareId != null ? results.find((r) => r.id === compareId) ?? null : null),
     [compareId, results],
   );
 

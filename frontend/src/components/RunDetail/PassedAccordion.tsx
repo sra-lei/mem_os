@@ -11,7 +11,7 @@ export function PassedAccordion({
   onOpenCompare,
 }: {
   results: TestCaseResult[];
-  onOpenCompare: (id: number) => void;
+  onOpenCompare: (id: string | number) => void;
 }) {
   const { passed, skipped } = useMemo(() => {
     const total = results.length;
@@ -25,7 +25,7 @@ export function PassedAccordion({
   }, [results]);
 
   const [tab, setTab] = useState<TabKey>('passed');
-  const [openId, setOpenId] = useState<number | null>(null);
+  const [openId, setOpenId] = useState<string | number | null>(null);
   const list = tab === 'passed' ? passed : skipped;
 
   return (
@@ -71,7 +71,7 @@ export function PassedAccordion({
                   </span>
                   <span className="accordion-item__col">
                     <PhaseBadge phase={r.phase} />
-                    <PassBadge passed={r.passed} />
+                    <PassBadge passed={!!r.passed} />
                     <span className="muted mono">{fmtLatency(r.latency_ms)}</span>
                   </span>
                   <span className="accordion-item__arrow" aria-hidden>{opened ? '−' : '+'}</span>
@@ -79,14 +79,6 @@ export function PassedAccordion({
                 {opened ? (
                   <div className="accordion-item__body">
                     <dl className="kv kv--grid">
-                      <div>
-                        <dt>Setup</dt>
-                        <dd><pre className="pre">{r.setup || '—'}</pre></dd>
-                      </div>
-                      <div>
-                        <dt>System Prompt</dt>
-                        <dd><pre className="pre">{r.system_prompt || '—'}</pre></dd>
-                      </div>
                       <div>
                         <dt>User Input</dt>
                         <dd><pre className="pre">{r.user_input}</pre></dd>

@@ -34,8 +34,6 @@ export function CaseCompareModal({ open, onClose, result, title }: Props) {
   const sections = useMemo(() => {
     if (!result) return null;
     return [
-      { label: 'Setup', value: result.setup || '—', tone: 'neutral' as const },
-      { label: 'System Prompt', value: result.system_prompt || '—', tone: 'neutral' as const },
       { label: 'User Input（用户输入）', value: result.user_input || '—', tone: 'neutral' as const },
       {
         label: 'Expected Output（期望）',
@@ -72,7 +70,7 @@ export function CaseCompareModal({ open, onClose, result, title }: Props) {
             </h3>
             <div className="modal__sub">
               <PhaseBadge phase={result.phase} />
-              <PassBadge passed={result.passed} />
+              <PassBadge passed={!!result.passed} />
               <span className="muted mono">
                 耗时 {fmtLatency(result.latency_ms)} · tokens in {fmtNum(result.tokens_input)} / out{' '}
                 {fmtNum(result.tokens_output)}
@@ -94,7 +92,7 @@ export function CaseCompareModal({ open, onClose, result, title }: Props) {
         </header>
 
         <div className="modal__body">
-          <RetrievedMemoriesBlock memories={result.retrieval_memory} />
+          <RetrievedMemoriesBlock memories={result.retrieval_memory ?? ''} />
           <div className="kv kv--grid kv--modal">
             {sections?.map((s) => (
               <div key={s.label} className={s.tone === 'danger' || s.tone === 'success' ? 'span-2' : ''}>

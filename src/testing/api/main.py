@@ -1,17 +1,28 @@
 """FastAPI application entrypoint for MemOS EvalView."""
 from __future__ import annotations
 
+import sys
 from pathlib import Path
+
+# Ensure project root is on sys.path (so `testing`/`os_mem` resolve when run directly)
+_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from src.db import init_db
-from .routes import runs_router, cases_router, stats_router
+from testing.db import init_db
+# Absolute imports keep `python -m testing.api.main` working; the
+# package-relative fallback keeps uvicorn testing.api.main:app working too.
+try:
+    from .routes import runs_router, cases_router, stats_router
+except ImportError:
+    from testing.api.routes import runs_router, cases_router, stats_router  # type: ignore[no-redef]
 
-_ROOT = Path(__file__).resolve().parents[2]
+_ROOT = Path(__file__).resolve().parents[3]
 # 只使用 Vite 构建产物（frontend/dist），由 React+TS 前端输出
 _DIST_DIR = _ROOT / "frontend" / "dist"
 _FRONTEND_DIR = _DIST_DIR
@@ -54,3 +65,14 @@ else:
             "msg": "frontend dist missing - please run `cd frontend && npm install && npm run build` first",
             "expected": str(_DIST_DIR),
         }
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(
+        "testing.api.main:app",
+        host="127.0.0.1",
+        port=8765,
+        log_level="info",
+        access_log=True,
+        reload=False,
+    )

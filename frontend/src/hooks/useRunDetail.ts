@@ -7,10 +7,11 @@ import { useMemo } from 'react';
 import { useAsync } from './useAsync';
 import { runsApi } from '@/api/runs';
 import { statsApi } from '@/api/stats';
-import type { CategoryStat, PhaseKey, TestCaseResult } from '@/types';
+import type { CategoryStat, PhaseKey, RunDetail, TestCaseResult } from '@/types';
 
 export interface UseRunDetailResult {
-  run: ReturnType<typeof useAsync>['data'];
+  run: RunDetail | null;                  // detailAsync.data — entire detail (extends RunSummary)
+  detail: RunDetail | null;               // alias of `run` (retained for backward compat)
   results: TestCaseResult[];
   byCategory: CategoryStat[];
   byPhase: Record<PhaseKey | 'all', TestCaseResult[]>;
@@ -51,7 +52,7 @@ export function useRunDetail(runId: number | string | undefined) {
   };
 
   return {
-    run: detailAsync.data?.run ?? null,
+    run: detailAsync.data,                        // entire RunDetail (extends RunSummary — has id/version/phase/results…)
     detail: detailAsync.data,
     results,
     byCategory: categoryAsync.data ?? [],

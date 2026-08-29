@@ -22,24 +22,32 @@ export function SortHeader({
   currentDir?: SortDir;
   onToggle: (key: string) => void;
 }) {
+  const justify =
+    column.align === 'right' ? 'flex-end' : column.align === 'center' ? 'center' : 'flex-start';
   if (!column.sortable) {
     return (
-      <span className="table__th-content" style={{ textAlign: column.align ?? 'left' }}>
+      <span
+        className="table__th-content"
+        style={{ textAlign: column.align ?? 'left', justifyContent: justify }}
+      >
         {column.label}
       </span>
     );
   }
   const active = currentKey === column.key;
-  const arrow = active ? (currentDir === 'asc' ? '↑' : '↓') : '↕';
+  const arrowChar = active ? (currentDir === 'asc' ? '↑' : '↓') : '↕';
+  // For right-aligned columns the arrow sits on the LEFT of the label so the
+  // label's right edge lines up with the cell content (numbers) below.
+  const arrow = <span className="table__sort-arrow">{arrowChar}</span>;
+  const label = <span>{column.label}</span>;
   return (
     <button
       type="button"
       className={`table__sort-btn ${active ? 'is-active' : ''}`}
-      style={{ textAlign: column.align ?? 'left', width: '100%', justifyContent: column.align ?? 'left' }}
+      style={{ width: '100%', justifyContent: justify, textAlign: column.align ?? 'left' }}
       onClick={() => onToggle(column.key)}
     >
-      <span>{column.label}</span>
-      <span className="table__sort-arrow">{arrow}</span>
+      {column.align === 'right' ? (<>{arrow}{label}</>) : (<>{label}{arrow}</>)}
     </button>
   );
 }

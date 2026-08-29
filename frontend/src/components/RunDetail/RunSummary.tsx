@@ -33,7 +33,7 @@ export function RunSummary({ run, onRefresh }: { run: RunSummary; onRefresh?: ()
           </h2>
           <div className="run-summary__meta">
             <PhaseBadge phase={run.phase} />
-            <StatusBadge status={run.status} />
+            <StatusBadge status={run.status ?? 'completed'} />
             <span className="muted mono">开始 {fmtDate(run.start_time)}</span>
             <span className="muted mono">耗时 {duration}</span>
             {onRefresh ? (

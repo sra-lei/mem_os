@@ -90,7 +90,7 @@ export function RunsTable({ items, sortKey, sortDir, onSort }: RunsTableProps) {
                     <span className={`num num--${tone}`}>{fmtRate(r.pass_rate)}</span>
                   </div>
                 </td>
-                <td><StatusBadge status={r.status} /></td>
+                <td><StatusBadge status={r.status ?? 'completed'} /></td>
                 <td align="right">
                   <Link to={`/runs/${r.id}`}>
                     <Button variant="ghost" size="sm">详情</Button>

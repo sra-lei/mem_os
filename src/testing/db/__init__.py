@@ -10,7 +10,7 @@ from sqlmodel import Session, SQLModel, create_engine
 
 from . import models  # noqa: F401  - ensures models registered
 
-_DB_PATH = Path(__file__).resolve().parents[2] / "memos.db"
+_DB_PATH = Path(__file__).resolve().parents[3] / "memos.db"
 _DB_URL = f"sqlite:///{_DB_PATH}"
 
 _engine = None

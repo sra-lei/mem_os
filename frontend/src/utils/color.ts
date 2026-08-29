@@ -4,11 +4,16 @@
  */
 import type { PhaseKey, RunStatus } from '@/types';
 
+/**
+ * Labels use DB's real PhaseKey values:
+ *   base          → single-turn scenario tests
+ *   multi_session → multi-turn / session retention tests
+ *   proactive     → proactive-memory / cross-domain orchestration tests
+ */
 export const PHASE_LABEL: Record<PhaseKey, string> = {
-  memory_retrieval: '记忆检索',
-  prompt_generation: 'Prompt 生成',
-  answer_generation: '回答生成',
-  all: '全链路',
+  base: '基础 (Base)',
+  multi_session: '多轮 (Multi-Session)',
+  proactive: '主动 (Proactive)',
 };
 
 export const STATUS_LABEL: Record<RunStatus, string> = {
@@ -19,12 +24,13 @@ export const STATUS_LABEL: Record<RunStatus, string> = {
   cancelled: '已取消',
 };
 
-/** 取 phase 对应 CSS 颜色名（与 styles 同步） */
+/** 取 phase 对应 CSS 颜色名（与 styles 同步）。
+ *  真实 DB 只有 3 个 phase，我们把旧的 4 色 palette 复用前 3 个即可。
+ */
 export const PHASE_COLOR_VAR: Record<PhaseKey, string> = {
-  memory_retrieval: 'var(--color-phase-memory)',
-  prompt_generation: 'var(--color-phase-prompt)',
-  answer_generation: 'var(--color-phase-answer)',
-  all: 'var(--color-phase-all)',
+  base:          'var(--color-phase-memory)',   // green
+  multi_session: 'var(--color-phase-prompt)',   // purple
+  proactive:     'var(--color-phase-answer)',   // blue
 };
 
 /** 版本号取颜色：按哈希稳定散列到 6 个品牌色 */

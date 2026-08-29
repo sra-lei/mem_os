@@ -17,8 +17,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.db import init_db, get_session  # noqa: E402
-from src.db.models import (  # noqa: E402
+from testing.db import init_db, get_session  # noqa: E402
+from testing.db.models import (  # noqa: E402
     TestRun,
     TestCaseResult,
     TestCaseDefinition,
@@ -121,10 +121,6 @@ def build_case_defs():
                 category=cat,
                 version_target=VERSIONS[min(version_idx, len(VERSIONS) - 1)],
                 description=f"测试{name}相关的{PHASE_LABEL[cat]}能力",
-                setup_dialog=json.dumps([
-                    {"role": "user", "content": f"我想处理{name}相关事务"},
-                    {"role": "assistant", "content": "好的，请提供一些基本信息"},
-                ], ensure_ascii=False),
                 query=f"请回忆我之前关于{name}的关键信息",
                 expected_answer=f"期望回答涵盖{name}的核心要点，关键信息准确无误",
                 tags=json.dumps(tags, ensure_ascii=False),

@@ -5,7 +5,7 @@ import { fmtLatency, fmtNum, truncate } from '@/utils/format';
 
 export interface FailedCaseCardProps {
   result: TestCaseResult;
-  onOpenCompare: (id: number) => void;
+  onOpenCompare: (id: string | number) => void;
 }
 
 export function FailedCaseCard({ result, onOpenCompare }: FailedCaseCardProps) {
@@ -54,7 +54,7 @@ export function FailedCasesGrid({
   onOpenCompare,
 }: {
   results: TestCaseResult[];
-  onOpenCompare: (id: number) => void;
+  onOpenCompare: (id: string | number) => void;
 }) {
   const failed = results.filter((r) => !r.passed);
   if (failed.length === 0) {

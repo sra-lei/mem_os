@@ -382,6 +382,9 @@
   font-size: var(--fs-sm);
   min-width: 760px;
 }
+.table--cases {
+  table-layout: fixed;
+}
 .table thead th {
   position: sticky;
   top: 0;
@@ -395,12 +398,15 @@
   border-bottom: 1px solid var(--color-border);
   letter-spacing: 0.02em;
   text-transform: uppercase;
+  box-sizing: border-box;
+  white-space: nowrap;
 }
 .table tbody td {
   padding: var(--s-3) var(--s-4);
   border-bottom: 1px solid var(--color-border-subtle);
   vertical-align: top;
   color: var(--color-text-primary);
+  box-sizing: border-box;
 }
 .table tbody tr:last-child td {
   border-bottom: 0;
@@ -417,6 +423,7 @@
 .table__th-content {
   display: inline-flex;
   align-items: center;
+  width: 100%;
 }
 .table__sort-btn {
   display: inline-flex;
@@ -436,6 +443,11 @@
 .table__sort-arrow {
   font-size: 10px;
   opacity: 0.7;
+  line-height: 1;
+  width: 12px;
+  display: inline-block;
+  text-align: center;
+  flex: none;
 }
 .table__primary {
   display: flex;
@@ -456,6 +468,12 @@
 }
 .items-center {
   align-items: center;
+}
+.justify-end {
+  justify-content: flex-end;
+}
+.gap-6 {
+  gap: 6px;
 }
 .gap-8 {
   gap: 8px;
@@ -987,3 +1005,103 @@
 .dot--success { background: var(--color-success); }
 .dot--danger  { background: var(--color-danger); }
 .dot--muted   { background: #9aa4b8; }
+
+/* ---- Filter bar layout overrides (CasesPage) ---- */
+.filter-bar--wrap {
+  flex-wrap: wrap;
+  row-gap: var(--s-3);
+}
+/* CasesPage: 单一过滤器 + 右侧信息/每页控件（同行） */
+.filter-bar--cases {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-4);
+  padding-bottom: var(--s-4);
+  border-bottom: 1px dashed var(--color-border-subtle);
+  margin-bottom: var(--s-4);
+}
+.filter-bar__right {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: var(--s-4);
+  margin-left: auto;
+}
+.input--grow {
+  flex: 1 1 260px;
+  min-width: 200px;
+}
+.filter-summary {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  font-size: var(--fs-sm);
+}
+.filter-summary .chip {
+  margin-left: 2px;
+}
+
+/* ---- Layer chip (CasesPage + CaseDetailPage) ---- */
+.layer-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: var(--r-pill);
+  letter-spacing: 0.2px;
+  border: 1px solid transparent;
+}
+.layer-chip--layer1 {
+  background: rgba(18, 183, 106, 0.12);
+  color: #0f8a50;
+  border-color: rgba(18, 183, 106, 0.35);
+}
+.layer-chip--layer2 {
+  background: rgba(74, 108, 247, 0.12);
+  color: #3b5bce;
+  border-color: rgba(74, 108, 247, 0.35);
+}
+.layer-chip--layer3 {
+  background: rgba(180, 83, 9, 0.12);
+  color: #a05008;
+  border-color: rgba(247, 144, 9, 0.4);
+}
+
+/* ---- Primary link in CasesTable name cell ---- */
+.table__primary-name {
+  color: var(--color-text-primary);
+  text-decoration: none;
+  display: inline-block;
+  transition: color 120ms ease, transform 120ms ease;
+}
+.table__primary-name:hover {
+  color: var(--color-brand-primary);
+}
+.table__primary-name strong {
+  box-shadow: inset 0 -1px 0 rgba(74, 108, 247, 0.25);
+}
+.table__primary-name:hover strong {
+  box-shadow: inset 0 -2px 0 rgba(74, 108, 247, 0.6);
+}
+
+.link-muted {
+  text-decoration: none;
+}
+.link-muted:hover {
+  color: var(--color-brand-primary);
+}
+
+.code-inline {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  background: var(--color-bg-subtle);
+  padding: 1px 6px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--color-border-subtle);
+  color: var(--color-text-secondary);
+}
+

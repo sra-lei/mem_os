@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useCases } from '@/hooks/useCases';
 import { CasesTable } from '@/components/Tables';
@@ -6,14 +6,12 @@ import { Button, Skeleton, TableSkeleton, useAsyncErrorToast } from '@/component
 import { PageHeader, Pager } from './DashboardPage';
 import type { SortDir } from '@/utils/sort';
 import type { CasesListQuery } from '@/api/cases';
-import type { PhaseKey } from '@/types';
 
-const PHASE_OPTIONS: Array<{ value: string; label: string }> = [
-  { value: '', label: '全部阶段' },
-  { value: 'memory_retrieval', label: '记忆检索' },
-  { value: 'prompt_generation', label: 'Prompt 生成' },
-  { value: 'answer_generation', label: '回答生成' },
-];
+const LAYER_LABEL: Record<string, string> = {
+  layer1: 'L1 单场景',
+  layer2: 'L2 多场景组合',
+  layer3: 'L3 多领域复杂协同',
+};
 
 export function CasesPage() {
   const [params, setParams] = useSearchParams();
@@ -22,45 +20,32 @@ export function CasesPage() {
   const query = useMemo<CasesListQuery>(() => {
     const page = Number(params.get('page') ?? 1);
     const limit = Number(params.get('limit') ?? 20);
+    const layerRaw = params.get('layer');
     return {
       page: Number.isFinite(page) && page > 0 ? page : 1,
       limit: [20, 50, 100].includes(limit) ? limit : 20,
-      search: params.get('q') ?? '',
-      phase: (params.get('phase') as PhaseKey | null) || null,
-      tag: params.get('tag') || null,
-      sortBy: params.get('sortBy') ?? 'total_runs',
+      layer: (layerRaw === 'layer1' || layerRaw === 'layer2' || layerRaw === 'layer3') ? layerRaw : null,
+      sortBy: params.get('sortBy') ?? 'updated_at',
       sortDir: (params.get('sortDir') as SortDir) ?? 'desc',
     };
   }, [params]);
 
-  const { items, meta, tags, loading, error, tagsLoading } = useCases(query);
+  const {
+    items, meta,
+    layers, layersLoading,
+    loading, error,
+  } = useCases(query);
   useAsyncErrorToast(error, '加载用例列表失败');
 
-  const [draft, setDraft] = useState({
-    q: query.search,
-    phase: query.phase ?? '',
-    tag: query.tag ?? '',
-  });
+  const currentLayer = query.layer ?? '';
 
-  useEffect(() => {
-    setDraft({
-      q: query.search,
-      phase: query.phase ?? '',
-      tag: query.tag ?? '',
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query.search, query.phase, query.tag]);
-
-  const applyFilter = (patch?: Partial<typeof draft>) => {
-    const next = { ...draft, ...patch };
-    setDraft(next);
-    const np = new URLSearchParams();
+  // 当 layer 通过下拉改变时，立即写入 URL（回到第 1 页）
+  const onLayerChange = (layer: string) => {
+    const np = new URLSearchParams(params);
     np.set('page', '1');
+    if (layer) np.set('layer', layer); else np.delete('layer');
     np.set('limit', String(meta.limit));
-    if (next.q) np.set('q', next.q);
-    if (next.phase) np.set('phase', next.phase);
-    if (next.tag) np.set('tag', next.tag);
-    np.set('sortBy', query.sortBy ?? 'total_runs');
+    np.set('sortBy', query.sortBy ?? 'updated_at');
     np.set('sortDir', query.sortDir ?? 'desc');
     navigate({ search: np.toString() });
   };
@@ -85,80 +70,67 @@ export function CasesPage() {
     setParams(np, { replace: true });
   };
 
+  // 若 URL 中携带了已废弃参数（q/phase/version/tag），清理掉以保持地址栏整洁
+  useEffect(() => {
+    const deprecatedKeys = ['q', 'phase', 'version', 'tag'];
+    const hasLegacy = deprecatedKeys.some((k) => params.has(k));
+    if (!hasLegacy) return;
+    const np = new URLSearchParams(params.toString());
+    deprecatedKeys.forEach((k) => np.delete(k));
+    setParams(np, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return (
     <div className="page">
       <PageHeader
         eyebrow="Case Library"
         title="用例定义"
-        desc="覆盖各阶段的测试用例库，查看历史通过率与最近更新，点击「历史」可查看同一用例在不同版本中的表现。"
+        desc="按层级浏览全部测试用例。点击用例名称查看详情，点击「历史」查看同一用例在不同版本中的表现。"
         right={<Button variant="secondary">🧭 批量导入（Phase 4）</Button>}
       />
 
       <section className="card">
-        <div className="filter-bar">
-          <input
-            className="input input--search"
-            placeholder="搜索用例名 / Case ID / 输入内容…"
-            value={draft.q}
-            onChange={(e) => setDraft((d) => ({ ...d, q: e.target.value }))}
-            onKeyDown={(e) => e.key === 'Enter' && applyFilter()}
-          />
+        <div className="filter-bar filter-bar--cases">
           <select
             className="select"
-            value={draft.phase}
-            onChange={(e) => applyFilter({ phase: e.target.value })}
+            value={currentLayer}
+            disabled={layersLoading}
+            onChange={(e) => onLayerChange(e.target.value)}
           >
-            {PHASE_OPTIONS.map((o) => (
-              <option key={o.value || 'all'} value={o.value}>{o.label}</option>
+            <option value="">全部层级</option>
+            {layers.map((l) => (
+              <option key={l} value={l}>{LAYER_LABEL[l] ?? l}</option>
             ))}
           </select>
-          <select
-            className="select"
-            value={draft.tag}
-            disabled={tagsLoading}
-            onChange={(e) => applyFilter({ tag: e.target.value })}
-          >
-            <option value="">全部标签</option>
-            {tags.map((t) => (
-              <option key={t} value={t}>{t}</option>
-            ))}
-          </select>
-          <Button variant="primary" onClick={() => applyFilter()}>应用</Button>
-          <Button
-            variant="ghost"
-            onClick={() => {
-              setDraft({ q: '', phase: '', tag: '' });
-              navigate({ search: '' });
-            }}
-          >
-            重置
-          </Button>
-        </div>
-
-        <div className="toolbar">
-          <div className="muted">
-            共 <strong>{meta.total}</strong> 条
+          <div className="filter-bar__right">
+            <div className="muted filter-summary">
+              <span>共 <strong>{meta.total}</strong> 条</span>
+              {query.layer ? <span> · 层级：{LAYER_LABEL[query.layer] ?? query.layer}</span> : null}
+            </div>
+            <label className="muted">
+              每页：
+              <select
+                className="select select--sm"
+                value={String(meta.limit)}
+                onChange={(e) => onLimit(Number(e.target.value))}
+              >
+                {[20, 50, 100].map((n) => (
+                  <option key={n} value={String(n)}>{n}</option>
+                ))}
+              </select>
+            </label>
           </div>
-          <label className="muted">
-            每页：
-            <select
-              className="select select--sm"
-              value={String(meta.limit)}
-              onChange={(e) => onLimit(Number(e.target.value))}
-            >
-              {[20, 50, 100].map((n) => (
-                <option key={n} value={String(n)}>{n}</option>
-              ))}
-            </select>
-          </label>
         </div>
 
-        {loading ? <TableSkeleton cols={8} rows={Math.min(12, meta.limit)} /> : <CasesTable items={items} sortKey={query.sortBy} sortDir={query.sortDir} onSort={onSort} />}
+        {loading ? <TableSkeleton cols={5} rows={Math.min(12, meta.limit)} /> : (
+          <CasesTable items={items} sortKey={query.sortBy} sortDir={query.sortDir} onSort={onSort} />
+        )}
 
         <Pager page={meta.page} pages={meta.pages} total={meta.total} limit={meta.limit} onChange={onPage} />
-      </section>
 
-      {!loading && tagsLoading ? <Skeleton /> : null}
+        {layersLoading ? <Skeleton /> : null}
+      </section>
     </div>
   );
 }

@@ -7,8 +7,8 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query
 from sqlmodel import select, func, orm
 
-from src.db import get_session
-from src.db.models import TestRun, TestCaseResult
+from testing.db import get_session
+from testing.db.models import TestRun, TestCaseResult, TestCaseDefinition
 from ..schemas import (
     RunListResponse,
     RunSummary,
@@ -20,6 +20,27 @@ from ..schemas import (
 )
 
 router = APIRouter(prefix="/api/runs", tags=["runs"])
+
+
+def _enrich_run_summary(run: TestRun) -> RunSummary:
+    """Map ORM TestRun -> RunSummary and fill the 6 derived/compat fields used by UI cards."""
+    s = RunSummary.model_validate(run)
+    s.name = f"{s.version} · {s.phase}"
+    passed_i = max(0, int(s.passed_count or 0))
+    total_i = max(0, int(s.total_cases or 0))
+    s.failed = max(0, total_i - passed_i)
+    s.passed = passed_i
+    # Backward-compat start_time / end_time (UI uses fmtDurationBetween on them)
+    s.start_time = s.run_at
+    if s.run_at is not None and s.duration_seconds is not None and s.duration_seconds >= 0:
+        from datetime import timedelta as _td
+        try:
+            s.end_time = s.run_at + _td(seconds=float(s.duration_seconds))
+        except (ValueError, TypeError, OverflowError):
+            s.end_time = None
+    else:
+        s.end_time = None
+    return s
 
 
 @router.get("", response_model=RunListResponse)
@@ -42,9 +63,22 @@ def list_runs(
 
         items = session.exec(stmt.offset(offset).limit(limit)).all()
         return RunListResponse(
-            runs=[RunSummary.model_validate(r) for r in items],
+            runs=[_enrich_run_summary(r) for r in items],
             total=total,
         )
+
+
+@router.get("/versions", response_model=list[str])
+def list_run_versions():
+    """Return distinct run versions for filter dropdowns (newest first)."""
+    with get_session() as session:
+        stmt = (
+            select(TestRun.version)
+            .where(TestRun.version.is_not(None))
+            .distinct()
+            .order_by(TestRun.version.desc())
+        )
+        return [v for v in session.exec(stmt).all() if v]
 
 
 @router.get("/{run_id}", response_model=RunDetailResponse)
@@ -54,14 +88,41 @@ def get_run(run_id: str):
         if run is None:
             raise HTTPException(status_code=404, detail="Run not found")
 
-        results = session.exec(
-            select(TestCaseResult).where(TestCaseResult.run_id == run_id)
-        ).all()
+        # LEFT JOIN case definitions so each result carries setup / grading fields
+        # used by the React run-detail accordion & compare modal.
+        stmt = (
+            select(TestCaseResult, TestCaseDefinition)
+            .join(
+                TestCaseDefinition,
+                TestCaseResult.case_id == TestCaseDefinition.case_id,
+                isouter=True,
+            )
+            .where(TestCaseResult.run_id == run_id)
+            .order_by(TestCaseResult.category, TestCaseResult.case_id)
+        )
+        joined_rows = session.exec(stmt).all()
 
-        summary = RunSummary.model_validate(run).model_dump()
+        results: list[CaseResult] = []
+        for result, defn in joined_rows:
+            payload = result.model_dump() if hasattr(result, "model_dump") else {
+                c.name: getattr(result, c.name, None)
+                for c in TestCaseResult.__table__.columns
+            }
+            if defn is not None:
+                # Merge case-def columns as flat aliases used by CaseResult schema
+                for col in ("query", "description", "tags",
+                            "evaluation_criteria", "expected_behavior",
+                            "conversation_histories_raw", "source_path"):
+                    payload[col] = getattr(defn, col, None)
+                # Override expected_answer to prefer the richer definition answer
+                if payload.get("expected_answer") in (None, ""):
+                    payload["expected_answer"] = getattr(defn, "expected_answer", None)
+            results.append(CaseResult.model_validate(payload))
+
+        summary = _enrich_run_summary(run)
         detail = RunDetailResponse(
-            **summary,
-            results=[CaseResult.model_validate(r) for r in results],
+            **summary.model_dump(),
+            results=results,
         )
         return detail
 
@@ -137,7 +198,7 @@ def get_run_chart(run_id: str):
 def create_run(req: CreateRunRequest):
     """Create a run placeholder (status='running'); the runner fills results later."""
     from datetime import datetime
-    from src.db.models import TestRun
+    from testing.db.models import TestRun
     import uuid
 
     run = TestRun(
