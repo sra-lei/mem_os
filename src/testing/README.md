@@ -8,20 +8,26 @@
 ```
 src/
 ├── os_mem/                  ← 记忆系统核心（你的地盘，导入用 os_mem. 前缀）
-│  memory.py    Memory 数据模型（需求文档 1.2）
-│  provider.py  MemoryProvider 协议（ingest/retrieve）+ register_provider 注册表
-│  prompt.py    format_injection 注入格式（1.5）
-│  storage.py   存储隔离：生产 os_mem.db / 评测临时库
-│  stub.py      占位实现（无记忆，跑通评测用）
-│  sanitizer.py 日志脱敏（1.1）        ← 你实现
-│  generator.py 事实提取（1.3）        ← 你实现
-│  retriever.py BM25 检索（1.4）       ← 你实现
+│  __init__.py   对外公共 API：仅 provider 契约 + 两个能力
+│  provider.py   MemoryProvider 协议（ingest/retrieve）+ register_provider / build_memory_provider
+│  memory.py     Memory 数据模型（需求文档 1.2）
+│  core/         核心实现：generator（提取 1.3）← 你实现 / retriever（检索 1.4）← 你实现
+│                / prompt（注入 1.5）/ stub（占位，通过 build_memory_provider('stub') 获取）
+│  storage/      存储隔离：生产 os_mem.db / 评测临时库
+│  guide/        sanitizer 日志脱敏（1.1）← 你实现
 └── testing/                   ← 评测域（导入用 testing. 前缀）
    ├── runner.py / judge.py / llm.py / provider.py   评测框架
    ├── api/                    评测 dashboard API（testing.api）
    └── db/                     评测数据存储 memos.db（testing.db）
 memos.db                     ← 评测数据（test_runs / test_case_results / test_case_definitions）
 os_mem.db                    ← 未来记忆系统的独立库（与 memos.db 完全解耦）
+```
+
+**对外契约**（`os_mem` 只暴露 provider 体系）：
+```python
+from os_mem import Memory, MemoryProvider, build_memory_provider, register_provider
+from os_mem import format_injection, temp_db_path, default_db_path   # 评测必需能力
+# 内部实现（os_mem.core / os_mem.storage / os_mem.guide）不对外承诺 API
 ```
 
 **导入方式**（无 `src.` 前缀）：

@@ -24,7 +24,11 @@ import os
 import tempfile
 from pathlib import Path
 
-_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+from ..logger import get_logger
+
+_logger = get_logger("os_mem.storage")
+
+_PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
 def default_db_path() -> Path:
@@ -39,4 +43,5 @@ def temp_db_path(prefix: str = "eval_mem_") -> Path:
     """
     fd, name = tempfile.mkstemp(prefix=prefix, suffix=".db")
     os.close(fd)
+    _logger.info(f"创建评测临时记忆库: {name}")
     return Path(name)

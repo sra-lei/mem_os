@@ -14,7 +14,9 @@ from __future__ import annotations
 
 from typing import List, Protocol
 
-from os_mem import Memory, format_injection
+from openai.types.chat.chat_completion_chunk import ModerationInputModerationResultsResult
+
+from os_mem import Memory
 from openai import OpenAI
 from testing.config import settings
 
@@ -22,7 +24,7 @@ from testing.config import settings
 class LLMClient(Protocol):
     """Minimal chat interface. Implementations must be pure (no hidden state)."""
     
-    def complete(self, system: str, user: str) -> str:
+    def complete(self, memories: str, user: str) -> str:
         """Return the assistant reply for one turn."""
         ...
 
@@ -36,15 +38,15 @@ class MockLLM:
 
     name = "mock"
 
-    def complete(self, system: str, user: str) -> str:
+    def complete(self, memories: str, user: str) -> str:
         return f"[mock-answer] 未接入真实LLM。注入记忆 {len(system)} 字符 / 问题: {user[:60]}"
 
 SYSTEM_PROMPT = '''
 # 角色
 你是一个严肃认真的中文助手，请务必保持礼貌和专业，用中文回答客户的问题。
-# 任务
+## 任务
 给定用户记忆信息和用户问题，生成一个答案。
-# 规则
+## 规则
 1. 答案必须基于用户记忆信息和用户问题。
 2. 答案必须用中文。
 3. 答案必须详细且准确。
@@ -62,11 +64,12 @@ class DeepSeekLLM:
             base_url=settings.DEEPSEEK_BASE_URL,
         )
 
-    def complete(self, system: str, user: str) -> str:
+    def complete(self, memories: str, user: str) -> str:
         return self.client.chat.completions.create(
             model=settings.DEEPSEEK_MODEL,
             messages=[
-                {"role": "system", "content": system},
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "assistant", "content": memories},
                 {"role": "user", "content": user},
             ],
         ).choices[0].message.content
@@ -80,9 +83,8 @@ class AnswerGenerator:
     def __init__(self, llm: LLMClient):
         self._llm = llm
 
-    def answer(self, query: str, memories: List[Memory]) -> str:
-        system = format_injection(memories)
-        return self._llm.complete(system=system, user=query)
+    def answer(self, query: str, memories: str) -> str:
+        return self._llm.complete(memories, user=query)
 
 
 def build_llm_client(name: str) -> LLMClient:

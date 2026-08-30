@@ -9,8 +9,10 @@ from __future__ import annotations
 
 from typing import List, Protocol
 
+from .logger import get_logger
 from .memory import Memory
 
+_logger = get_logger("os_mem.memory_provider")
 
 class MemoryProvider(Protocol):
     """Contract the evaluation framework requires from the memory system.
@@ -20,6 +22,10 @@ class MemoryProvider(Protocol):
                   (LLM extraction, ≤3 facts per session, PII-redacted logging)
       - retrieve: module 1.4 — BM25 over the user's memories, top-k, k=3 default
     """
+    def __init__(self, user_id: str):
+        """Initialize the memory provider with the given user ID."""
+        ...
+
 
     def ingest(self, conversation: dict) -> List[Memory]:
         """Extract and store memories from one conversation (a single item of
@@ -33,9 +39,17 @@ class MemoryProvider(Protocol):
         """
         ...
 
-    def retrieve(self, query: str, top_k: int = 3) -> List[Memory]:
+    def retrieve(self, query: str, top_k: int = 3) -> str:
         """Return the top-k most relevant memories for the user's query."""
-        ...
+        memories: List[Memory] = []
+        _logger(f"  检索到 {len(retrieved)} 条记忆")
+        _SECTION_HEADER = "## 关于用户的长久记忆"
+        memory_lines = [_SECTION_HEADER]
+        if not memories:
+            memory_lines.append("（当前没有可用记忆）")
+        for m in memories:
+            memory_lines.append(f"- {m.fact}")
+        return "\n".join(memory_lines)
 
 
 # Registered provider names -> factory. The evaluation CLI selects one via
@@ -50,7 +64,7 @@ def register_provider(name: str, cls: type) -> None:
 
 def build_memory_provider(name: str, user_id: str, **kwargs) -> MemoryProvider:
     if name == "stub":
-        from .stub import StubMemoryProvider
+        from .core.stub import StubMemoryProvider
 
         return StubMemoryProvider(user_id=user_id)
     if name in _PROVIDER_REGISTRY:

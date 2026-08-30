@@ -9,7 +9,10 @@ from __future__ import annotations
 
 from typing import List
 
-from .memory import Memory
+from ..logger import get_logger
+from ..memory import Memory
+
+_logger = get_logger("os_mem.retriever")
 
 
 def retrieve(query: str, memories: List[Memory], top_k: int = 3) -> List[Memory]:
@@ -17,4 +20,5 @@ def retrieve(query: str, memories: List[Memory], top_k: int = 3) -> List[Memory]
 
     TODO(user): implement BM25 scoring per 需求文档 v0.1 module 1.4.
     """
+    _logger.warning(f"retrieve 未实现 BM25（占位）：按原序返回前 {top_k} 条")
     return memories[:top_k]

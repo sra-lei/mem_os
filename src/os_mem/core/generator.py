@@ -10,7 +10,10 @@ from __future__ import annotations
 
 from typing import List
 
-from .memory import Memory
+from ..logger import get_logger
+from ..memory import Memory
+
+_logger = get_logger("os_mem.generator")
 
 
 def extract_facts(conversation: dict) -> List[str]:
@@ -21,4 +24,7 @@ def extract_facts(conversation: dict) -> List[str]:
         conversation: dict with conversation_id / timestamp / metadata /
                       messages[{role, content}]
     """
+    _logger.warning(
+        f"extract_facts 未实现（占位）：会话 {conversation.get('conversation_id')} 跳过提取"
+    )
     return []

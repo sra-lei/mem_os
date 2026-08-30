@@ -182,10 +182,8 @@ def run_test_suite(
             for conv in histories:
                 provider.ingest(conv)
 
-            retrieved = provider.retrieve(case.query, top_k=top_k)
-            if verbose:
-                print(f"  检索到 {len(retrieved)} 条记忆")
-            actual = agent.answer(query=case.query, memories=retrieved)
+            retrievedMem = provider.retrieve(case.query, top_k=top_k)
+            actual = agent.answer(query=case.query, memories=retrievedMem)
             if verbose:
                 print(f"  DeepSeek 答案: {(actual or '')[:150]}")
 
