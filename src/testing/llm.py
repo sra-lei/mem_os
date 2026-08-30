@@ -15,11 +15,13 @@ from __future__ import annotations
 from typing import List, Protocol
 
 from os_mem import Memory, format_injection
+from openai import OpenAI
+from testing.config import settings
 
 
 class LLMClient(Protocol):
     """Minimal chat interface. Implementations must be pure (no hidden state)."""
-
+    
     def complete(self, system: str, user: str) -> str:
         """Return the assistant reply for one turn."""
         ...
@@ -37,6 +39,37 @@ class MockLLM:
     def complete(self, system: str, user: str) -> str:
         return f"[mock-answer] 未接入真实LLM。注入记忆 {len(system)} 字符 / 问题: {user[:60]}"
 
+SYSTEM_PROMPT = '''
+# 角色
+你是一个严肃认真的中文助手，请务必保持礼貌和专业，用中文回答客户的问题。
+# 任务
+给定用户记忆信息和用户问题，生成一个答案。
+# 规则
+1. 答案必须基于用户记忆信息和用户问题。
+2. 答案必须用中文。
+3. 答案必须详细且准确。
+4. 答案必须避免使用敏感词和不当语言。
+5. 答案必须尊重用户隐私。
+6. 如果根据用户记忆信息无法生成答案，请返回"对不起，我无法回答这个问题。"
+'''
+
+class DeepSeekLLM:
+    name = "deepseek"
+
+    def __init__(self) -> None:
+        self.client = OpenAI(
+            api_key=settings.DEEPSEEK_API_KEY,
+            base_url=settings.DEEPSEEK_BASE_URL,
+        )
+
+    def complete(self, system: str, user: str) -> str:
+        return self.client.chat.completions.create(
+            model=settings.DEEPSEEK_MODEL,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+        ).choices[0].message.content
 
 class AnswerGenerator:
     """The evaluated agent: answers the query with retrieved memories injected.
@@ -56,4 +89,6 @@ def build_llm_client(name: str) -> LLMClient:
     """Factory used by the runner/CLI. Register your real provider here."""
     if name == "mock":
         return MockLLM()
+    elif name == "deepseek":
+        return DeepSeekLLM()
     raise ValueError(f"unknown llm client: {name!r} (available: mock)")

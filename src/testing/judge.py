@@ -9,10 +9,13 @@ EvalView需求文档.md phase-4 design).
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Optional, Protocol
 
-from .llm import LLMClient
+from openai import OpenAI
+
+from testing.config import settings
 
 
 @dataclass
@@ -22,11 +25,9 @@ class JudgeResult:
     reasoning: Optional[str] = None
     error: Optional[str] = None
 
-
 class JudgeProvider(Protocol):
     """Grades one answer. Note: it receives the RUBRIC (evaluation_criteria),
     not a fixed expected answer string."""
-
     def evaluate(
         self,
         query: str,
@@ -34,6 +35,82 @@ class JudgeProvider(Protocol):
         actual: str,
     ) -> JudgeResult:
         ...
+
+
+# 普通字符串模板 + .format()（criteria/query/actual 在 evaluate 时注入）
+SYSTEM_PROMPT: str = '''
+# 角色
+你是 Kimi，由 Moonshot AI 提供的人工智能助手，你更擅长中文和英文的对话。
+# 任务
+你会为根据{criteria}，对于用户的问题{query}，以及给定的答案{actual}来输出一个评分。
+# 规则
+你会拒绝一切涉及恐怖主义，种族歧视，黄色暴力等问题的回答。
+Moonshot AI 为专有名词，不可翻译成其他语言。
+# 输出格式
+输出 JudgeResult 格式的 JSON，包含分数、是否通过、评分理由和错误信息。
+评分理由和错误信息用中文输出。
+'''
+
+# JSON Schema for structured output (score/passed/reasoning/error)
+_JUDGE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "score": {"type": "number", "description": "分数 0.0 ~ 1.0"},
+        "passed": {"type": "boolean"},
+        "reasoning": {"type": ["string", "null"]},
+        "error": {"type": ["string", "null"]},
+    },
+    "required": ["score", "passed"],
+    "additionalProperties": False,
+}
+
+class MoonshotJudgeProvider(Protocol):
+    """Grades one answer. Note: it receives the RUBRIC (evaluation_criteria),
+    not a fixed expected answer string."""
+    def __init__(self) -> None:
+        self.client = OpenAI(
+            api_key=settings.MOONSHOT_API_KEY,
+            base_url=settings.MOONSHOT_BASE_URL,
+        )
+
+    def evaluate(
+        self,
+        query: str,
+        criteria: Optional[str],
+        actual: str,
+    ) -> JudgeResult:
+        completion = self.client.chat.completions.create(
+            model=settings.MOONSHOT_MODEL,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT.format(criteria=criteria, query=query, actual=actual)},
+            ],
+            response_format={
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "judge_result",
+                    "schema": _JUDGE_SCHEMA,
+                    "strict": True,
+                },
+            },
+        )
+        content = completion.choices[0].message.content
+        print(f"[judge] {content}")
+        try:
+            obj = json.loads(content or "")
+        except (json.JSONDecodeError, TypeError) as e:
+            return JudgeResult(
+                score=0.0,
+                passed=False,
+                reasoning=f"judge 输出不是合法 JSON: {(content or '')[:200]}",
+                error=str(e),
+            )
+        return JudgeResult(
+            score=float(obj.get("score", 0.0)),
+            passed=bool(obj.get("passed", False)),
+            reasoning=obj.get("reasoning"),
+            error=obj.get("error"),
+        )
+
 
 
 class MockJudge:
@@ -66,4 +143,6 @@ def build_judge(name: str, threshold: float = 0.7) -> JudgeProvider:
     """Factory used by the runner/CLI. Register your real judge here."""
     if name == "mock":
         return MockJudge()
+    elif name == "moonshot":
+        return MoonshotJudgeProvider()
     raise ValueError(f"unknown judge: {name!r} (available: mock)")

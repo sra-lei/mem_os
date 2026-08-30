@@ -38,6 +38,11 @@ vite.config.d.ts
 # Build artifacts are covered by `dist/` above
 frontend/dist/
 
+# ---- Secrets ----
+.env
+.env.*
+!.env.example
+
 # ---- OS / editor / logs ----
 .DS_Store
 Thumbs.db

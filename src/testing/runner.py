@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import os
 import time
+import traceback
 import uuid
 from datetime import datetime
 from typing import Any, Optional
@@ -106,6 +107,7 @@ def run_test_suite(
     config: Optional[dict[str, Any]] = None,
     notes: Optional[str] = None,
     limit: Optional[int] = None,
+    verbose: bool = False,
 ) -> str:
     """Run one test phase; returns the new run_id."""
     config = dict(config or {})
@@ -152,6 +154,12 @@ def run_test_suite(
     t_run_start = time.monotonic()
 
     for idx, case in enumerate(cases, start=1):
+        if case.query is None:
+            if verbose:
+                print(f"[{idx}/{len(cases)}] {case.case_id}: 跳过（无 query）")
+            continue
+        if verbose:
+            print(f"\n[{idx}/{len(cases)}] {case.case_id} - {case.name[:60]}")
         t_case_start = time.monotonic()
         error: Optional[str] = None
         score: Optional[float] = None
@@ -169,11 +177,17 @@ def run_test_suite(
             agent = AnswerGenerator(llm)
 
             histories = json.loads(case.conversation_histories_raw or "[]")
+            if verbose:
+                print(f"  会话数: {len(histories)}")
             for conv in histories:
                 provider.ingest(conv)
 
             retrieved = provider.retrieve(case.query, top_k=top_k)
+            if verbose:
+                print(f"  检索到 {len(retrieved)} 条记忆")
             actual = agent.answer(query=case.query, memories=retrieved)
+            if verbose:
+                print(f"  DeepSeek 答案: {(actual or '')[:150]}")
 
             verdict = judge.evaluate(
                 query=case.query,
@@ -184,8 +198,14 @@ def run_test_suite(
             passed = verdict.passed
             if verdict.error:
                 error = verdict.error
+            if verbose:
+                print(f" Moonshot 判分: score={score} passed={passed}"
+                      + (f"  (judge error: {verdict.error})" if verdict.error else ""))
         except Exception as exc:  # noqa: BLE001 — a failing case must not kill the run
             error = f"{type(exc).__name__}: {exc}"
+            if verbose:
+                print(f"  ✗ 用例异常: {error}")
+                traceback.print_exc()
 
         latency_ms = int((time.monotonic() - t_case_start) * 1000)
         if passed:

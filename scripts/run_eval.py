@@ -1,4 +1,4 @@
-﻿"""CLI entry to run the MemOS evaluation suite.
+"""CLI entry to run the MemOS evaluation suite.
 
 Usage:
     python -m scripts.run_eval --phase base --notes "v0.1 框架验证"
@@ -15,6 +15,7 @@ Options:
     --judge            judge: mock (default)
     --limit            run only first N cases (for smoke tests)
     --notes            note attached to the run
+    --verbose, -v      print per-case progress, answers and errors
 """
 from __future__ import annotations
 
@@ -47,6 +48,8 @@ def main() -> None:
     parser.add_argument("--judge", default="mock", help="judge (mock)")
     parser.add_argument("--limit", type=int, default=None, help="run first N cases")
     parser.add_argument("--notes", default=None)
+    parser.add_argument("--verbose", "-v", action="store_true",
+                        help="print per-case progress, answers and errors")
     args = parser.parse_args()
 
     config = {
@@ -66,6 +69,7 @@ def main() -> None:
         config=config,
         notes=args.notes,
         limit=args.limit,
+        verbose=args.verbose,
     )
 
     with get_session() as session:
