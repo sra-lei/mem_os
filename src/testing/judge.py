@@ -10,6 +10,7 @@ EvalView需求文档.md phase-4 design).
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass
 from typing import Optional, Protocol
 
@@ -67,11 +68,25 @@ _JUDGE_SCHEMA = {
 class MoonshotJudgeProvider(Protocol):
     """Grades one answer. Note: it receives the RUBRIC (evaluation_criteria),
     not a fixed expected answer string."""
+
+    # 账号组织级 RPM=3（每分钟最多 3 次请求）→ 调用间隔至少 20s，否则必被 429
+    _MIN_INTERVAL_SECONDS = 20.0
+    _last_call: float = 0.0
+
     def __init__(self) -> None:
         self.client = OpenAI(
             api_key=settings.MOONSHOT_API_KEY,
             base_url=settings.MOONSHOT_BASE_URL,
+            max_retries=3,  # openai SDK 会对 429/5xx 自动重试（指数退避）
         )
+
+    @classmethod
+    def _throttle(cls) -> None:
+        """请求节流：保证调用间隔 >= RPM 窗口所需的最小间隔。"""
+        wait = cls._MIN_INTERVAL_SECONDS - (time.monotonic() - cls._last_call)
+        if wait > 0:
+            time.sleep(wait)
+        cls._last_call = time.monotonic()
 
     def evaluate(
         self,
@@ -79,20 +94,29 @@ class MoonshotJudgeProvider(Protocol):
         criteria: Optional[str],
         actual: str,
     ) -> JudgeResult:
-        completion = self.client.chat.completions.create(
-            model=settings.MOONSHOT_MODEL,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT.format(criteria=criteria, query=query, actual=actual)},
-            ],
-            response_format={
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "judge_result",
-                    "schema": _JUDGE_SCHEMA,
-                    "strict": True,
-                },
-            },
-        )
+        try:
+            self._throttle()
+            completion = self.client.chat.completions.create(
+                model=settings.MOONSHOT_MODEL,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT.format(criteria=criteria, query=query, actual=actual)},
+                ],
+                response_format={
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "judge_result",
+                        "schema": _JUDGE_SCHEMA,
+                        "strict": True,
+                    },
+                }
+            )
+        except Exception as exc:  # noqa: BLE001 — 重试耗尽（含 429 持续超限）时兜底，不让 runner 崩
+            return JudgeResult(
+                score=0.0,
+                passed=False,
+                reasoning="moonshot judge 调用失败",
+                error=f"{type(exc).__name__}: {exc}",
+            )
         content = completion.choices[0].message.content
         print(f"[judge] {content}")
         try:
