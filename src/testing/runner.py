@@ -23,13 +23,30 @@ import os
 import time
 import traceback
 import uuid
+from datetime import datetime
 from typing import Any, Optional
 
 from sqlmodel import select
 
-from os_mem import Memory, MemoryProvider, build_memory_provider, temp_db_path
-from testing.db import get_engine, get_session, init_db
-from testing.db.models import TestCaseDefinition, TestCaseResult, TestRun, utcnow
+from os_mem import build_memory_provider
+from os_mem.core.models.mem_models import Conversation
+from os_mem.infra.logger.logger import get_logger
+from os_mem.provider import MemoryProvider
+from testing.services.store_service import get_store_service
+
+
+def _parse_ts(value) -> datetime:
+    """YAML timestamp -> datetime。YAML 会话用 `timestamp`（如 "2024-11-15 10:30:00"），
+    Conversation 模型要求 datetime；缺失或解析失败时用当前时间兜底。"""
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
+            try:
+                return datetime.strptime(value, fmt)
+            except ValueError:
+                continue
+    return datetime.utcnow()
 
 from .judge import JudgeProvider, build_judge
 from .llm import AnswerGenerator, Completion, LLMClient, build_llm_client
@@ -40,88 +57,8 @@ PHASE_TO_VERSION = {
     "proactive": "v0.3",
 }
 
-
-def _ensure_result_columns() -> None:
-    """Migrate test_case_results: add token columns if missing (SQLite)."""
-    from sqlalchemy import text
-
-    engine = get_engine()
-    with engine.begin() as conn:
-        existing = {
-            row[1]
-            for row in conn.execute(text("PRAGMA table_info(test_case_results)")).fetchall()
-        }
-        for col in ("tokens_input", "tokens_output"):
-            if col not in existing:
-                conn.execute(text(f"ALTER TABLE test_case_results ADD COLUMN {col} INTEGER"))
-                print(f"  migrated: added column {col}")
-
-
-def _load_cases(phase: str) -> list[TestCaseDefinition]:
-    with get_session() as session:
-        stmt = (
-            select(TestCaseDefinition)
-            .where(TestCaseDefinition.category == phase)
-            .order_by(TestCaseDefinition.case_id)
-        )
-        return list(session.exec(stmt).all())
-
-
-def _record_result(
-    run_id: str,
-    version: str,
-    phase: str,
-    case: TestCaseDefinition,
-    *,
-    passed: bool,
-    score: Optional[float],
-    actual: Optional[str],
-    retrieved: str,
-    error: Optional[str],
-    latency_ms: int,
-    tokens_input: Optional[int] = None,
-    tokens_output: Optional[int] = None,
-) -> None:
-    # retrieve 的返回在接口演进中：list[Memory]（stub）或注入文本 str（base）。
-    # 落库统一为 TEXT：list 序列化成 JSON，str 原样。
-    retrieved_json = (
-        json.dumps(retrieved, ensure_ascii=False, default=str)
-        if isinstance(retrieved, (list, tuple))
-        else (retrieved or "")
-    )
-    with get_session() as session:
-        session.add(TestCaseResult(
-            id=f"res_{uuid.uuid4().hex[:10]}",
-            run_id=run_id,
-            case_id=case.case_id,
-            case_name=case.name,
-            category=phase,
-            version=version,
-            passed=1 if passed else 0,
-            score=score,
-            expected_answer=case.expected_answer,
-            actual_answer=actual,
-            retrieved_memories=retrieved_json,
-            error_message=error,
-            latency_ms=latency_ms,
-            tokens_input=tokens_input,
-            tokens_output=tokens_output,
-            created_at=utcnow(),
-        ))
-        session.commit()
-
-
-def _update_progress(run_id: str, completed: int, total: int, status: str, **extra) -> None:
-    with get_session() as session:
-        run = session.get(TestRun, run_id)
-        if run is None:
-            return
-        run.progress = round(completed / total, 4) if total else 1.0
-        run.status = status
-        for k, v in extra.items():
-            setattr(run, k, v)
-        session.commit()
-
+_logger = get_logger("runner")  # singleton for the run
+_storeService = get_store_service()  # singleton for the run
 
 def run_test_suite(
     version: Optional[str] = None,
@@ -141,41 +78,26 @@ def run_test_suite(
     judge_name = str(config.get("judge_provider", "mock"))
     mem_name = str(config.get("memory_provider", "stub"))
 
-    cases = _load_cases(phase)
+    cases = _storeService.load_cases(phase)
     if limit:
         cases = cases[:limit]
-
-    init_db()
-    _ensure_result_columns()
     run_id = f"run_{uuid.uuid4().hex[:10]}"
+    _logger.info(f"开始测试: run_id={run_id} phase={phase} version={version} "
+                 f"cases={len(cases)} top_k={top_k} threshold={threshold} "
+                 f"llm={llm_name} memory={mem_name} judge={judge_name} notes={notes}")
     snapshot = json.dumps(config, ensure_ascii=False)
-    # create run row
-    with get_session() as session:
-        session.add(TestRun(
-            id=run_id,
-            version=version,
-            phase=phase,
-            total_cases=len(cases),
-            passed_count=0,
-            pass_rate=0.0,
-            config_snapshot=snapshot,
-            notes=notes,
-            triggered_by="manual",
-            status="running",
-            progress=0.0,
-        ))
-        session.commit()
+    _storeService.record_test_run(cases, run_id, version, phase, snapshot, notes)
 
     passed_total = 0
     t_run_start = time.monotonic()
 
+    _logger.info(f"  测试开始: {len(cases)} 用例")
     for idx, case in enumerate(cases, start=1):
         if case.query is None:
-            if verbose:
-                print(f"[{idx}/{len(cases)}] {case.case_id}: 跳过（无 query）")
+            _logger.info(f"[{idx}/{len(cases)}] {case.case_id}: 跳过（无 query）")
             continue
-        if verbose:
-            print(f"\n[{idx}/{len(cases)}] {case.case_id} - {case.name[:60]}")
+        
+        _logger.info(f"\n[{idx}/{len(cases)}] {case.case_id} - {case.name[:60]}")
         t_case_start = time.monotonic()
         error: Optional[str] = None
         score: Optional[float] = None
@@ -195,18 +117,33 @@ def run_test_suite(
             agent = AnswerGenerator(llm)
 
             histories = json.loads(case.conversation_histories_raw or "[]")
-            if verbose:
-                print(f"  会话数: {len(histories)}")
+            _logger.info(f"  会话数: {len(histories)}")
             for conv in histories:
-                provider.ingest(conv)
+                _logger.info(f"  会话: {conv.get('conversation_id')} "
+                             f"({len(conv.get('messages', []))} 条消息)")
+                conversation = Conversation(
+                    id=conv.get("conversation_id"),
+                    user_id=case.case_id,
+                    summary="",
+                    # Conversation.messages 是 list[str]（每条为 JSON 字符串），
+                    # YAML 的 messages 是 [{role, content}] -> 序列化成 JSON 字符串
+                    messages=[
+                        json.dumps(m, ensure_ascii=False)
+                        for m in conv.get("messages", [])
+                    ],
+                    source_session_id=conv.get("conversation_id"),
+                    started_at=_parse_ts(conv.get("timestamp")),
+                    ended_at=_parse_ts(conv.get("ended_at") or conv.get("timestamp")),
+                    message_count=len(conv.get("messages", [])),
+                )
+                provider.ingest(conversation)
 
             retrievedMem = provider.retrieve(case.query, top_k=top_k)
             completion: Completion = agent.answer(query=case.query, memories=retrievedMem)
             actual = completion.text
             tokens_input = completion.prompt_tokens
             tokens_output = completion.completion_tokens
-            if verbose:
-                print(f"  DeepSeek 答案: {(actual or '')[:150]}")
+            _logger.info(f"  DeepSeek 答案: {(actual or '')[:150]}")
 
             verdict = judge.evaluate(
                 query=case.query,
@@ -217,37 +154,30 @@ def run_test_suite(
             passed = verdict.passed
             if verdict.error:
                 error = verdict.error
-            if verbose:
-                print(f" Moonshot 判分: score={score} passed={passed}"
+            _logger.info(f" Moonshot 判分: score={score} passed={passed}"
                       + (f"  (judge error: {verdict.error})" if verdict.error else ""))
         except Exception as exc:  # noqa: BLE001 — a failing case must not kill the run
             error = f"{type(exc).__name__}: {exc}"
-            if verbose:
-                print(f"  ✗ 用例异常: {error}")
-                traceback.print_exc()
+            _logger.info(f"  ✗ 用例异常: {error}")
+            traceback.print_exc()
 
         latency_ms = int((time.monotonic() - t_case_start) * 1000)
         if passed:
             passed_total += 1
 
-        _record_result(
+        _storeService.record_result(
             run_id, version, phase, case,
             passed=passed, score=score, actual=actual,
             retrieved=retrievedMem, error=error, latency_ms=latency_ms,
             tokens_input=tokens_input, tokens_output=tokens_output,
         )
-        _update_progress(run_id, idx, len(cases), "running")
+        _storeService.update_progress(run_id, idx, len(cases), "running")
 
     duration = round(time.monotonic() - t_run_start, 3)
-    _update_progress(
+    _storeService.update_progress(
         run_id, len(cases), len(cases), "completed",
         passed_count=passed_total,
         pass_rate=round(passed_total / len(cases), 4) if cases else 0.0,
         duration_seconds=duration,
     )
-    # if tmp_db is not None:
-    #     try:
-    #         os.unlink(tmp_db)
-    #     except OSError:
-    #         pass  # provider may still hold the file open on Windows; ignore
     return run_id

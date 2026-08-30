@@ -13,11 +13,8 @@ The default MockLLM keeps the framework runnable with zero external services.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Protocol
+from typing import Protocol
 
-from openai.types.chat.chat_completion_chunk import ModerationInputModerationResultsResult
-
-from os_mem import Memory
 from openai import OpenAI
 from testing.config import settings
 

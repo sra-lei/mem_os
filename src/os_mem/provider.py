@@ -9,8 +9,9 @@ from __future__ import annotations
 
 from typing import List, Protocol
 
-from .logger import get_logger
-from .memory import Memory
+from os_mem.core.models.mem_models import Conversation
+
+from .infra.logger.logger import get_logger
 
 _logger = get_logger("os_mem.memory_provider")
 
@@ -26,7 +27,7 @@ class MemoryProvider(Protocol):
         """Initialize the memory provider with the given user ID."""
         ...
 
-    def ingest(self, conversation: dict) -> List[Memory]:
+    def ingest(self, conversation: Conversation) -> None:
         """Extract and store memories from one conversation (a single item of
         test_case `conversation_histories`).
 
@@ -53,11 +54,8 @@ _PROVIDER_REGISTRY: dict[str, type] = {
 
 def build_memory_provider(name: str, user_id: str, **kwargs) -> MemoryProvider:
     _logger.info(f"构建 memory provider: name={name} user_id={user_id}")
-    if name == "stub":
-        from .core.stub import StubMemoryProvider
-        return StubMemoryProvider(user_id=user_id)
     if name in _PROVIDER_REGISTRY:
         return _PROVIDER_REGISTRY[name](user_id=user_id, **kwargs)
     raise ValueError(
-        f"unknown memory provider: {name!r} (available: stub, base)"
+        f"unknown memory provider: {name!r} (available: base)"
     )

@@ -40,7 +40,10 @@ class LoggerHelper:
     def critical(self, message: str):
         self.logger.critical(message)
 
-
+# @classmethod
+# def get_logger(cls, name: str = "MemOs") -> LoggerHelper:
+#     """获取日志辅助实例"""
+#     return LoggerHelper(name)
 def get_logger(name: str = "os_mem") -> LoggerHelper:
     """获取 os_mem 命名空间下的日志辅助实例。"""
     return LoggerHelper(name)

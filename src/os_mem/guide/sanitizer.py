@@ -7,7 +7,7 @@ card), sensitive values replaced with [REDACTED], keep structured info like
 """
 from __future__ import annotations
 
-from ..logger import get_logger
+from ..infra.logger.logger import get_logger
 
 _logger = get_logger("os_mem.sanitizer")
 

@@ -10,8 +10,7 @@ from __future__ import annotations
 
 from typing import List
 
-from ..logger import get_logger
-from ..memory import Memory
+from ..infra.logger import get_logger
 
 _logger = get_logger("os_mem.generator")
 

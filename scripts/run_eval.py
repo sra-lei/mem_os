@@ -40,11 +40,8 @@ def main() -> None:
     parser.add_argument("--top-k", type=int, default=3)
     parser.add_argument("--threshold", type=float, default=0.7)
     parser.add_argument("--llm", default="mock", help="llm client (mock)")
-    parser.add_argument("--memory-provider", default="stub",
-                        help="memory provider (stub | your os_mem implementation)")
-    parser.add_argument("--memory-store", default="tmp",
-                        choices=["tmp", "file"],
-                        help="memory db location: tmp (throwaway) | file (os_mem.db)")
+    parser.add_argument("--memory-provider", default="base",
+                        help="memory provider (base | your os_mem implementation)")
     parser.add_argument("--judge", default="mock", help="judge (mock)")
     parser.add_argument("--limit", type=int, default=None, help="run first N cases")
     parser.add_argument("--notes", default=None)
@@ -57,7 +54,6 @@ def main() -> None:
         "judge_threshold": args.threshold,
         "llm_provider": args.llm,
         "memory_provider": args.memory_provider,
-        "memory_store": args.memory_store,
         "judge_provider": args.judge,
     }
     version = args.version or PHASE_TO_VERSION.get(args.phase, "v0.1")
@@ -71,7 +67,8 @@ def main() -> None:
         limit=args.limit,
         verbose=args.verbose,
     )
-
+    print(f"run complete: run_id={run_id}")
+    
     with get_session() as session:
         run = session.get(TestRun, run_id)
         if run is None:
