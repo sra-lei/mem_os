@@ -15,15 +15,13 @@ or anything else outside itself. External consumers interact with os_mem
 through the public exports below — primarily the MemoryProvider contract.
 """
 from .memory import Memory
-from .provider import MemoryProvider, build_memory_provider, register_provider
+from .provider import MemoryProvider, build_memory_provider
 from .storage.storage import default_db_path, temp_db_path
 
 __all__ = [
     "Memory",
     "MemoryProvider",
     "build_memory_provider",
-    "register_provider",
     "default_db_path",
     "temp_db_path",
-    "format_injection",
 ]

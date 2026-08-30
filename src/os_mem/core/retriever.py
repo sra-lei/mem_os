@@ -14,11 +14,11 @@ from ..memory import Memory
 
 _logger = get_logger("os_mem.retriever")
 
+class Retriever:
+    def retrieve(query: str, memories: List[Memory], top_k: int = 3) -> List[Memory]:
+        """Rank `memories` by BM25 relevance to `query`, return top-k.
 
-def retrieve(query: str, memories: List[Memory], top_k: int = 3) -> List[Memory]:
-    """Rank `memories` by BM25 relevance to `query`, return top-k.
-
-    TODO(user): implement BM25 scoring per 需求文档 v0.1 module 1.4.
-    """
-    _logger.warning(f"retrieve 未实现 BM25（占位）：按原序返回前 {top_k} 条")
-    return memories[:top_k]
+        TODO(user): implement BM25 scoring per 需求文档 v0.1 module 1.4.
+        """
+        _logger.warning(f"retrieve 未实现 BM25（占位）：按原序返回前 {top_k} 条")
+        return memories[:top_k]

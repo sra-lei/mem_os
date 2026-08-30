@@ -26,7 +26,6 @@ class MemoryProvider(Protocol):
         """Initialize the memory provider with the given user ID."""
         ...
 
-
     def ingest(self, conversation: dict) -> List[Memory]:
         """Extract and store memories from one conversation (a single item of
         test_case `conversation_histories`).
@@ -41,34 +40,24 @@ class MemoryProvider(Protocol):
 
     def retrieve(self, query: str, top_k: int = 3) -> str:
         """Return the top-k most relevant memories for the user's query."""
-        memories: List[Memory] = []
-        _logger(f"  检索到 {len(retrieved)} 条记忆")
-        _SECTION_HEADER = "## 关于用户的长久记忆"
-        memory_lines = [_SECTION_HEADER]
-        if not memories:
-            memory_lines.append("（当前没有可用记忆）")
-        for m in memories:
-            memory_lines.append(f"- {m.fact}")
-        return "\n".join(memory_lines)
+        ...
 
+# Registered provider names -> factory.
+# NOTE: BaseProvider 在 MemoryProvider 定义之后才导入，避免
+# provider -> core -> base_provider -> provider 的循环导入。
+from .core import BaseProvider  # noqa: E402
 
-# Registered provider names -> factory. The evaluation CLI selects one via
-# --memory-provider. Register your own implementation here (e.g.
-# "if name == 'mine': return MyMemoryProvider(...)").
-_PROVIDER_REGISTRY: dict[str, type] = {}
-
-
-def register_provider(name: str, cls: type) -> None:
-    _PROVIDER_REGISTRY[name] = cls
-
+_PROVIDER_REGISTRY: dict[str, type] = {
+    "base": BaseProvider,
+}
 
 def build_memory_provider(name: str, user_id: str, **kwargs) -> MemoryProvider:
+    _logger.info(f"构建 memory provider: name={name} user_id={user_id}")
     if name == "stub":
         from .core.stub import StubMemoryProvider
-
         return StubMemoryProvider(user_id=user_id)
     if name in _PROVIDER_REGISTRY:
         return _PROVIDER_REGISTRY[name](user_id=user_id, **kwargs)
     raise ValueError(
-        f"unknown memory provider: {name!r} (available: stub{('' if not _PROVIDER_REGISTRY else ', ' + ', '.join(_PROVIDER_REGISTRY))})"
+        f"unknown memory provider: {name!r} (available: stub, base)"
     )

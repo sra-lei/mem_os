@@ -1,20 +1,24 @@
-"""Memory data model (需求文档 v0.1 module 1.2)."""
+"""Memory data model (需求文档 v0.1 module 1.2).
+
+Memory is the SQLModel table backing the memories storage. v0.1 keeps
+memories unstructured (plain text only); structured fields (category/key/
+value/...) arrive in v0.2 — do not add them yet.
+"""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import uuid
 from datetime import datetime
 
+from sqlmodel import Field, SQLModel
 
-@dataclass
-class Memory:
-    """One extracted memory.
 
-    v0.1 keeps memories unstructured (plain text only). Structured fields
-    (category/key/value/...) arrive in v0.2 — do not add them yet.
-    """
+class Memory(SQLModel, table=True):
+    """One extracted memory."""
 
-    id: str
-    user_id: str            # namespace; evaluation uses case_id so cases don't leak into each other
-    fact: str               # plain-text fact, e.g. "用户邮箱是 john@example.com"
-    source_session_id: str  # conversation_id that produced this memory
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    __tablename__ = "memories"
+
+    id: str = Field(default_factory=lambda: uuid.uuid4().hex, primary_key=True)
+    user_id: str = Field(index=True, max_length=100)            # namespace; evaluation uses case_id so cases don't leak
+    fact: str = Field(max_length=1000)                          # plain-text fact, e.g. "用户邮箱是 john@example.com"
+    source_session_id: str = Field(default="", index=True, max_length=100)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
