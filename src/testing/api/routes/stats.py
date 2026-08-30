@@ -1,14 +1,14 @@
-﻿"""Stats / overview / dashboard API routes."""
+"""Stats / overview / dashboard API routes."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from sqlmodel import select, func, and_, case
 
 from testing.db import get_session
-from testing.db.models import TestRun, TestCaseResult, TestCaseDefinition
+from testing.db.models import TestRun, TestCaseResult, TestCaseDefinition, utcnow
 from ..schemas import (
     OverviewStats,
     LatestRun,
@@ -304,7 +304,7 @@ def dashboard_stats():
         total_pass_rate = round(float(overall_avg or 0.0), 4)
 
         # --- recent_7_days (case results executed in the last 7 days) ---
-        cutoff = datetime.utcnow() - timedelta(days=7)
+        cutoff = utcnow() - timedelta(days=7)
         recent_stmt = (
             select(func.count(TestCaseResult.id))
             .join(TestRun, TestCaseResult.run_id == TestRun.id)

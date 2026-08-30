@@ -5,10 +5,11 @@ import json
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
+from sqlalchemy import delete as sa_delete
 from sqlmodel import select, func, orm
 
 from testing.db import get_session
-from testing.db.models import TestRun, TestCaseResult, TestCaseDefinition
+from testing.db.models import TestRun, TestCaseResult, TestCaseDefinition, utcnow
 from ..schemas import (
     RunListResponse,
     RunSummary,
@@ -197,15 +198,13 @@ def get_run_chart(run_id: str):
 @router.post("", response_model=CreateRunResponse, status_code=201)
 def create_run(req: CreateRunRequest):
     """Create a run placeholder (status='running'); the runner fills results later."""
-    from datetime import datetime
-    from testing.db.models import TestRun
     import uuid
 
     run = TestRun(
         id=uuid.uuid4().hex,
         version=req.version,
         phase=req.phase,
-        run_at=datetime.utcnow(),
+        run_at=utcnow(),
         total_cases=0,
         passed_count=0,
         pass_rate=0.0,
@@ -221,3 +220,56 @@ def create_run(req: CreateRunRequest):
         session.commit()
         session.refresh(run)
     return CreateRunResponse(run_id=run.id, status=run.status)
+
+
+# ---------- delete ----------
+# NOTE: concrete-path routes must be declared before "/{run_id}" wildcard routes.
+
+@router.delete("")
+def clear_all_runs():
+    """Delete ALL runs together with their case results (irreversible).
+
+    Refuses while any run is still 'running' to avoid the runner writing
+    orphaned results after the parent run is gone.
+    """
+    with get_session() as session:
+        running = session.exec(
+            select(func.count()).select_from(TestRun).where(TestRun.status == "running")
+        ).one()
+        if running:
+            raise HTTPException(
+                status_code=409,
+                detail=f"有 {running} 条运行中的记录，请等待完成后再清空",
+            )
+        try:
+            res_results = session.execute(sa_delete(TestCaseResult))
+            res_runs = session.execute(sa_delete(TestRun))
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        return {
+            "deleted_runs": int(res_runs.rowcount or 0),
+            "deleted_results": int(res_results.rowcount or 0),
+        }
+
+
+@router.delete("/{run_id}")
+def delete_run(run_id: str):
+    """Delete one run and all its case results (irreversible)."""
+    with get_session() as session:
+        run = session.get(TestRun, run_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail="Run not found")
+        if run.status == "running":
+            raise HTTPException(status_code=409, detail="运行中的记录无法删除，请等待完成")
+        try:
+            res = session.execute(
+                sa_delete(TestCaseResult).where(TestCaseResult.run_id == run_id)
+            )
+            session.delete(run)
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        return {"run_id": run_id, "deleted_results": int(res.rowcount or 0)}

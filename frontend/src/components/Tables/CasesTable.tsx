@@ -1,7 +1,6 @@
 import { Link } from "react-router-dom";
-import { PassBadge } from "../UI/Badge";
 import { SortHeader, nextDir, type SortableColumn } from "./tableUtils";
-import { fmtDateShort, fmtNum, fmtRate } from "@/utils/format";
+import { fmtDate } from "@/utils/format";
 import { sortBy } from "@/utils/sort";
 import type { CaseDefinition } from "@/types";
 import type { SortDir } from "@/utils/sort";
@@ -17,30 +16,9 @@ export interface CasesTableProps {
 const COLS: Array<SortableColumn & { key: ValidSortKey }> = [
   { key: "name", label: "用例名称 / 用户输入", sortable: true },
   {
-    key: "total_runs",
-    label: "运行次数",
-    width: "100px",
-    align: "center",
-    sortable: true,
-  },
-  {
-    key: "run_status",
-    label: "状态",
-    width: "100px",
-    align: "center",
-    sortable: true,
-  },
-  {
-    key: "pass_rate",
-    label: "通过率",
-    width: "110px",
-    align: "center",
-    sortable: true,
-  },
-  {
     key: "updated_at",
     label: "更新时间",
-    width: "120px",
+    width: "200px",
     align: "center",
     sortable: true,
   },
@@ -49,43 +27,24 @@ const COLS: Array<SortableColumn & { key: ValidSortKey }> = [
 
 type ValidSortKey =
   | "name"
-  | "total_runs"
-  | "run_status"
-  | "pass_rate"
   | "updated_at"
   | "__actions";
 
 interface RowShape {
   c: CaseDefinition;
-  rate: number;
-  tone: "muted" | "ok" | "warn" | "bad";
-  total: number;
   /** accessor dispatch values (string for sortBy — always string/number) */
   sortVals: Record<ValidSortKey, string | number | null | undefined>;
 }
 
 function buildRows(items: CaseDefinition[]): RowShape[] {
-  return items.map((c) => {
-    const total = Number(c.total_runs ?? 0);
-    const pass = Number(c.pass_count ?? 0);
-    const rate = total > 0 ? pass / total : 0;
-    const tone: RowShape["tone"] =
-      total === 0 ? "muted" : rate >= 0.7 ? "ok" : rate >= 0.4 ? "warn" : "bad";
-    return {
-      c,
-      rate,
-      tone,
-      total,
-      sortVals: {
-        name: c.case_name,
-        total_runs: total,
-        run_status: rate,
-        pass_rate: rate,
-        updated_at: c.updated_at ?? "",
-        __actions: "",
-      },
-    };
-  });
+  return items.map((c) => ({
+    c,
+    sortVals: {
+      name: c.case_name,
+      updated_at: c.updated_at ?? "",
+      __actions: "",
+    },
+  }));
 }
 
 export function CasesTable({
@@ -141,7 +100,7 @@ export function CasesTable({
               </td>
             </tr>
           ) : (
-            rows.map(({ c, rate, tone, total }) => (
+            rows.map(({ c }) => (
               <tr key={c.case_id} className="table__row">
                 <td>
                   <div className="table__primary">
@@ -157,26 +116,8 @@ export function CasesTable({
                   </div>
                 </td>
                 <td>
-                  <div className="num" style={{ textAlign: "center" }}>
-                    {fmtNum(total)}
-                  </div>
-                </td>
-                <td>
-                  <div className="flex items-center gap-2">
-                    <PassBadge passed={!!(rate >= 0.7 && total > 0)} />
-                  </div>
-                </td>
-                <td>
-                  <div className="flex items-center gap-6">
-                    <span className={`num num--${tone}`}>{fmtRate(rate)}</span>
-                    <span className="muted">
-                      ({fmtNum(c.pass_count)}/{fmtNum(total)})
-                    </span>
-                  </div>
-                </td>
-                <td>
-                  <div className="mono" style={{ textAlign: "center" }}>
-                    {c.updated_at ? fmtDateShort(c.updated_at) : "—"}
+                  <div className="mono" style={{ textAlign: "center", whiteSpace: "nowrap" }}>
+                    {c.updated_at ? fmtDate(c.updated_at) : "—"}
                   </div>
                 </td>
                 <td>

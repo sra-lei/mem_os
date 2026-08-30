@@ -72,7 +72,7 @@ export function PassedAccordion({
                   <span className="accordion-item__col">
                     <PhaseBadge phase={r.phase} />
                     <PassBadge passed={!!r.passed} />
-                    <span className="muted mono">{fmtLatency(r.latency_ms)}</span>
+                    <span className="muted mono">{fmtLatency(r.latency_ms)} · tokens {fmtNum(r.tokens_input ?? 0)}/{fmtNum(r.tokens_output ?? 0)}</span>
                   </span>
                   <span className="accordion-item__arrow" aria-hidden>{opened ? '−' : '+'}</span>
                 </button>

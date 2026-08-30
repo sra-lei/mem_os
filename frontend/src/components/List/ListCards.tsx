@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
 import type { FailingCase, RunSummary } from '@/types';
 import { PhaseBadge, PassBadge } from '../UI/Badge';
-import { fmtDateShort, fmtNum } from '@/utils/format';
+import { fmtDate, fmtDateShort, fmtNum } from '@/utils/format';
 
 export function FailingCasesList({ items }: { items: FailingCase[] }) {
   if (items.length === 0) {
@@ -67,7 +67,7 @@ export function RecentRunsList({ items }: { items: RunSummary[] }) {
               <PhaseBadge phase={r.phase} />
             </div>
             <div className="list-card__row muted">
-              <span className="mono">{fmtDateShort(r.start_time)}</span>
+              <span className="mono" style={{ whiteSpace: 'nowrap' }}>{fmtDate(r.start_time)}</span>
               <span>
                 用例 {fmtNum(r.total_cases)} · 通过率{' '}
                 <strong className={`num--${tone}`}>{(r.pass_rate * 100).toFixed(1)}%</strong>

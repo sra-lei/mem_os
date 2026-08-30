@@ -1,21 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { useAsync } from '@/hooks/useAsync';
 import { useRuns } from '@/hooks/useRuns';
 import { RunsTable } from '@/components/Tables';
 import { runsApi } from '@/api/runs';
+import { clearApiCache } from '@/api/client';
 import type { SortDir } from '@/utils/sort';
-import { Button, TableSkeleton, Skeleton, useAsyncErrorToast } from '@/components/UI';
+import { Button, TableSkeleton, Skeleton, useAsyncErrorToast, useToast } from '@/components/UI';
 import { PageHeader, Pager } from './DashboardPage';
 import type { RunsListQuery } from '@/api/runs';
-
-const PHASE_OPTIONS: Array<{ value: string; label: string }> = [
-  { value: '', label: '全部阶段' },
-  { value: 'memory_retrieval', label: '记忆检索' },
-  { value: 'prompt_generation', label: 'Prompt 生成' },
-  { value: 'answer_generation', label: '回答生成' },
-  { value: 'all', label: '全链路' },
-];
+import type { RunSummary } from '@/types';
 
 const STATUS_OPTIONS: Array<{ value: string; label: string }> = [
   { value: '', label: '全部状态' },
@@ -28,7 +22,6 @@ const STATUS_OPTIONS: Array<{ value: string; label: string }> = [
 
 export function RunsPage() {
   const [params, setParams] = useSearchParams();
-  const navigate = useNavigate();
 
   const query = useMemo<RunsListQuery>(() => {
     const page = Number(params.get('page') ?? 1);
@@ -36,8 +29,6 @@ export function RunsPage() {
     return {
       page: Number.isFinite(page) && page > 0 ? page : 1,
       limit: [20, 50, 100].includes(limit) ? limit : 20,
-      search: params.get('q') ?? '',
-      phase: params.get('phase') || undefined,
       version: params.get('version') || undefined,
       status: params.get('status') || undefined,
       sortBy: params.get('sortBy') ?? 'start_time',
@@ -45,43 +36,93 @@ export function RunsPage() {
     };
   }, [params]);
 
-  const { items, meta, loading, error } = useRuns(query);
+  // 清理已下线的筛选参数（搜索 q / 阶段 phase），避免旧书签残留
+  useEffect(() => {
+    if (!params.has('q') && !params.has('phase')) return;
+    const np = new URLSearchParams(params);
+    np.delete('q');
+    np.delete('phase');
+    setParams(np, { replace: true });
+  }, [params, setParams]);
+
+  const { items, meta, loading, error, refresh } = useRuns(query);
   useAsyncErrorToast(error, '加载运行列表失败');
+  const toast = useToast();
 
   // 版本下拉
   const versionsAsync = useAsync((signal) => runsApi.versions(signal), []);
   useAsyncErrorToast(versionsAsync.error, '加载版本列表失败');
 
-  // 本地表单状态（提交时才同步 URL）
-  const [draft, setDraft] = useState({
-    q: query.search,
-    phase: query.phase ?? '',
-    version: query.version ?? '',
-    status: query.status ?? '',
-  });
-  useEffect(() => {
-    setDraft({
-      q: query.search,
-      phase: query.phase ?? '',
-      version: query.version ?? '',
-      status: query.status ?? '',
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query.search, query.phase, query.version, query.status]);
+  // 删除 / 清空的进行中状态
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [clearing, setClearing] = useState(false);
 
-  const applyFilter = (patch?: Partial<typeof draft>) => {
-    const next = { ...draft, ...patch };
-    setDraft(next);
-    const np = new URLSearchParams();
+  const gotoPage = (p: number) => {
+    const np = new URLSearchParams(params);
+    np.set('page', String(p));
+    setParams(np, { replace: true });
+  };
+
+  const handleDelete = async (run: RunSummary) => {
+    const ok = window.confirm(
+      `确定删除运行记录「${run.name}」吗？\n` +
+      `该运行下的 ${run.total_cases ?? 0} 条用例结果将一并删除，此操作不可恢复。`,
+    );
+    if (!ok) return;
+    setDeletingId(String(run.id));
+    try {
+      const res = await runsApi.delete(run.id);
+      clearApiCache();
+      // 最后一页仅剩一条时，删除后回退一页，避免停留在空页
+      if (items.length === 1 && meta.page > 1) {
+        gotoPage(meta.page - 1);
+      } else {
+        await refresh();
+      }
+      toast.push({
+        kind: 'success',
+        title: '运行记录已删除',
+        desc: `已删除 ${res.deleted_results} 条用例结果`,
+      });
+    } catch (err) {
+      toast.error(err, '删除运行记录失败');
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const handleClearAll = async () => {
+    if (meta.total === 0) return;
+    const ok = window.confirm(
+      `确定清空全部 ${meta.total} 条运行记录吗？\n` +
+      `所有运行记录及对应用例结果都将被删除，此操作不可恢复。`,
+    );
+    if (!ok) return;
+    setClearing(true);
+    try {
+      const res = await runsApi.clearAll();
+      clearApiCache();
+      gotoPage(1);
+      await refresh();
+      toast.push({
+        kind: 'success',
+        title: '运行记录已清空',
+        desc: `共删除 ${res.deleted_runs} 条运行、${res.deleted_results} 条用例结果`,
+      });
+    } catch (err) {
+      toast.error(err, '清空运行记录失败');
+    } finally {
+      setClearing(false);
+    }
+  };
+
+  // 下拉筛选即时生效（无需"应用"按钮）
+  const onFilter = (key: 'version' | 'status', value: string) => {
+    const np = new URLSearchParams(params);
+    if (value) np.set(key, value);
+    else np.delete(key);
     np.set('page', '1');
-    np.set('limit', String(meta.limit));
-    if (next.q) np.set('q', next.q);
-    if (next.phase) np.set('phase', next.phase);
-    if (next.version) np.set('version', next.version);
-    if (next.status) np.set('status', next.status);
-    np.set('sortBy', query.sortBy ?? 'start_time');
-    np.set('sortDir', query.sortDir ?? 'desc');
-    navigate({ search: np.toString() }, { replace: false });
+    setParams(np, { replace: true });
   };
 
   const onSort = (key: string, dir: SortDir) => {
@@ -109,75 +150,73 @@ export function RunsPage() {
       <PageHeader
         eyebrow="Runs"
         title="运行记录"
-        desc="所有历史运行的完整列表；支持按版本 / 阶段 / 状态筛选，点击任一运行查看详情。"
+        desc="所有历史运行的完整列表；支持按版本 / 状态筛选，点击任一运行查看详情。"
       />
 
       <section className="card">
         <div className="filter-bar">
-          <input
-            className="input"
-            placeholder="搜索运行名 / 版本 / 备注…"
-            value={draft.q}
-            onChange={(e) => setDraft((d) => ({ ...d, q: e.target.value }))}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') applyFilter();
-            }}
-          />
-          <select className="select" value={draft.phase} onChange={(e) => applyFilter({ phase: e.target.value })}>
-            {PHASE_OPTIONS.map((o) => (
-              <option key={o.value || 'all-ph'} value={o.value}>{o.label}</option>
-            ))}
-          </select>
           <select
             className="select"
-            value={draft.version}
+            value={query.version ?? ''}
             disabled={versionsAsync.loading}
-            onChange={(e) => applyFilter({ version: e.target.value })}
+            onChange={(e) => onFilter('version', e.target.value)}
           >
             <option value="">全部版本</option>
             {versionsAsync.data?.map((v) => (
               <option key={v} value={v}>{v}</option>
             ))}
           </select>
-          <select className="select" value={draft.status} onChange={(e) => applyFilter({ status: e.target.value })}>
+          <select
+            className="select"
+            value={query.status ?? ''}
+            onChange={(e) => onFilter('status', e.target.value)}
+          >
             {STATUS_OPTIONS.map((o) => (
               <option key={o.value || 'all-st'} value={o.value}>{o.label}</option>
             ))}
           </select>
-          <Button variant="primary" onClick={() => applyFilter()}>应用筛选</Button>
-          <Button
-            variant="ghost"
-            onClick={() => {
-              setDraft({ q: '', phase: '', version: '', status: '' });
-              navigate({ search: '' });
-            }}
-          >
-            重置
-          </Button>
         </div>
 
         <div className="toolbar">
           <div className="muted">
             共 <strong>{meta.total}</strong> 条
           </div>
-          <label className="muted">
-            每页：
-            <select
-              className="select select--sm"
-              value={String(meta.limit)}
-              onChange={(e) => onLimit(Number(e.target.value))}
+          <div className="flex items-center gap-8">
+            <label className="muted">
+              每页：
+              <select
+                className="select select--sm"
+                value={String(meta.limit)}
+                onChange={(e) => onLimit(Number(e.target.value))}
+              >
+                {[20, 50, 100].map((n) => (
+                  <option key={n} value={String(n)}>{n}</option>
+                ))}
+              </select>
+            </label>
+            <Button
+              variant="danger"
+              size="sm"
+              loading={clearing}
+              disabled={meta.total === 0}
+              onClick={handleClearAll}
             >
-              {[20, 50, 100].map((n) => (
-                <option key={n} value={String(n)}>{n}</option>
-              ))}
-            </select>
-          </label>
+              清空全部
+            </Button>
+          </div>
         </div>
 
         {loading ? (
           <TableSkeleton cols={8} rows={Math.min(12, meta.limit)} />
         ) : (
-          <RunsTable items={items} sortKey={query.sortBy} sortDir={query.sortDir} onSort={onSort} />
+          <RunsTable
+            items={items}
+            sortKey={query.sortBy}
+            sortDir={query.sortDir}
+            onSort={onSort}
+            onDelete={handleDelete}
+            deletingId={deletingId}
+          />
         )}
 
         <Pager

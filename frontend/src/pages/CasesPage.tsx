@@ -13,6 +13,8 @@ const LAYER_LABEL: Record<string, string> = {
   layer3: 'L3 多领域复杂协同',
 };
 
+const VALID_SORT_KEYS = ['name', 'updated_at'];
+
 export function CasesPage() {
   const [params, setParams] = useSearchParams();
   const navigate = useNavigate();
@@ -21,11 +23,12 @@ export function CasesPage() {
     const page = Number(params.get('page') ?? 1);
     const limit = Number(params.get('limit') ?? 20);
     const layerRaw = params.get('layer');
+    const sortByRaw = params.get('sortBy');
     return {
       page: Number.isFinite(page) && page > 0 ? page : 1,
       limit: [20, 50, 100].includes(limit) ? limit : 20,
       layer: (layerRaw === 'layer1' || layerRaw === 'layer2' || layerRaw === 'layer3') ? layerRaw : null,
-      sortBy: params.get('sortBy') ?? 'updated_at',
+      sortBy: sortByRaw && VALID_SORT_KEYS.includes(sortByRaw) ? sortByRaw : 'updated_at',
       sortDir: (params.get('sortDir') as SortDir) ?? 'desc',
     };
   }, [params]);
@@ -70,13 +73,20 @@ export function CasesPage() {
     setParams(np, { replace: true });
   };
 
-  // 若 URL 中携带了已废弃参数（q/phase/version/tag），清理掉以保持地址栏整洁
+  // 若 URL 中携带了已废弃参数（q/phase/version/tag 或已删除列的 sortBy），清理掉以保持地址栏整洁
   useEffect(() => {
     const deprecatedKeys = ['q', 'phase', 'version', 'tag'];
-    const hasLegacy = deprecatedKeys.some((k) => params.has(k));
+    const legacySort = params.get('sortBy');
+    const hasLegacy =
+      deprecatedKeys.some((k) => params.has(k)) ||
+      (!!legacySort && !VALID_SORT_KEYS.includes(legacySort));
     if (!hasLegacy) return;
     const np = new URLSearchParams(params.toString());
     deprecatedKeys.forEach((k) => np.delete(k));
+    if (legacySort && !VALID_SORT_KEYS.includes(legacySort)) {
+      np.delete('sortBy');
+      np.delete('sortDir');
+    }
     setParams(np, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -123,7 +133,7 @@ export function CasesPage() {
           </div>
         </div>
 
-        {loading ? <TableSkeleton cols={5} rows={Math.min(12, meta.limit)} /> : (
+        {loading ? <TableSkeleton cols={3} rows={Math.min(12, meta.limit)} /> : (
           <CasesTable items={items} sortKey={query.sortBy} sortDir={query.sortDir} onSort={onSort} />
         )}
 

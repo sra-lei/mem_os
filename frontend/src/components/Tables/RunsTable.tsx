@@ -6,19 +6,18 @@ import { Button } from '../UI/Button';
 import { RateBar } from '../UI/RateBar';
 import { SortHeader, nextDir, type SortableColumn } from './tableUtils';
 import type { SortDir } from '@/utils/sort';
-import { fmtDate, fmtRate, fmtDurationBetween, fmtNum } from '@/utils/format';
+import { fmtDate, fmtDurationBetween, fmtNum } from '@/utils/format';
 
 const COLS: SortableColumn[] = [
   { key: 'id', label: 'ID', sortable: true, width: '72px', align: 'right' },
-  { key: 'name', label: '运行名称', sortable: true },
   { key: 'version', label: '版本', sortable: true, width: '110px' },
   { key: 'phase', label: '阶段', sortable: true, width: '110px' },
   { key: 'start_time', label: '开始时间', sortable: true, width: '160px' },
   { key: 'duration', label: '耗时', sortable: false, width: '90px' },
   { key: 'total_cases', label: '用例数', sortable: true, width: '80px', align: 'right' },
-  { key: 'pass_rate', label: '通过率', sortable: true, width: '180px' },
-  { key: 'status', label: '状态', sortable: true, width: '100px' },
-  { key: 'actions', label: '操作', sortable: false, width: '90px', align: 'right' },
+  { key: 'pass_rate', label: '通过率', sortable: true, width: '160px' },
+  { key: 'status', label: '状态', sortable: true, width: '120px' },
+  { key: 'actions', label: '操作', sortable: false, width: '150px', align: 'right' },
 ];
 
 export interface RunsTableProps {
@@ -26,9 +25,11 @@ export interface RunsTableProps {
   sortKey?: string;
   sortDir?: SortDir;
   onSort: (key: string, dir: SortDir) => void;
+  onDelete?: (run: RunSummary) => void;
+  deletingId?: string | null;
 }
 
-export function RunsTable({ items, sortKey, sortDir, onSort }: RunsTableProps) {
+export function RunsTable({ items, sortKey, sortDir, onSort, onDelete, deletingId }: RunsTableProps) {
   const toggleSort = (key: string) => {
     onSort(key, sortKey === key ? (sortDir === 'desc' ? 'asc' : 'desc') : nextDir());
   };
@@ -64,18 +65,8 @@ export function RunsTable({ items, sortKey, sortDir, onSort }: RunsTableProps) {
           ) : (
             rows.map(({ r, tone }) => (
               <tr key={r.id} className="table__row">
-                <td align="right">#{r.id}</td>
-                <td>
-                  <div className="table__primary">
-                    <Link to={`/runs/${r.id}`} className="link-strong">
-                      {r.name}
-                    </Link>
-                    {r.error_message ? (
-                      <span className="table__hint" title={r.error_message}>
-                        错误：{r.error_message.slice(0, 80)}
-                      </span>
-                    ) : null}
-                  </div>
+                <td align="right">
+                  <Link to={`/runs/${r.id}`} className="link-strong">#{r.id}</Link>
                 </td>
                 <td>
                   <code className="chip">{r.version}</code>
@@ -85,16 +76,34 @@ export function RunsTable({ items, sortKey, sortDir, onSort }: RunsTableProps) {
                 <td className="mono">{fmtDurationBetween(r.start_time, r.end_time)}</td>
                 <td align="right">{fmtNum(r.total_cases)}</td>
                 <td>
-                  <div className="flex items-center gap-8">
-                    <RateBar value={r.pass_rate} tone={tone as 'success' | 'warning' | 'danger'} />
-                    <span className={`num num--${tone}`}>{fmtRate(r.pass_rate)}</span>
+                  <RateBar value={r.pass_rate} tone={tone as 'success' | 'warning' | 'danger'} />
+                </td>
+                <td>
+                  <div className="flex items-center gap-6">
+                    <StatusBadge status={r.status ?? 'completed'} />
+                    {r.error_message ? (
+                      <span className="table__hint" title={r.error_message}>
+                        错误：{r.error_message.slice(0, 40)}
+                      </span>
+                    ) : null}
                   </div>
                 </td>
-                <td><StatusBadge status={r.status ?? 'completed'} /></td>
                 <td align="right">
-                  <Link to={`/runs/${r.id}`}>
-                    <Button variant="ghost" size="sm">详情</Button>
-                  </Link>
+                  <div className="flex items-center gap-6" style={{ justifyContent: 'flex-end' }}>
+                    <Link to={`/runs/${r.id}`}>
+                      <Button variant="ghost" size="sm">详情</Button>
+                    </Link>
+                    {onDelete && r.status !== 'running' ? (
+                      <Button
+                        variant="danger"
+                        size="sm"
+                        loading={deletingId === String(r.id)}
+                        onClick={() => onDelete(r)}
+                      >
+                        删除
+                      </Button>
+                    ) : null}
+                  </div>
                 </td>
               </tr>
             ))

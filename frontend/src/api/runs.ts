@@ -118,4 +118,12 @@ export const runsApi = {
 
   versions: (signal?: AbortSignal) =>
     apiClient.get<string[]>('/api/runs/versions', undefined, { signal }),
+
+  /** Delete one run together with its case results. */
+  delete: (id: number | string) =>
+    apiClient.delete<{ run_id: string; deleted_results: number }>(`/api/runs/${id}`),
+
+  /** Delete ALL runs and case results (irreversible). */
+  clearAll: () =>
+    apiClient.delete<{ deleted_runs: number; deleted_results: number }>('/api/runs'),
 };

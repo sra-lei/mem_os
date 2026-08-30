@@ -2,11 +2,21 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlmodel import Field, SQLModel, Column
 import sqlalchemy.dialects.sqlite as sqlite
+
+
+def utcnow() -> datetime:
+    """Naive UTC timestamp for DB columns.
+
+    All timestamps are stored as UTC; SQLite columns are naive (no tzinfo),
+    so we strip the offset here. The API layer (schemas._utc_iso) marks naive
+    values back as UTC on output. Avoids the deprecated datetime.utcnow().
+    """
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 # ---------- test_runs ----------
@@ -16,7 +26,7 @@ class TestRun(SQLModel, table=True):
     id: str = Field(default_factory=lambda: uuid.uuid4().hex, primary_key=True)
     version: str = Field(index=True)  # 'v0.1' | 'v0.2' | ...
     phase: str = Field(index=True)    # 'base' | 'multi_session' | 'proactive'
-    run_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    run_at: datetime = Field(default_factory=utcnow, index=True)
     total_cases: int
     passed_count: int
     pass_rate: float
@@ -45,7 +55,9 @@ class TestCaseResult(SQLModel, table=True):
     retrieved_memories: Optional[str] = Field(default=None, sa_column=Column(sqlite.TEXT))  # JSON
     error_message: Optional[str] = None
     latency_ms: Optional[int] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    tokens_input: Optional[int] = None    # answer LLM prompt tokens（只记录回答 LLM）
+    tokens_output: Optional[int] = None   # answer LLM completion tokens
+    created_at: datetime = Field(default_factory=utcnow)
 
 
 # ---------- test_case_definitions ----------
@@ -70,5 +82,5 @@ class TestCaseDefinition(SQLModel, table=True):
     expected_behavior: Optional[str] = Field(default=None, sa_column=Column(sqlite.TEXT))
     # Relative path of the source YAML, e.g. tests/test_cases/layer1/01_bank_account_setup.yaml
     source_path: Optional[str] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utcnow)
     updated_at: Optional[datetime] = None

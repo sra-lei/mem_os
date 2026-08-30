@@ -12,6 +12,7 @@ The default MockLLM keeps the framework runnable with zero external services.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import List, Protocol
 
 from openai.types.chat.chat_completion_chunk import ModerationInputModerationResultsResult
@@ -21,11 +22,24 @@ from openai import OpenAI
 from testing.config import settings
 
 
+@dataclass
+class Completion:
+    """一次回答的文本 + token 消耗（只统计回答 LLM，不含 judge 消耗）。"""
+
+    text: str
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+
+    @property
+    def total_tokens(self) -> int:
+        return self.prompt_tokens + self.completion_tokens
+
+
 class LLMClient(Protocol):
     """Minimal chat interface. Implementations must be pure (no hidden state)."""
-    
-    def complete(self, memories: str, user: str) -> str:
-        """Return the assistant reply for one turn."""
+
+    def complete(self, memories: str, user: str) -> Completion:
+        """Return the assistant reply (with token usage) for one turn."""
         ...
 
 
@@ -38,8 +52,10 @@ class MockLLM:
 
     name = "mock"
 
-    def complete(self, memories: str, user: str) -> str:
-        return f"[mock-answer] 未接入真实LLM。注入记忆 {len(system)} 字符 / 问题: {user[:60]}"
+    def complete(self, memories: str, user: str) -> Completion:
+        return Completion(
+            text=f"[mock-answer] 未接入真实LLM。注入记忆 {len(memories)} 字符 / 问题: {user[:60]}",
+        )
 
 SYSTEM_PROMPT = '''
 # 角色
@@ -64,15 +80,21 @@ class DeepSeekLLM:
             base_url=settings.DEEPSEEK_BASE_URL,
         )
 
-    def complete(self, memories: str, user: str) -> str:
-        return self.client.chat.completions.create(
+    def complete(self, memories: str, user: str) -> Completion:
+        resp = self.client.chat.completions.create(
             model=settings.DEEPSEEK_MODEL,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "assistant", "content": memories},
                 {"role": "user", "content": user},
             ],
-        ).choices[0].message.content
+        )
+        usage = resp.usage
+        return Completion(
+            text=resp.choices[0].message.content or "",
+            prompt_tokens=getattr(usage, "prompt_tokens", 0) or 0,
+            completion_tokens=getattr(usage, "completion_tokens", 0) or 0,
+        )
 
 class AnswerGenerator:
     """The evaluated agent: answers the query with retrieved memories injected.
@@ -83,7 +105,7 @@ class AnswerGenerator:
     def __init__(self, llm: LLMClient):
         self._llm = llm
 
-    def answer(self, query: str, memories: str) -> str:
+    def answer(self, query: str, memories: str) -> Completion:
         return self._llm.complete(memories, user=query)
 
 

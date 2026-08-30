@@ -1,4 +1,4 @@
-﻿"""Evaluation runner: orchestrates one test run end-to-end.
+"""Evaluation runner: orchestrates one test run end-to-end.
 
 Pipeline per test case (matches the agreed design):
   1. ingest   — replay each conversation of the case into the memory provider
@@ -23,23 +23,38 @@ import os
 import time
 import traceback
 import uuid
-from datetime import datetime
 from typing import Any, Optional
 
 from sqlmodel import select
 
 from os_mem import Memory, MemoryProvider, build_memory_provider, temp_db_path
-from testing.db import get_session, init_db
-from testing.db.models import TestCaseDefinition, TestCaseResult, TestRun
+from testing.db import get_engine, get_session, init_db
+from testing.db.models import TestCaseDefinition, TestCaseResult, TestRun, utcnow
 
 from .judge import JudgeProvider, build_judge
-from .llm import AnswerGenerator, LLMClient, build_llm_client
+from .llm import AnswerGenerator, Completion, LLMClient, build_llm_client
 
 PHASE_TO_VERSION = {
     "base": "v0.1",
     "multi_session": "v0.2",
     "proactive": "v0.3",
 }
+
+
+def _ensure_result_columns() -> None:
+    """Migrate test_case_results: add token columns if missing (SQLite)."""
+    from sqlalchemy import text
+
+    engine = get_engine()
+    with engine.begin() as conn:
+        existing = {
+            row[1]
+            for row in conn.execute(text("PRAGMA table_info(test_case_results)")).fetchall()
+        }
+        for col in ("tokens_input", "tokens_output"):
+            if col not in existing:
+                conn.execute(text(f"ALTER TABLE test_case_results ADD COLUMN {col} INTEGER"))
+                print(f"  migrated: added column {col}")
 
 
 def _load_cases(phase: str) -> list[TestCaseDefinition]:
@@ -61,10 +76,19 @@ def _record_result(
     passed: bool,
     score: Optional[float],
     actual: Optional[str],
-    retrieved: list[Memory],
+    retrieved: str,
     error: Optional[str],
     latency_ms: int,
+    tokens_input: Optional[int] = None,
+    tokens_output: Optional[int] = None,
 ) -> None:
+    # retrieve 的返回在接口演进中：list[Memory]（stub）或注入文本 str（base）。
+    # 落库统一为 TEXT：list 序列化成 JSON，str 原样。
+    retrieved_json = (
+        json.dumps(retrieved, ensure_ascii=False, default=str)
+        if isinstance(retrieved, (list, tuple))
+        else (retrieved or "")
+    )
     with get_session() as session:
         session.add(TestCaseResult(
             id=f"res_{uuid.uuid4().hex[:10]}",
@@ -77,14 +101,12 @@ def _record_result(
             score=score,
             expected_answer=case.expected_answer,
             actual_answer=actual,
-            retrieved_memories=json.dumps(
-                [{"id": m.id, "fact": m.fact, "source_session_id": m.source_session_id}
-                 for m in retrieved],
-                ensure_ascii=False,
-            ),
+            retrieved_memories=retrieved_json,
             error_message=error,
             latency_ms=latency_ms,
-            created_at=datetime.utcnow(),
+            tokens_input=tokens_input,
+            tokens_output=tokens_output,
+            created_at=utcnow(),
         ))
         session.commit()
 
@@ -118,19 +140,13 @@ def run_test_suite(
     llm_name = str(config.get("llm_provider", "mock"))
     judge_name = str(config.get("judge_provider", "mock"))
     mem_name = str(config.get("memory_provider", "stub"))
-    # memory_store: "tmp" -> throwaway memory db per run (evaluation default,
-    # os_mem.db is never touched); "file" -> let the provider use its default
-    # persistent path (production memory database).
-    mem_store = str(config.get("memory_store", "tmp"))
-    tmp_db: Optional[str] = None
-    if mem_store == "tmp" and mem_name != "stub":
-        tmp_db = str(temp_db_path())
 
     cases = _load_cases(phase)
     if limit:
         cases = cases[:limit]
 
     init_db()
+    _ensure_result_columns()
     run_id = f"run_{uuid.uuid4().hex[:10]}"
     snapshot = json.dumps(config, ensure_ascii=False)
     # create run row
@@ -165,12 +181,14 @@ def run_test_suite(
         score: Optional[float] = None
         passed = False
         actual: Optional[str] = None
-        retrieved: list[Memory] = []
+        retrievedMem: str = ""
+        tokens_input: Optional[int] = None
+        tokens_output: Optional[int] = None
 
         try:
             # Isolated provider per case (user_id = case_id) — no cross-case leakage
             provider: MemoryProvider = build_memory_provider(
-                mem_name, user_id=case.case_id, db_path=tmp_db,
+                mem_name, user_id=case.case_id
             )
             llm: LLMClient = build_llm_client(llm_name)
             judge: JudgeProvider = build_judge(judge_name, threshold=threshold)
@@ -183,7 +201,10 @@ def run_test_suite(
                 provider.ingest(conv)
 
             retrievedMem = provider.retrieve(case.query, top_k=top_k)
-            actual = agent.answer(query=case.query, memories=retrievedMem)
+            completion: Completion = agent.answer(query=case.query, memories=retrievedMem)
+            actual = completion.text
+            tokens_input = completion.prompt_tokens
+            tokens_output = completion.completion_tokens
             if verbose:
                 print(f"  DeepSeek 答案: {(actual or '')[:150]}")
 
@@ -212,7 +233,8 @@ def run_test_suite(
         _record_result(
             run_id, version, phase, case,
             passed=passed, score=score, actual=actual,
-            retrieved=retrieved, error=error, latency_ms=latency_ms,
+            retrieved=retrievedMem, error=error, latency_ms=latency_ms,
+            tokens_input=tokens_input, tokens_output=tokens_output,
         )
         _update_progress(run_id, idx, len(cases), "running")
 
@@ -223,9 +245,9 @@ def run_test_suite(
         pass_rate=round(passed_total / len(cases), 4) if cases else 0.0,
         duration_seconds=duration,
     )
-    if tmp_db is not None:
-        try:
-            os.unlink(tmp_db)
-        except OSError:
-            pass  # provider may still hold the file open on Windows; ignore
+    # if tmp_db is not None:
+    #     try:
+    #         os.unlink(tmp_db)
+    #     except OSError:
+    #         pass  # provider may still hold the file open on Windows; ignore
     return run_id

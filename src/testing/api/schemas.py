@@ -1,10 +1,34 @@
 """Pydantic response / request schemas."""
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Any, List, Optional
+from datetime import datetime, timezone
+from typing import Annotated, Any, List, Optional
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, PlainSerializer, field_validator
+
+
+def _utc_iso(dt: datetime) -> str:
+    """Serialize a datetime to ISO-8601 with an explicit UTC offset.
+
+    All timestamps in the DB are written as UTC (via datetime.now(timezone.utc)
+    and stored naive by SQLite). Pydantic's default JSON encoding of a naive
+    datetime omits the timezone suffix ("2026-08-30T08:00:00"), and JavaScript
+    `new Date()` parses offset-less date-time strings as LOCAL time — which
+    shifts every displayed time by the local offset (8h in Asia/Shanghai).
+    Marking naive values as UTC and emitting "+00:00" makes the chain correct:
+    store UTC -> emit UTC-with-offset -> JS converts to browser local time.
+    """
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.isoformat()
+
+
+# JSON-serialization-only: in-process model_dump() keeps real datetimes
+# (arithmetic in routes still works); FastAPI responses get the offset string.
+UtcDateTime = Annotated[
+    datetime,
+    PlainSerializer(_utc_iso, return_type=str, when_used="json"),
+]
 
 
 # ---------- TestRun schemas ----------
@@ -15,7 +39,7 @@ class RunSummary(BaseModel):
     id: str
     version: str
     phase: str
-    run_at: datetime
+    run_at: UtcDateTime
     total_cases: int
     passed_count: int
     pass_rate: float
@@ -32,9 +56,9 @@ class RunSummary(BaseModel):
     failed: Optional[int] = None
     # --- Backward-compat aliases (matches legacy React TS interface keys) ---
     # start_time = run_at (all table/sort code currently references start_time)
-    start_time: Optional[datetime] = None
+    start_time: Optional[UtcDateTime] = None
     # end_time   = run_at + duration_seconds when duration is available
-    end_time: Optional[datetime] = None
+    end_time: Optional[UtcDateTime] = None
     # `passed`  is an alias for passed_count (used by old TS RunSummary)
     passed: Optional[int] = None
 
@@ -79,7 +103,9 @@ class CaseResult(BaseModel):
     retrieved_memories: Optional[str] = None
     error_message: Optional[str] = None
     latency_ms: Optional[int] = None
-    created_at: datetime
+    tokens_input: Optional[int] = None
+    tokens_output: Optional[int] = None
+    created_at: UtcDateTime
     # --- JOINed from TestCaseDefinition (only populated on run detail endpoint) ---
     query: Optional[str] = None
     description: Optional[str] = None
@@ -133,8 +159,8 @@ class CaseDefinition(BaseModel):
     expected_behavior: Optional[str] = None
     source_path: Optional[str] = None
     # --- Audit timestamps ---
-    created_at: datetime
-    updated_at: Optional[datetime] = None
+    created_at: UtcDateTime
+    updated_at: Optional[UtcDateTime] = None
     # --- Derived aggregate counters (filled by routes/cases.py) ---
     total_runs: Optional[int] = 0
     pass_count: Optional[int] = 0
@@ -146,7 +172,7 @@ class CaseHistoryEntry(BaseModel):
     version: str
     passed: bool
     score: Optional[float] = None
-    run_at: datetime
+    run_at: UtcDateTime
     # --- Enriched for Case History page detail rendering ---
     latency_ms: Optional[int] = None
     expected_answer: Optional[str] = None
@@ -166,7 +192,7 @@ class LatestRun(BaseModel):
     version: str
     phase: str
     pass_rate: float
-    run_at: datetime
+    run_at: UtcDateTime
 
 
 class ByVersionStat(BaseModel):
@@ -184,7 +210,7 @@ class FailingCase(BaseModel):
     pass_count: Optional[int] = 0
     last_run_id: Optional[str] = None
     last_run_version: Optional[str] = None
-    last_run_time: Optional[datetime] = None
+    last_run_time: Optional[UtcDateTime] = None
     last_passed: Optional[bool] = None
     # --- Legacy alias: most front-end components render this key as a "PhaseBadge";
     #     on a case-level card it equals the case's category (base / multi_session / proactive).
@@ -210,7 +236,7 @@ class TrendPoint(BaseModel):
     run_id: str                        # backend uses UUID hex; TS type has lenient `number` which accepts strings at runtime
     name: str                          # label: "<version> · <phase>"
     version: str
-    start_time: datetime               # ISO serializable
+    start_time: UtcDateTime            # ISO serializable
     pass_rate: float
     total_cases: int
     passed: int
