@@ -17,10 +17,9 @@ through the public exports below — primarily the MemoryProvider contract.
 
 
 from .configs.mem_settings import memory_settings
-from .provider import MemoryProvider, build_memory_provider
+from .infra.logger.logger import get_logger
 
 __all__ = [
     "memory_settings",
-    "MemoryProvider",
-    "build_memory_provider"
+    "get_logger",
 ]

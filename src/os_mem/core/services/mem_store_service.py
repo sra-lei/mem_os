@@ -3,7 +3,7 @@ from typing import List
 
 from sqlmodel import select
 
-from os_mem.core.models.mem_models import Memory
+from os_mem.models.mem_models import Memory
 from os_mem.entries.mem_models import ConversationMemory, Message
 from os_mem.infra.logger.logger import LoggerHelper, get_logger
 from os_mem.infra.retriever.bm25_retriever import SimpleBM25

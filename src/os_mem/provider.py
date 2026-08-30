@@ -7,9 +7,9 @@ YOUR work — reference 需求文档 v0.1 modules 1.2~1.4).
 """
 from __future__ import annotations
 
-from typing import List, Protocol
+from typing import Protocol
 
-from os_mem.core.models.mem_models import Conversation
+from os_mem.models.mem_models import Conversation
 
 from .infra.logger.logger import get_logger
 
@@ -43,12 +43,11 @@ class MemoryProvider(Protocol):
         """Return the top-k most relevant memories for the user's query."""
         ...
 
-# Registered provider names -> factory.
-# NOTE: BaseProvider 在 MemoryProvider 定义之后才导入，避免
-# provider -> core -> base_provider -> provider 的循环导入。
-from .core import BaseProvider  # noqa: E402
+from os_mem.core.mem_provider import BaseProvider,FullTextProvider  # noqa: E402
 
+# Registered provider names -> factory.
 _PROVIDER_REGISTRY: dict[str, type] = {
+    "full": FullTextProvider,
     "base": BaseProvider,
 }
 

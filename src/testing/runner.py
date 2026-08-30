@@ -26,12 +26,9 @@ import uuid
 from datetime import datetime
 from typing import Any, Optional
 
-from sqlmodel import select
-
-from os_mem import build_memory_provider
-from os_mem.core.models.mem_models import Conversation
+from os_mem.provider import MemoryProvider, build_memory_provider
+from os_mem.models import Conversation
 from os_mem.infra.logger.logger import get_logger
-from os_mem.provider import MemoryProvider
 from testing.services.store_service import get_store_service
 
 

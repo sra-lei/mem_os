@@ -1,7 +1,7 @@
 import json
 from typing import List
 
-from os_mem.core.models.mem_models import Conversation, Memory
+from os_mem.models.mem_models import Conversation, Memory
 from os_mem.core.services.mem_store_service import get_store_service
 from os_mem.entries.mem_models import ConversationMemory, Message
 
@@ -29,7 +29,6 @@ class BaseProvider():
         # self.messages = json.dumps(conversation["messages"], ensure_ascii=False)
         
         # v2: 存储对话内容到sqlite
-
         messages = conversation.messages
         if not messages:
             raise ValueError("没有消息内容")

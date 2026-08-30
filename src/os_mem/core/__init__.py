@@ -1,3 +1,3 @@
-from .base_provider import BaseProvider
+from .mem_provider.base_provider import BaseProvider
 
-__all__ = ["base_provider"]
+__all__ = ["BaseProvider"]
