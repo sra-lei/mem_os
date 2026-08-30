@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useRunDetail } from '@/hooks/useRunDetail';
-import { RunSummary, FailedCasesGrid, PassedAccordion } from '@/components/RunDetail';
+import { RunSummary, PassFailCases } from '@/components/RunDetail';
 import { RunCategoryChart, PassFailPieChart } from '@/components/Charts';
 import { CaseCompareModal } from '@/components/CaseCompareModal';
 import { CardHeader, PageHeader } from './DashboardPage';
 import { Skeleton, TableSkeleton, Button, useAsyncErrorToast } from '@/components/UI';
+import { fmtNum } from '@/utils/format';
 import type { TestCaseResult } from '@/types';
 
 export function RunDetailPage() {
@@ -17,6 +18,15 @@ export function RunDetailPage() {
   const compare: TestCaseResult | null = useMemo(
     () => (compareId != null ? results.find((r) => r.id === compareId) ?? null : null),
     [compareId, results],
+  );
+
+  // Token 消耗（回答 LLM，不含 judge）：对每条用例的 tokens 求和
+  const tokens = useMemo(
+    () => ({
+      input: results.reduce((a, r) => a + (r.tokens_input ?? 0), 0),
+      output: results.reduce((a, r) => a + (r.tokens_output ?? 0), 0),
+    }),
+    [results],
   );
 
   return (
@@ -51,6 +61,15 @@ export function RunDetailPage() {
         <>
           <RunSummary run={run} />
 
+          <section className="card">
+            <CardHeader title="Token 消耗" subtitle="回答 LLM（DeepSeek）的 token 用量，不含评测判分" />
+            <ul className="run-summary__metrics">
+              <li><span>Token 输入</span><strong>{fmtNum(tokens.input)}</strong></li>
+              <li><span>Token 输出</span><strong>{fmtNum(tokens.output)}</strong></li>
+              <li><span>Token 合计</span><strong>{fmtNum(tokens.input + tokens.output)}</strong></li>
+            </ul>
+          </section>
+
           <div className="grid-2">
             <section className="card">
               <CardHeader title="分类通过率 & 平均耗时" subtitle="按阶段看表现，快速识别表现最弱的阶段" />
@@ -65,22 +84,7 @@ export function RunDetailPage() {
             </section>
           </div>
 
-          <section className="card">
-            <CardHeader
-              title={
-                <>
-                  ❌ 失败用例
-                  <span className="badge-text badge-text--danger">
-                    {results.filter((r) => !r.passed).length}
-                  </span>
-                </>
-              }
-              subtitle="点击「查看原因」打开对比详情：期望 vs 实际 / Judge Reason / 检索记忆"
-            />
-            <FailedCasesGrid results={results} onOpenCompare={(id) => setCompareId(id)} />
-          </section>
-
-          <PassedAccordion results={results} onOpenCompare={(id) => setCompareId(id)} />
+          <PassFailCases results={results} onOpenCompare={(id) => setCompareId(id)} />
         </>
       ) : (
         <div className="card">

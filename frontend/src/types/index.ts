@@ -36,6 +36,9 @@ export interface RunSummary {
   status: RunStatus | null;
   progress: number | null;
   config_snapshot: Record<string, unknown> | null;
+  // --- Aggregated token usage (sum of per-case answer LLM tokens) ---
+  tokens_input: number | null;        // 该次运行 answer LLM 输入 token 总和
+  tokens_output: number | null;       // 该次运行 answer LLM 输出 token 总和
 
   // --- Derived (filled by routes) ---
   name: string;                     // "<version> · <phase>"

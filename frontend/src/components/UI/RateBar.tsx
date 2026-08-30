@@ -18,9 +18,6 @@ export function RateBar({
   const label = format ? format(value ?? 0) : pct;
   return (
     <div className={`rate-bar rate-bar--${tone}`}>
-      <div className="rate-bar__track">
-        <div className={`rate-bar__fill rate-bar__fill--${tone}`} style={{ width: pct }} />
-      </div>
       {showLabel ? <span className="rate-bar__label">{label}</span> : null}
     </div>
   );

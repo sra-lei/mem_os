@@ -49,6 +49,9 @@ class RunSummary(BaseModel):
     status: Optional[str] = None
     progress: Optional[float] = None
     config_snapshot: Optional[dict[str, Any]] = None
+    # --- Aggregated token usage (sum of per-case answer LLM tokens) ---
+    tokens_input: Optional[int] = None
+    tokens_output: Optional[int] = None
     # --- Derived fields (filled by routes/runs.py & stats.py helpers) ---
     # Human-friendly label rendered on Runs list cards
     name: Optional[str] = None

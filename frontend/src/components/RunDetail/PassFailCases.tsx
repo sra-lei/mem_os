@@ -3,30 +3,30 @@ import type { TestCaseResult } from '@/types';
 import { PhaseBadge, PassBadge } from '../UI/Badge';
 import { fmtLatency, fmtNum } from '@/utils/format';
 import { Button } from '../UI/Button';
+import { FailedCaseCard } from './FailedCasesGrid';
 
-type TabKey = 'passed' | 'skipped';
+type TabKey = 'passed' | 'failed';
 
-export function PassedAccordion({
+/** 运行详情：通过/失败合并展示。失败用 failed-card（期望/实际/理由对比），
+ *  通过用可展开 accordion。 */
+export function PassFailCases({
   results,
   onOpenCompare,
 }: {
   results: TestCaseResult[];
   onOpenCompare: (id: string | number) => void;
 }) {
-  const { passed, skipped } = useMemo(() => {
-    const total = results.length;
-    const passedCount = results.filter((r) => r.passed).length;
-    const failedCount = results.filter((r) => !r.passed).length;
-    const skippedLocal = total - passedCount - failedCount;
-    return {
+  const { passed, failed } = useMemo(
+    () => ({
       passed: results.filter((r) => r.passed),
-      skipped: skippedLocal > 0 ? results.slice(passedCount, passedCount + skippedLocal) : [],
-    };
-  }, [results]);
+      failed: results.filter((r) => !r.passed),
+    }),
+    [results],
+  );
 
   const [tab, setTab] = useState<TabKey>('passed');
   const [openId, setOpenId] = useState<string | number | null>(null);
-  const list = tab === 'passed' ? passed : skipped;
+  const list = tab === 'passed' ? passed : failed;
 
   return (
     <section className="card accordion-wrap">
@@ -39,24 +39,33 @@ export function PassedAccordion({
             通过 <span className="chip">{fmtNum(passed.length)}</span>
           </button>
           <button
-            className={`tab ${tab === 'skipped' ? 'is-active' : ''}`}
-            onClick={() => setTab('skipped')}
+            className={`tab ${tab === 'failed' ? 'is-active' : ''}`}
+            onClick={() => setTab('failed')}
           >
-            跳过 / 其他 <span className="chip">{fmtNum(skipped.length)}</span>
+            失败 <span className="chip">{fmtNum(failed.length)}</span>
           </button>
         </div>
         <div className="accordion-wrap__hint muted">
-          共 {fmtNum(list.length)} 条，展开查看期望 / 实际 / 理由
+          {tab === 'failed'
+            ? `共 ${fmtNum(failed.length)} 条失败，点击「查看原因」打开对比详情`
+            : `共 ${fmtNum(passed.length)} 条通过，展开查看期望 / 实际 / 理由`}
         </div>
       </div>
+
       {list.length === 0 ? (
         <div className="empty-state empty-state--neutral">
           <strong>无记录</strong>
           <span className="muted">该分组下暂无内容。</span>
         </div>
+      ) : tab === 'failed' ? (
+        <div className="grid-failed">
+          {failed.map((r) => (
+            <FailedCaseCard key={r.id} result={r} onOpenCompare={onOpenCompare} />
+          ))}
+        </div>
       ) : (
         <ul className="accordion-list">
-          {list.map((r) => {
+          {passed.map((r) => {
             const opened = openId === r.id;
             return (
               <li key={r.id} className={`accordion-item ${opened ? 'is-open' : ''}`}>

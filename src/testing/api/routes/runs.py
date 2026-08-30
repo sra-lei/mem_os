@@ -63,8 +63,26 @@ def list_runs(
         ).one()
 
         items = session.exec(stmt.offset(offset).limit(limit)).all()
+        summaries = [_enrich_run_summary(r) for r in items]
+        # Aggregate per-run answer-LLM token usage (input/output) for the list view
+        if items:
+            ids = [r.id for r in items]
+            agg_rows = session.exec(
+                select(
+                    TestCaseResult.run_id,
+                    func.sum(TestCaseResult.tokens_input),
+                    func.sum(TestCaseResult.tokens_output),
+                )
+                .where(TestCaseResult.run_id.in_(ids))
+                .group_by(TestCaseResult.run_id)
+            ).all()
+            token_map = {rid: (tin, tout) for rid, tin, tout in agg_rows}
+            for s in summaries:
+                tin, tout = token_map.get(s.id, (None, None))
+                s.tokens_input = int(tin) if tin is not None else 0
+                s.tokens_output = int(tout) if tout is not None else 0
         return RunListResponse(
-            runs=[_enrich_run_summary(r) for r in items],
+            runs=summaries,
             total=total,
         )
 

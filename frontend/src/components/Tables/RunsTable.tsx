@@ -14,6 +14,7 @@ const COLS: SortableColumn[] = [
   { key: 'phase', label: '阶段', sortable: true, width: '110px' },
   { key: 'start_time', label: '开始时间', sortable: true, width: '160px' },
   { key: 'duration', label: '耗时', sortable: false, width: '90px' },
+  { key: 'tokens', label: 'Token 输入/输出', sortable: false, width: '140px', align: 'right' },
   { key: 'total_cases', label: '用例数', sortable: true, width: '80px', align: 'right' },
   { key: 'pass_rate', label: '通过率', sortable: true, width: '160px' },
   { key: 'status', label: '状态', sortable: true, width: '120px' },
@@ -74,6 +75,9 @@ export function RunsTable({ items, sortKey, sortDir, onSort, onDelete, deletingI
                 <td><PhaseBadge phase={r.phase} /></td>
                 <td className="mono">{fmtDate(r.start_time)}</td>
                 <td className="mono">{fmtDurationBetween(r.start_time, r.end_time)}</td>
+                <td align="right" className="mono">
+                  {fmtNum(r.tokens_input ?? 0)}/{fmtNum(r.tokens_output ?? 0)}
+                </td>
                 <td align="right">{fmtNum(r.total_cases)}</td>
                 <td>
                   <RateBar value={r.pass_rate} tone={tone as 'success' | 'warning' | 'danger'} />

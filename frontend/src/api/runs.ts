@@ -82,6 +82,8 @@ function adaptRunDetail(flat: BackendRunDetail): RunDetail {
     status: flat.status,
     progress: flat.progress,
     config_snapshot: flat.config_snapshot,
+    tokens_input: flat.tokens_input ?? null,
+    tokens_output: flat.tokens_output ?? null,
     name: flat.name,
     failed: flat.failed,
     start_time: flat.start_time,
