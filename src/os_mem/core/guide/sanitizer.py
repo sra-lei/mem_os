@@ -7,15 +7,16 @@ card), sensitive values replaced with [REDACTED], keep structured info like
 """
 from __future__ import annotations
 
-from ..infra.logger.logger import get_logger
+from os_mem.infra.logger import get_logger
+from os_mem.infra.p2check import has_pii, mask_pii
 
 _logger = get_logger("os_mem.sanitizer")
 
 
 def sanitize_log(message: str) -> str:
     """Return a PII-redacted version of the log message.
-
-    TODO(user): implement regex rules per 需求文档 v0.1 module 1.1.
+    implement regex rules per 需求文档 v0.1 module 1.1.
     """
-    _logger.debug(f"sanitize_log 未实现（占位）：原样返回 {len(message)} 字符")
+    if has_pii(message):
+        message = mask_pii(message)
     return message

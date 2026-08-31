@@ -53,6 +53,18 @@ class MemService:
             session.refresh(conversation)
             print(f"✅ 已存储对话: {conversation.id} ({len(messages)} 条消息)")
 
+
+     def _expand_turn_with_context(self,
+        messages: List[Message],
+        turn_index: int, 
+        expand_before: int = 3, 
+        expand_after: int = 3
+    ) -> str:
+        """取某个回合前后各 N 个回合，组成一个上下文块"""
+        start = max(0, turn_index - expand_before)
+        end = min(len(messages), turn_index + expand_after + 1)
+        return "\n".join([messages[i].content for i in range(start, end)])
+
      def search_user_memories(self, user_id: str, query: str, top_k: int = 3,) -> List[Memory]:
             """检索用户相关对话"""
             _logger.info(f"检索用户 {user_id} 的记忆: query={query}, top_k={top_k}")
@@ -81,9 +93,10 @@ class MemService:
             memories:List[Memory] = []
             for doc_idx, doc_text, score in results:
                 _logger.info(f"检索结果: {doc_idx}, {messages[doc_idx].masked_text}, {score}")
+                fact = self._expand_turn_with_context(messages, doc_idx, expand_before=1, expand_after=1)
                 memory = Memory(
                     user_id=user_id,
-                    fact=messages[doc_idx].content,
+                    fact=fact,
                     contains_pii=messages[doc_idx].contains_pii,
                     masked_text=messages[doc_idx].masked_text,
                     source_session_id=messages[doc_idx].source_session_id,
