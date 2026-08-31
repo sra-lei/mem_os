@@ -23,4 +23,8 @@ class Message(SQLModel, table=True):
     user_id: str = Field(index=True, nullable=False)
     source_session_id: str = Field(index=True, nullable=False)
     content: str
+    # 新增：PII 标记
+    contains_pii: bool = Field(default=False)  # 是否包含 PII
+    masked_text: str = Field(default="")       # 脱敏后的文本（调试用）
+    
     create_at: datetime = Field(default_factory=datetime.utcnow)

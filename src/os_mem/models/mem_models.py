@@ -17,5 +17,7 @@ class Conversation():
 class Memory():
     user_id: str
     fact: str
+    contains_pii: bool
+    masked_text: str | None
     source_session_id: str
     created_at: datetime

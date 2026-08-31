@@ -8,6 +8,7 @@ from os_mem.entries.mem_models import ConversationMemory, Message
 from os_mem.infra.logger.logger import LoggerHelper, get_logger
 from os_mem.infra.retriever import SimpleBM25, RankBM25
 from os_mem.infra.storage import get_session
+from os_mem.infra.p2check import has_pii, mask_pii
 
 _logger: LoggerHelper = get_logger("StoreService")
 
@@ -28,10 +29,16 @@ class MemService:
                     # 客服(assistant)告知用户，只存 user 会丢失正确答案
                     role = msg.get("role")
                     if role in ("user", "assistant"):
+                        msg_content = msg.get("content")
+                        hasPii = has_pii(msg_content)
                         message = Message(
                             user_id=user_id,
                             source_session_id=conversation.id,
-                            content=msg.get("content"),
+                            content=msg_content,
+                            # 新增字段：PII 标记
+                            contains_pii=hasPii,
+                            # 可选：存一份脱敏后的文本供日志查看
+                            masked_text=mask_pii(msg_content) if hasPii else None,
                             create_at=conversation.started_at,
                         )
                         session.add(message)
@@ -70,13 +77,15 @@ class MemService:
             # bm25 = SimpleBM25(user_contents)
             bm25 = RankBM25(user_contents)
             results = bm25.retrieve(query, top_k)
-            _logger.info(f"BM25 检索结果: {results}")
     
             memories:List[Memory] = []
             for doc_idx, doc_text, score in results:
+                _logger.info(f"检索结果: {doc_idx}, {messages[doc_idx].masked_text}, {score}")
                 memory = Memory(
                     user_id=user_id,
-                    fact=doc_text,
+                    fact=messages[doc_idx].content,
+                    contains_pii=messages[doc_idx].contains_pii,
+                    masked_text=messages[doc_idx].masked_text,
                     source_session_id=messages[doc_idx].source_session_id,
                     created_at=messages[doc_idx].create_at,
                 )
