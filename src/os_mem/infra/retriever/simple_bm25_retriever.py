@@ -8,6 +8,8 @@
 from typing import List
 import math
 
+from os_mem.infra.logger import get_logger
+_logger = get_logger("SimpleBM25")
 # 英文常用停用词（查询与文档统一过滤，避免 what/my/it/set 等词干扰关键词权重）
 _STOPWORDS = {
     "the", "a", "an", "and", "or", "but", "if", "then", "else", "for",
@@ -31,6 +33,7 @@ class SimpleBM25:
     def __init__(self, documents: List[str]):
         self.documents = documents
         self._build_index()
+        _logger.info("SimpleBM25 初始化完成")
 
     @staticmethod
     def _tokenize(text: str) -> List[str]:
@@ -51,7 +54,7 @@ class SimpleBM25:
 
         self.avg_doc_len = sum(self.doc_lengths) / self.corpus_size if self.corpus_size else 1
 
-    def search(self, query: str, top_k: int = 3) -> List[tuple]:
+    def retrieve(self, query: str, top_k: int = 3) -> List[tuple]:
         query_words = self._tokenize(query)
         scores = []
 
@@ -67,7 +70,7 @@ class SimpleBM25:
                 idf = math.log(1 + (self.corpus_size - df + 0.5) / (df + 0.5))
                 tf = tokens.count(w)  # 词频（split 后计数，非子串）
                 score += idf * (tf * 1.5 / (tf + 0.5 + 1.5 * (doc_len / self.avg_doc_len)))
-            scores.append((i, score))
+            scores.append((i, self.documents[i], score))
 
-        scores.sort(key=lambda x: x[1], reverse=True)
+        scores.sort(key=lambda x: x[2], reverse=True)
         return scores[:top_k]

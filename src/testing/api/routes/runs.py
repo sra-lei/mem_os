@@ -279,8 +279,6 @@ def delete_run(run_id: str):
         run = session.get(TestRun, run_id)
         if run is None:
             raise HTTPException(status_code=404, detail="Run not found")
-        if run.status == "running":
-            raise HTTPException(status_code=409, detail="运行中的记录无法删除，请等待完成")
         try:
             res = session.execute(
                 sa_delete(TestCaseResult).where(TestCaseResult.run_id == run_id)

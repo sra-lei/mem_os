@@ -62,8 +62,7 @@ def run_test_suite(
     phase: str = "base",
     config: Optional[dict[str, Any]] = None,
     notes: Optional[str] = None,
-    limit: Optional[int] = None,
-    verbose: bool = False,
+    limit: Optional[int] = None
 ) -> str:
     """Run one test phase; returns the new run_id."""
     config = dict(config or {})

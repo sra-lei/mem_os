@@ -37,7 +37,7 @@ def main() -> None:
     parser.add_argument("--phase", default="base",
                         choices=["base", "multi_session", "proactive"])
     parser.add_argument("--version", default=None, help="defaults by phase")
-    parser.add_argument("--top-k", type=int, default=3)
+    parser.add_argument("--top-k", type=int, default=5)
     parser.add_argument("--threshold", type=float, default=0.7)
     parser.add_argument("--llm", default="mock", help="llm client (mock)")
     parser.add_argument("--memory-provider", default="base",
@@ -64,8 +64,7 @@ def main() -> None:
         phase=args.phase,
         config=config,
         notes=args.notes,
-        limit=args.limit,
-        verbose=args.verbose,
+        limit=args.limit
     )
     print(f"run complete: run_id={run_id}")
     

@@ -6,12 +6,12 @@ from sqlmodel import select
 from os_mem.models.mem_models import Memory
 from os_mem.entries.mem_models import ConversationMemory, Message
 from os_mem.infra.logger.logger import LoggerHelper, get_logger
-from os_mem.infra.retriever.bm25_retriever import SimpleBM25
+from os_mem.infra.retriever import SimpleBM25, RankBM25
 from os_mem.infra.storage import get_session
 
 _logger: LoggerHelper = get_logger("StoreService")
 
-class StoreService:
+class MemService:
      def save_user_memories(self, user_id: str, conversation: ConversationMemory, messages: List[str]) -> None:
         with get_session() as session:
             records = session.exec(
@@ -62,25 +62,21 @@ class StoreService:
                 return []
             _logger.info(f"检索用户 {user_id} 的对话记录: {len(records)} 条, 消息记录: {len(messages)} 条")
             # 构建文档（对话摘要）
-            documents = []
-            # for r in records:
-            #     messages = json.loads(r.messages)
-            #     # 把用户消息拼成文档文本
-            #     user_text = " ".join([m["content"] for m in messages if m.get("role") == "user"])
-            #     documents.append(user_text)
+            user_contents = []
             for msg in messages:
-                documents.append(msg.content)
-            _logger.info(f"构建文档: {len(documents)} 条")
+                user_contents.append(msg.content)
+            _logger.info(f"构建文档: {len(user_contents)} 条")
             # BM25 检索
-            bm25 = SimpleBM25(documents)
-            results = bm25.search(query, top_k)
+            # bm25 = SimpleBM25(user_contents)
+            bm25 = RankBM25(user_contents)
+            results = bm25.retrieve(query, top_k)
             _logger.info(f"BM25 检索结果: {results}")
     
             memories:List[Memory] = []
-            for doc_idx, score in results:
+            for doc_idx, doc_text, score in results:
                 memory = Memory(
                     user_id=user_id,
-                    fact=documents[doc_idx],
+                    fact=doc_text,
                     source_session_id=messages[doc_idx].source_session_id,
                     created_at=messages[doc_idx].create_at,
                 )
@@ -89,5 +85,5 @@ class StoreService:
             return memories
 
 
-def get_store_service() -> StoreService:
-    return StoreService()
+def get_store_service() -> MemService:
+    return MemService()

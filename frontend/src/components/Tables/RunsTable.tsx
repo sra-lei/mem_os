@@ -97,7 +97,7 @@ export function RunsTable({ items, sortKey, sortDir, onSort, onDelete, deletingI
                     <Link to={`/runs/${r.id}`}>
                       <Button variant="ghost" size="sm">详情</Button>
                     </Link>
-                    {onDelete && r.status !== 'running' ? (
+                    {onDelete && (
                       <Button
                         variant="danger"
                         size="sm"
@@ -106,7 +106,7 @@ export function RunsTable({ items, sortKey, sortDir, onSort, onDelete, deletingI
                       >
                         删除
                       </Button>
-                    ) : null}
+                    )}
                   </div>
                 </td>
               </tr>
