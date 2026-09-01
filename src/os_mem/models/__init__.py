@@ -1,3 +1,3 @@
-from .mem_models import Conversation, Memory
+from .mem_models import Conversation, Memory, MemoryFact, MemoryFacts
 
-__all__ = ["Conversation", "Memory"]
+__all__ = ["Conversation", "Memory", "MemoryFact", "MemoryFacts"]

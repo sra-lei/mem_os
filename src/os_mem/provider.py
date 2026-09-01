@@ -43,12 +43,13 @@ class MemoryProvider(Protocol):
         """Return the top-k most relevant memories for the user's query."""
         ...
 
-from os_mem.core.mem_provider import BaseProvider,FullTextProvider  # noqa: E402
+from os_mem.core.mem_provider import BaseProvider,FullTextProvider, StructProvider  # noqa: E402
 
 # Registered provider names -> factory.
 _PROVIDER_REGISTRY: dict[str, type] = {
     "full": FullTextProvider,
     "base": BaseProvider,
+    "struct": StructProvider,
 }
 
 def build_memory_provider(name: str, user_id: str, **kwargs) -> MemoryProvider:

@@ -12,14 +12,14 @@ from os_mem.infra.p2check import has_pii, mask_pii
 
 _logger: LoggerHelper = get_logger("StoreService")
 
-class MemService:
-     def save_user_memories(self, user_id: str, conversation: ConversationMemory, messages: List[str]) -> None:
+class NoteMemService:
+     def save_user_memories(self, conversation: ConversationMemory, messages: List[str]) -> None:
         with get_session() as session:
             records = session.exec(
-                select(ConversationMemory).where(ConversationMemory.user_id == user_id and ConversationMemory.source_session_id == conversation.source_session_id)
+                select(ConversationMemory).where(ConversationMemory.user_id == conversation.user_id and ConversationMemory.source_session_id == conversation.source_session_id)
             ).all()
             if records:
-                _logger.warning(f"用户 {user_id} 的会话 {conversation.source_session_id} 已存在，跳过存储")
+                _logger.warning(f"用户 {conversation.user_id} 的会话 {conversation.source_session_id} 已存在，跳过存储")
                 return
             
             for m in messages:
@@ -65,7 +65,7 @@ class MemService:
         end = min(len(messages), turn_index + expand_after + 1)
         return "\n".join([messages[i].content for i in range(start, end)])
 
-     def search_user_memories(self, user_id: str, query: str, top_k: int = 3,) -> List[Memory]:
+     def search_user_memories(self, user_id: str, query: str, top_k: int = 3) -> List[Memory]:
             """检索用户相关对话"""
             _logger.info(f"检索用户 {user_id} 的记忆: query={query}, top_k={top_k}")
             with get_session() as session:
@@ -106,6 +106,8 @@ class MemService:
 
             return memories
 
-
-def get_store_service() -> MemService:
-    return MemService()
+_note_mem_service = None
+def get_note_mem_service() -> NoteMemService:
+    if _note_mem_service is None:
+        _note_mem_service = NoteMemService()
+    return _note_mem_service

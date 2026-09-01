@@ -1,12 +1,11 @@
 import json
 from typing import List
 
-from os_mem.models.mem_models import Conversation, Memory
-from os_mem.core.services.mem_store_service import get_store_service
-from os_mem.entries.mem_models import ConversationMemory, Message
+from os_mem.models.mem_models import Conversation
+from os_mem.core.services.note_mem_service import get_note_mem_service
+from os_mem.entries.mem_models import ConversationMemory
 
 from os_mem.infra.logger.logger import get_logger
-from os_mem.infra.storage.mem_storage import get_session
 
 # TODO(user): 剩余实现问题（运行时才暴露，属于记忆系统实现部分）：
 #   1. _logger(f"...") 是函数调用写法，应为 _logger.info(f"...")
@@ -22,7 +21,7 @@ class BaseProvider():
     
     def __init__(self, user_id: str):
         self.user_id = user_id
-        self.store = get_store_service()
+        self.store = get_note_mem_service()
    
     def ingest(self, conversation: Conversation) -> None:
         _logger.info(f"  存储记忆: start")
