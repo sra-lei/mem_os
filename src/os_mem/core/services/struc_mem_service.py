@@ -12,6 +12,8 @@ from os_mem.infra.storage import MemoryVectorStore, Vectorizer, get_memory_vecto
 from os_mem.infra.llm.llm_client import get_llm_client, LLMClient
 from os_mem.models import Conversation
 from os_mem.models.mem_models import MemoryFact, MemoryFacts
+from os_mem.configs import memory_settings
+
 
 _logger = get_logger("StrucMemStoreService")
 ALLOWED_CATEGORIES = ["personal", "contact", "preference", "health", "travel", "work", "finance", "family", "education", "other"]
@@ -58,7 +60,7 @@ class StructuredMemService:
             return []
 
     # 新增提取器
-    def _chunk_dialog(self, dialog_text: str, max_chars: int = 2000, overlap: int = 5) -> List[str]:
+    def _chunk_dialog(self, dialog_text: str, max_chars: int = 8000, overlap: int = 5) -> List[str]:
         """把长对话按消息分段：每段 < max_chars 字符，段间保留 overlap 条消息冗余。
 
         冗余（重叠）保证落在分段边界附近的信息不被切掉，两边都能提取到。
@@ -120,7 +122,11 @@ class StructuredMemService:
         }
         """
         dialog_text = "\n".join([item for item in conversation.messages])
-        chunks = self._chunk_dialog(dialog_text, max_chars=2000, overlap=5)
+        chunks = self._chunk_dialog(
+            dialog_text,
+            max_chars=memory_settings.DEEPSEEK_EXTRACT_MAX_CHARS,
+            overlap=memory_settings.DEEPSEEK_EXTRACT_OVERLAP,
+        )
         if len(chunks) <= 1:
             # 短对话：单次提取（原有重试 + 降级）
             facts = self._extract_chunk(dialog_text, retries)

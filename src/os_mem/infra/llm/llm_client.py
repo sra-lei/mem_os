@@ -6,15 +6,24 @@ from os_mem.configs.mem_settings import memory_settings
 SYSTEM_PROMPT = """
 你是一个信息提取助手。从以下对话中提取值得长期记忆的事实。
 
-## 对话内容
-{dialog_text}
+## 提取标准（什么值得提取）
+只提取**用户明确陈述的、持久的、对未来交互有价值**的信息，例如：
+- 身份与联系方式：姓名、生日、地址、电话、邮箱
+- 账户/财务：账号、卡号、路由号、余额、转账设置（如"用户支票账户号码是 4429853327"）
+- 偏好：座位、饮食、沟通方式、旅行习惯
+- 健康、工作、家庭、教育等长期事实
+
+**不要提取**：
+- 客服客套话（"好的，我记下了"、"还有什么需要帮助吗"）
+- 瞬时/无长期价值的信息（"今天天气不错"、临时决定）
+- 与用户无关的信息
 
 ## 提取规则
 1. 每条事实独立成句，格式为 "用户 ..."
 2. category 必须从以下列表中选取：
    personal, contact, preference, health, travel, work, finance, family, education, other
 3. key 是字段名（如 'email', 'seat_preference', 'checking_account_number'）
-4. 最多提取 10 条
+4. 按上述标准尽量提取（宁多勿漏），不要遗漏关键信息；最多 {max_facts} 条（防失控保险）
 
 ## 输出格式（必须输出 JSON 对象，facts 为数组）
 {
@@ -49,7 +58,9 @@ class LLMClient:
             resp = self.client.chat.completions.create(
                 model=memory_settings.DEEPSEEK_MODEL,
                 messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "system", "content": SYSTEM_PROMPT.replace(
+                        "{max_facts}", str(memory_settings.DEEPSEEK_EXTRACT_MAX_FACTS),
+                    )},
                     {"role": "user", "content": f"请从以下对话中提取结构化事实：\n\n{dialog_text}"}
                 ],
                 response_format={"type": "json_object"},
