@@ -1,5 +1,6 @@
 import json
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import List
 
@@ -141,11 +142,16 @@ class StructuredMemService:
                 confidence=0.1
             )]
 
-        # 长对话：分段提取，每段独立调用 LLM，结果合并去重
+        # 长对话：分段提取，每段独立调用 LLM（并行），结果合并去重
         all_facts: List[MemoryFact] = []
-        for i, chunk in enumerate(chunks, 1):
-            _logger.info(f"提取分段 {i}/{len(chunks)}（{len(chunk)} 字符）")
-            all_facts.extend(self._extract_chunk(chunk, retries))
+        _logger.info(f"分段提取开始: {len(chunks)} 段（并行 {min(4, len(chunks))} 路）")
+        with ThreadPoolExecutor(max_workers=min(4, len(chunks))) as pool:
+            futures = {pool.submit(self._extract_chunk, chunk, retries): i
+                       for i, chunk in enumerate(chunks, 1)}
+            for fut in as_completed(futures):
+                i = futures[fut]
+                _logger.info(f"提取分段 {i}/{len(chunks)} 完成")
+                all_facts.extend(fut.result())
         deduped = self._dedup_facts(all_facts)
         if not deduped:
             _logger.error("全部分段提取失败，降级存储原始对话")
@@ -180,8 +186,9 @@ class StructuredMemService:
     def add_structured_memory(self, conversation: Conversation):
         conv_facts: List[MemoryFact] = self._extract_structured_facts(conversation)
 
-        records: list[dict] = []      # 向量库记录（dict）
-        embeddings: list[list[float]] = []
+        # 逐个 embed → 改为批量 embed（DashScope 单批上限 10，自动折半重试）
+        records: list[dict] = []
+        texts: list[str] = []
         for conv_fact in conv_facts:
             records.append({
                 "id": uuid.uuid4().hex,
@@ -192,7 +199,8 @@ class StructuredMemService:
                 "user_id": conversation.user_id,
                 "updated_at": datetime.utcnow().isoformat(),
             })
-            embeddings.append(self.vectorizer.embed(conv_fact.fact))
+            texts.append(conv_fact.fact)
+        embeddings: list[list[float]] = self.vectorizer.embed_batch(texts) if texts else []
 
         if records:
             self.vector_store.add_structured_memories(records, embeddings)

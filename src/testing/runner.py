@@ -62,9 +62,13 @@ def run_test_suite(
     phase: str = "base",
     config: Optional[dict[str, Any]] = None,
     notes: Optional[str] = None,
-    limit: Optional[int] = None
+    limit: Optional[int] = None,
+    case_ids: Optional[list[str]] = None,
 ) -> str:
-    """Run one test phase; returns the new run_id."""
+    """Run one test phase; returns the new run_id.
+
+    case_ids: 只跑指定用例（如 ['layer1_05_internet_service']），调试单条用。
+    """
     config = dict(config or {})
     phase = phase.lower()
     version = version or PHASE_TO_VERSION.get(phase, "v0.1")
@@ -75,6 +79,9 @@ def run_test_suite(
     mem_name = str(config.get("memory_provider", "stub"))
 
     cases = _storeService.load_cases(phase)
+    if case_ids:
+        wanted = set(case_ids)
+        cases = [c for c in cases if c.case_id in wanted]
     if limit:
         cases = cases[:limit]
     run_id = f"run_{uuid.uuid4().hex[:10]}"

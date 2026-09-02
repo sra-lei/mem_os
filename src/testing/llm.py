@@ -56,16 +56,19 @@ class MockLLM:
 
 SYSTEM_PROMPT = '''
 # 角色
-你是一个严肃认真的中文助手，请务必保持礼貌和专业，用中文回答客户的问题。
-## 任务
-给定用户记忆信息和用户问题，生成一个答案。
+你是一个具备用户长期记忆的客服助手，负责用用户的记忆档案回答当前问题。
+
+## 回答依据
+- 记忆档案（system 中随对话给出）是用户历史提供过的真实信息，是权威答案来源。
+- 用户问题：用户当前询问的内容。
+
 ## 规则
-1. 答案必须基于用户记忆信息和用户问题。
-2. 答案必须用中文。
-3. 答案必须详细且准确。
-4. 答案必须避免使用敏感词和不当语言。
-5. 答案必须尊重用户隐私。
-6. 如果根据用户记忆信息无法生成答案，请返回"对不起，我无法回答这个问题。"
+1. 记忆档案中明确出现的信息（账号/卡号/路由号/日期/金额/号码/姓名/偏好等）必须直接采用；
+   档案里有的信息，严禁回答"没有记录 / 无法提供 / 信息缺失"。
+2. 回答要完整覆盖问题涉及的所有要点；若问题隐含多项信息（如"账户和路由号"），尽量全部给出。
+3. 仅当记忆档案完全不包含相关信息时，才如实说明"记忆中没有该信息"，并可引用档案中最相关的部分协助用户。
+4. 严禁编造档案中不存在的信息；数值/号码不确定时不要虚构。
+5. 用中文回答，礼貌、专业、简洁直接。
 '''
 
 class DeepSeekLLM:
@@ -78,11 +81,13 @@ class DeepSeekLLM:
         )
 
     def complete(self, memories: str, user: str) -> Completion:
+        # 记忆档案放进 system（作为权威背景资料），不要放 assistant 消息——
+        # 否则模型会当成"自己说过的话"而非"用户的记忆"，容易忽视/否认
+        system = SYSTEM_PROMPT + f"\n\n{memories}"
         resp = self.client.chat.completions.create(
             model=settings.DEEPSEEK_MODEL,
             messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "assistant", "content": memories},
+                {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
         )

@@ -44,6 +44,8 @@ def main() -> None:
                         help="memory provider (base | your os_mem implementation)")
     parser.add_argument("--judge", default="mock", help="judge (mock)")
     parser.add_argument("--limit", type=int, default=None, help="run first N cases")
+    parser.add_argument("--case", default=None,
+                        help="只跑指定用例（逗号分隔，如 layer1_05_internet_service）")
     parser.add_argument("--notes", default=None)
     parser.add_argument("--verbose", "-v", action="store_true",
                         help="print per-case progress, answers and errors")
@@ -59,12 +61,14 @@ def main() -> None:
     version = args.version or PHASE_TO_VERSION.get(args.phase, "v0.1")
 
     print(f"running phase={args.phase} version={version} config={config}")
+    case_ids = [c.strip() for c in args.case.split(",")] if args.case else None
     run_id = run_test_suite(
         version=version,
         phase=args.phase,
         config=config,
         notes=args.notes,
-        limit=args.limit
+        limit=args.limit,
+        case_ids=case_ids,
     )
     print(f"run complete: run_id={run_id}")
     

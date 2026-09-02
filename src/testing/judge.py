@@ -69,8 +69,8 @@ class MoonshotJudgeProvider(Protocol):
     """Grades one answer. Note: it receives the RUBRIC (evaluation_criteria),
     not a fixed expected answer string."""
 
-    # 账号组织级 RPM=3（每分钟最多 3 次请求）→ 调用间隔至少 20s，否则必被 429
-    _MIN_INTERVAL_SECONDS = 20.0
+    # 请求节流：读配置 MOONSHOT_MIN_INTERVAL（RPM=3 时代曾需 20s；
+    # 充值/升配额后调小，如 RPM=60 → 1s）。空等时间由配置控制。
     _last_call: float = 0.0
 
     def __init__(self) -> None:
@@ -81,9 +81,13 @@ class MoonshotJudgeProvider(Protocol):
         )
 
     @classmethod
+    def _min_interval(cls) -> float:
+        return getattr(settings, "MOONSHOT_MIN_INTERVAL", 1.0)
+
+    @classmethod
     def _throttle(cls) -> None:
-        """请求节流：保证调用间隔 >= RPM 窗口所需的最小间隔。"""
-        wait = cls._MIN_INTERVAL_SECONDS - (time.monotonic() - cls._last_call)
+        """请求节流：保证调用间隔 >= 配置的最小间隔（防 429）。"""
+        wait = cls._min_interval() - (time.monotonic() - cls._last_call)
         if wait > 0:
             time.sleep(wait)
         cls._last_call = time.monotonic()

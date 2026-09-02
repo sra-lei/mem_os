@@ -21,6 +21,9 @@ class Setting(BaseSettings):
     MOONSHOT_BASE_URL: str = "https://api.moonshot.cn/v1"
     MOONSHOT_API_KEY: str | None = None
     MOONSHOT_MODEL: str = "kimi-k3"
+    # judge 请求最小间隔（秒）：RPM=3 时代需 20s；充值/升配额后调小
+    # （如 RPM=60 → 1.0s；若仍 429 再调大）
+    MOONSHOT_MIN_INTERVAL: float = Field(default=1.0, ge=0)
 
     # ------------------------------------------------------------------
     # DeepSeek — used by testing.llm.DeepSeekLLM as the answer generator
