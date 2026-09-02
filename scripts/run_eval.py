@@ -37,7 +37,9 @@ def main() -> None:
     parser.add_argument("--phase", default="base",
                         choices=["base", "multi_session", "proactive"])
     parser.add_argument("--version", default=None, help="defaults by phase")
-    parser.add_argument("--top-k", type=int, default=5)
+    parser.add_argument("--top-k", type=int, default=None,
+                        help="retrieval top-k；缺省时 base/bm25 用 5（保持与 40% 基线可比），"
+                             "struct 用 15（fact 粒度细，需要更宽注入）")
     parser.add_argument("--threshold", type=float, default=0.7)
     parser.add_argument("--llm", default="mock", help="llm client (mock)")
     parser.add_argument("--memory-provider", default="base",
@@ -51,8 +53,11 @@ def main() -> None:
                         help="print per-case progress, answers and errors")
     args = parser.parse_args()
 
+    top_k = args.top_k if args.top_k is not None else (
+        15 if args.memory_provider == "struct" else 5
+    )
     config = {
-        "top_k": args.top_k,
+        "top_k": top_k,
         "judge_threshold": args.threshold,
         "llm_provider": args.llm,
         "memory_provider": args.memory_provider,
