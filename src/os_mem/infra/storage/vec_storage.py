@@ -7,7 +7,6 @@ fact 向量化，category/key/value/user_id/updated_at 作为元数据。
 """
 from typing import Any
 
-from loguru import logger
 from pymilvus import (
     AnnSearchRequest,
     DataType,
@@ -19,6 +18,9 @@ from pymilvus import (
 from pymilvus.exceptions import MilvusException
 
 from os_mem.configs.mem_settings import memory_settings
+from os_mem.infra.logger import get_logger
+
+_logger = get_logger("os_mem.storage")
 # =========================================================================== #
 #  MemOS：mem_os collection —— StructuredMemory 向量化存储
 #
@@ -39,7 +41,7 @@ class MemoryVectorStore:
             uri=memory_settings.MILVUS_URI,
             token=memory_settings.MILVUS_API_KEY,
         )
-        logger.info(f"MemoryVectorStore 初始化完成 | collection={self.collection_name} dim={self.dim}")
+        _logger.info(f"MemoryVectorStore 初始化完成 | collection={self.collection_name} dim={self.dim}")
 
     # ------------------------------------------------------------------ #
     #  建集合：id + vector(fact embedding) + sparse(BM25) + 元数据显式字段
@@ -61,7 +63,7 @@ class MemoryVectorStore:
                     )
                 return
         except MilvusException as e:
-            logger.error(f"[Milvus] 检测集合 {self.collection_name} 失败: {e}")
+            _logger.error(f"[Milvus] 检测集合 {self.collection_name} 失败: {e}")
             raise
 
         schema = self.client.create_schema(auto_id=False, enable_dynamic_field=True)
@@ -114,10 +116,10 @@ class MemoryVectorStore:
             )
             self.client.load_collection(self.collection_name)
         except MilvusException as e:
-            logger.error(f"[Milvus] 创建 mem_os 集合失败: {e}")
+            _logger.error(f"[Milvus] 创建 mem_os 集合失败: {e}")
             raise RuntimeError(f"创建 Milvus collection {self.collection_name} 失败: {e}") from e
 
-        logger.info(
+        _logger.info(
             f"[Milvus] mem_os collection 创建完成"
             f"（dense AUTOINDEX/COSINE + sparse BM25, dim={self.dim}）"
         )
@@ -158,10 +160,10 @@ class MemoryVectorStore:
             self.client.insert(collection_name=self.collection_name, data=records)
             self.client.flush(collection_name=self.collection_name)
         except MilvusException as e:
-            logger.error(f"[Milvus] 写入 StructuredMemory 失败: {e}")
+            _logger.error(f"[Milvus] 写入 StructuredMemory 失败: {e}")
             raise
 
-        logger.info(f"写入 {len(records)} 条 StructuredMemory → mem_os")
+        _logger.info(f"写入 {len(records)} 条 StructuredMemory → mem_os")
         return len(records)
 
     # ------------------------------------------------------------------ #
@@ -260,7 +262,7 @@ class MemoryVectorStore:
                     return int(rc)
             return -1
         except (MilvusException, AttributeError, TypeError, ValueError) as e:
-            logger.warning(f"[Milvus] count(mem_os) 失败: {e}")
+            _logger.warning(f"[Milvus] count(mem_os) 失败: {e}")
             return -1
 
 

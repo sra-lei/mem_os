@@ -47,6 +47,7 @@ frontend/dist/
 .DS_Store
 Thumbs.db
 *.log
+logs/
 .tmp/
 .temp/
 *.swp
