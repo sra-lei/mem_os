@@ -41,7 +41,7 @@ class BaseProvider():
             ended_at=conversation.ended_at,
             message_count=len(messages),
         )
-        self.store.save_user_memories(user_id=self.user_id, conversation=memory, messages=messages)
+        self.store.save_user_memories(conversation=memory, messages=messages)
         _logger.info(f"  存储记忆: 完成")
 
     def retrieve(self, query: str, top_k: int = 3) -> str:

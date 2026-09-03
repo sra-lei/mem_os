@@ -16,7 +16,10 @@ class NoteMemService:
      def save_user_memories(self, conversation: ConversationMemory, messages: List[str]) -> None:
         with get_session() as session:
             records = session.exec(
-                select(ConversationMemory).where(ConversationMemory.user_id == conversation.user_id and ConversationMemory.source_session_id == conversation.source_session_id)
+                select(ConversationMemory).where(
+                    (ConversationMemory.user_id == conversation.user_id)
+                    & (ConversationMemory.source_session_id == conversation.source_session_id)
+                )
             ).all()
             if records:
                 _logger.warning(f"用户 {conversation.user_id} 的会话 {conversation.source_session_id} 已存在，跳过存储")
@@ -32,8 +35,8 @@ class NoteMemService:
                         msg_content = msg.get("content")
                         hasPii = has_pii(msg_content)
                         message = Message(
-                            user_id=user_id,
-                            source_session_id=conversation.id,
+                            user_id=conversation.user_id,
+                            source_session_id=conversation.source_session_id,
                             content=msg_content,
                             # 新增字段：PII 标记
                             contains_pii=hasPii,
@@ -108,6 +111,7 @@ class NoteMemService:
 
 _note_mem_service = None
 def get_note_mem_service() -> NoteMemService:
+    global _note_mem_service
     if _note_mem_service is None:
         _note_mem_service = NoteMemService()
     return _note_mem_service
