@@ -7,10 +7,17 @@ from typing import List
 
 from openai import OpenAI
 from pydantic import ValidationError
+from sqlmodel import select
 
 from os_mem.entries.mem_models import StructuredMemory
 from os_mem.infra.logger import get_logger
-from os_mem.infra.storage import MemoryVectorStore, Vectorizer, get_memory_vector_store, get_vectorizer
+from os_mem.infra.storage import (
+    MemoryVectorStore,
+    Vectorizer,
+    get_memory_vector_store,
+    get_session,
+    get_vectorizer,
+)
 from os_mem.infra.llm.llm_client import get_llm_client, LLMClient
 from os_mem.models import Conversation
 from os_mem.models.mem_models import MemoryFact, MemoryFacts
@@ -233,23 +240,55 @@ class StructuredMemService:
         _logger.info(f"分段提取完成: {len(all_facts)} 条（去重后 {len(deduped)} 条）")
         return deduped
 
-    def _resolve_conflict(self, existing: StructuredMemory, new: StructuredMemory) -> StructuredMemory:
+    @staticmethod
+    def save_structured_memories_to_sqlite(
+        user_id: str,
+        source_conversation_id: str,
+        facts: List[MemoryFact],
+    ) -> int:
+        """把结构化事实落库到 SQLite ``struct_memories`` 表（与向量库双写）。
+
+        冲突检测（v0.2 变更 2.3）：同一 ``(user_id, category, key)`` 已有记录则
+        UPDATE —— 新值覆盖，旧值归档到 ``previous_fact``；否则 INSERT。
+
+        纯本地落库，与 Milvus / LLM / 向量化解耦，供审计、回溯以及向量库重建兜底。
+        返回本次写入（INSERT + UPDATE）的条数。
         """
-        同一 (user_id, category, key) 出现不同 value：
-        - 检查 timestamp：取最新的
-        - 检查 confidence：取最高的
-        - 保留历史：存到 previous_values 字段
-        """
-        memories = []
-        if existing.user_id == new.user_id and existing.category == new.category and existing.key == new.key:
-            if(existing.timestamp < new.timestamp or existing.confidence < new.confidence) :
-                new.previous_fact = existing.fact
-                memories.append(new)
-        if memories:
-            with get_session() as session:
-                session.add_all(memories)
-                session.commit()
-                session.refresh(memories)
+        if not facts:
+            return 0
+        now = datetime.utcnow()
+        written = 0
+        with get_session() as session:
+            for f in facts:
+                existing = session.exec(
+                    select(StructuredMemory).where(
+                        StructuredMemory.user_id == user_id,
+                        StructuredMemory.category == f.category,
+                        StructuredMemory.key == f.key,
+                    )
+                ).first()
+                if existing is not None:
+                    # 冲突：新值覆盖，旧值归档到 previous_fact
+                    existing.previous_fact = existing.fact
+                    existing.fact = f.fact
+                    existing.value = f.value
+                    existing.confidence = f.confidence
+                    existing.source_conversation_id = source_conversation_id
+                    existing.updated_at = now
+                    session.add(existing)
+                else:
+                    session.add(StructuredMemory(
+                        user_id=user_id,
+                        fact=f.fact,
+                        category=f.category,
+                        key=f.key,
+                        value=f.value,
+                        confidence=f.confidence,
+                        source_conversation_id=source_conversation_id,
+                    ))
+                written += 1
+            session.commit()
+        return written
 
     def add_structured_memory(self, conversation: Conversation):
         llm_facts: List[MemoryFact] = self._extract_structured_facts(conversation)
@@ -261,6 +300,15 @@ class StructuredMemService:
         conv_facts = self._dedup_facts(llm_facts + fallback_facts)
         if len(fallback_facts):
             _logger.info(f"  数字兜底补充: {len(fallback_facts)} 条（LLM {len(llm_facts)} → 合并 {len(conv_facts)}）")
+
+        # SQLite 双写：结构化事实同步落库（审计/回溯 + 向量库重建兜底）。
+        # 本地落库先于向量写入，保证即便 Milvus 写入失败，记忆仍持久化在 SQLite。
+        sqlite_written = self.save_structured_memories_to_sqlite(
+            user_id=conversation.user_id,
+            source_conversation_id=conversation.id or conversation.source_session_id or "",
+            facts=conv_facts,
+        )
+        _logger.info(f"  落库 SQLite struct_memories: {sqlite_written} 条")
 
         # 逐个 embed → 改为批量 embed（DashScope 单批上限 10，自动折半重试）
         records: list[dict] = []

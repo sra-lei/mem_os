@@ -1,35 +1,44 @@
-"""单独测试混合检索：用 layer1 各用例的 user_question 检索 mem_os 向量库。
+"""手动真实验证：混合检索召回调试（连真实 mem_os 向量库，需 .env 配置）。
 
 目的：排查评测通过率低是否出在"检索环节"——直接看每条用例能召回到什么事实，
 以及期望答案里的关键信息（数字/账号等）有没有被召回。
 
+注意：本文件是手动验证脚本（需在线 Milvus + embedding），不是 pytest 用例，
+已由 tests/conftest.py 的 collect_ignore 排除收集。
+
 用法：
-    uv run python -m scripts.test_hybrid_retrieval            # 全部 20 条
-    uv run python -m scripts.test_hybrid_retrieval --limit 5  # 前 5 条
-    uv run python -m scripts.test_hybrid_retrieval --case layer1_01_bank_account
+    uv run python tests/test_hybrid_retrieval.py                # 全部 20 条
+    uv run python tests/test_hybrid_retrieval.py --limit 5      # 前 5 条
+    uv run python tests/test_hybrid_retrieval.py --case layer1_01_bank_account
 """
 from __future__ import annotations
 
 import argparse
 import re
+import sys
 from pathlib import Path
 
 import yaml
 
-from os_mem.infra.storage import get_memory_vector_store
-from os_mem.infra.storage.vectorizer import get_vectorizer
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
-TEST_DIR = Path("tests/test_cases/layer1")
+from os_mem.infra.storage import get_memory_vector_store  # noqa: E402
+from os_mem.infra.storage.vectorizer import get_vectorizer  # noqa: E402
+
+TEST_DIR = ROOT / "tests" / "test_cases" / "layer1"
 
 
 def load_cases() -> list[dict]:
     cases = []
     for p in sorted(TEST_DIR.glob("*.yaml")):
         data = yaml.safe_load(p.read_text(encoding="utf-8"))
+        expected = data.get("expected_behavior") or data.get("evaluation_criteria", "")
         cases.append({
             "case_id": data["test_id"],
             "question": data.get("user_question", ""),
-            "expected": data.get("expected_behavior") or data.get("evaluation_criteria", ""),
+            "expected": expected,
             "source": p.name,
         })
     return cases
@@ -77,23 +86,30 @@ def main() -> None:
             print("   ❌ 检索 0 条命中")
             continue
         for h in hits:
-            print(f"   [{h['distance']:.3f}] {h.get('category','?')}/{h.get('key','?')}: "
-                  f"{(h.get('fact') or '')[:80]}")
+            label = (
+                f"[{h['distance']:.3f}] "
+                f"{h.get('category', '?')}/{h.get('key', '?')}"
+            )
+            print(f"   {label}: {(h.get('fact') or '')[:80]}")
 
         # 期望答案里的关键数字是否被召回
         nums = key_numbers(c["expected"])
         if nums:
             hit_text = " ".join(h.get("fact") or "" for h in hits)
             found = [n for n in nums if n in hit_text]
+            missing = [n for n in nums if n not in hit_text]
             total_num += len(nums)
             total_hit += len(found)
             mark = "✅" if found else "❌"
-            print(f"   {mark} 期望关键数字 {len(found)}/{len(nums)} 被召回: "
-                  f"{[n for n in nums if n in hit_text]} 缺失: {[n for n in nums if n not in hit_text]}")
+            print(
+                f"   {mark} 期望关键数字 {len(found)}/{len(nums)} 被召回: "
+                f"{found} 缺失: {missing}"
+            )
         print()
 
     if total_num:
-        print(f"汇总: 关键数字召回率 {total_hit}/{total_num} = {total_hit/total_num:.0%}")
+        rate = f"{total_hit / total_num:.0%}"
+        print(f"汇总: 关键数字召回率 {total_hit}/{total_num} = {rate}")
 
 
 if __name__ == "__main__":

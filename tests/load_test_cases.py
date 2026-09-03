@@ -3,8 +3,11 @@
 Idempotent: re-running updates existing definitions (keyed by test_id),
 so it is safe to run after YAML edits.
 
+Seeds the Dashboard 用例库 (test_case_definitions)。评测本身直接读 YAML，
+不依赖本步骤；仅在需要让 EvalView 用例库/回放可见时执行。
+
 Usage:
-    python -m scripts.load_test_cases
+    uv run python tests/load_test_cases.py
 """
 from __future__ import annotations
 
@@ -109,7 +112,8 @@ def _ensure_columns() -> None:
                 print(f"  migrated: added column {col}")
         for col in DROPPED_COLUMNS:
             if col in existing:
-                conn.execute(text(f"ALTER TABLE test_case_definitions DROP COLUMN {col}"))
+                sql = f"ALTER TABLE test_case_definitions DROP COLUMN {col}"
+                conn.execute(text(sql))
                 print(f"  migrated: dropped column {col}")
 
 
@@ -131,8 +135,10 @@ def load_all() -> int:
             # YAMLs without expected_behavior get a summary derived from the
             # rubric (41/60 cases); tags are derived from the title (all cases).
             if not expected_behavior:
-                expected_behavior = _derive_expected_answer(data.get("evaluation_criteria") or "")
-            tags = json.dumps(_derive_tags(str(data.get("title") or data["test_id"])), ensure_ascii=False)
+                criteria = data.get("evaluation_criteria") or ""
+                expected_behavior = _derive_expected_answer(criteria)
+            title = str(data.get("title") or data["test_id"])
+            tags = json.dumps(_derive_tags(title), ensure_ascii=False)
 
             case = session.get(TestCaseDefinition, data["test_id"])
             if case is None:

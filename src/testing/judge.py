@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass
-from typing import Optional, Protocol
+from typing import Protocol
 
 from openai import OpenAI
 
@@ -23,8 +23,8 @@ from testing.config import settings
 class JudgeResult:
     score: float            # 0.0 ~ 1.0
     passed: bool
-    reasoning: Optional[str] = None
-    error: Optional[str] = None
+    reasoning: str | None = None
+    error: str | None = None
 
 class JudgeProvider(Protocol):
     """Grades one answer. Note: it receives the RUBRIC (evaluation_criteria),
@@ -32,7 +32,7 @@ class JudgeProvider(Protocol):
     def evaluate(
         self,
         query: str,
-        criteria: Optional[str],
+        criteria: str | None,
         actual: str,
     ) -> JudgeResult:
         ...
@@ -95,16 +95,15 @@ class MoonshotJudgeProvider(Protocol):
     def evaluate(
         self,
         query: str,
-        criteria: Optional[str],
+        criteria: str | None,
         actual: str,
     ) -> JudgeResult:
         try:
             self._throttle()
+            prompt = SYSTEM_PROMPT.format(criteria=criteria, query=query, actual=actual)
             completion = self.client.chat.completions.create(
                 model=settings.MOONSHOT_MODEL,
-                messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT.format(criteria=criteria, query=query, actual=actual)},
-                ],
+                messages=[{"role": "system", "content": prompt}],
                 response_format={
                     "type": "json_schema",
                     "json_schema": {
@@ -141,36 +140,12 @@ class MoonshotJudgeProvider(Protocol):
 
 
 
-class MockJudge:
-    """Placeholder judge: fixed score, always fails above threshold 0.
+def build_judge(name: str = "moonshot", threshold: float = 0.7) -> JudgeProvider:
+    """Judge 工厂（真实链路，无 mock）。
 
-    Replace with a real LLM-as-Judge by implementing JudgeProvider and
-    registering it in build_judge(). A real judge prompt should instruct the
-    model to check the answer against every requirement in `criteria`.
+    threshold 保留在签名里以兼容历史调用；Moonshot 判分的通过与否由模型
+    按其输出决定，本地阈值仅 assert 判定使用。
     """
-
-    name = "mock"
-
-    def __init__(self, fixed_score: float = 0.5):
-        self._fixed_score = fixed_score
-
-    def evaluate(
-        self,
-        query: str,
-        criteria: Optional[str],
-        actual: str,
-    ) -> JudgeResult:
-        return JudgeResult(
-            score=self._fixed_score,
-            passed=False,
-            reasoning="mock judge: 固定分数，未接入真实判分模型",
-        )
-
-
-def build_judge(name: str, threshold: float = 0.7) -> JudgeProvider:
-    """Factory used by the runner/CLI. Register your real judge here."""
-    if name == "mock":
-        return MockJudge()
-    elif name == "moonshot":
+    if name == "moonshot":
         return MoonshotJudgeProvider()
-    raise ValueError(f"unknown judge: {name!r} (available: mock)")
+    raise ValueError(f"unknown judge: {name!r} (available: moonshot)")

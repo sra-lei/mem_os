@@ -16,7 +16,8 @@ src/
 │  storage/      存储隔离：生产 os_mem.db / 评测临时库
 │  guide/        sanitizer 日志脱敏（1.1）← 你实现
 └── testing/                   ← 评测域（导入用 testing. 前缀）
-   ├── runner.py / judge.py / llm.py / provider.py   评测框架
+   ├── judge.py / llm.py       LLM 判分（Moonshot）/ 答案生成（DeepSeek）
+   ├── services/               store_service：评测数据上报（pytest --record-db）
    ├── api/                    评测 dashboard API（testing.api）
    └── db/                     评测数据存储 memos.db（testing.db）
 memos.db                     ← 评测数据（test_runs / test_case_results / test_case_definitions）
@@ -34,7 +35,6 @@ from os_mem import format_injection, temp_db_path, default_db_path   # 评测必
 ```python
 import os_mem                      # 记忆系统
 from testing.db import get_session # 评测数据
-from testing.runner import run_test_suite
 from testing.api.main import app   # FastAPI 应用
 ```
 
@@ -58,27 +58,33 @@ test_case (test_case_definitions 表)
   └─ 5. record    写 test_case_results，更新进度
 ```
 
-**隔离**：每用例独立 provider 实例（`user_id = case_id`）；评测记忆存临时库（`--memory-store tmp`），
-不碰 `memos.db` 和 `os_mem.db`。
+**隔离**：每用例独立 provider 实例（`user_id = case_id`）；单环节记忆测试经 pytest
+`tmp_path` 隔离，不碰 `memos.db` 和生产记忆库。
 
-## 三、运行
+## 三、运行（评测入口已收敛为 pytest，无 mock 冒烟）
 
 ```bash
-# 先确保测试集已入库（60 条 YAML → memos.db）
-.venv\Scripts\python.exe -m scripts.load_test_cases
+# 先确保测试集已入库（60 条 YAML → memos.db，供 Dashboard 用例库；可选，评测直接读 YAML）
+.venv\Scripts\python.exe tests\load_test_cases.py
 
-# 跑一次 mock 评测（v0.1 base 20 条）
-.venv\Scripts\python.exe -m scripts.run_eval --phase base --notes "v0.1 框架验证"
+# layer1 全链路：base provider + DeepSeek 回答 + assert 本地判定（默认）
+.venv\Scripts\python.exe -m pytest tests/test_memory_eval.py -m layer1
 
-# 冒烟测试（只跑前 3 条）
-.venv\Scripts\python.exe -m scripts.run_eval --phase base --limit 3
+# 全量 + Moonshot 判分 + 结果落库看板
+.venv\Scripts\python.exe -m pytest tests/test_memory_eval.py --judge moonshot --record-db
 
 # 查看结果
 .venv\Scripts\python.exe -m uvicorn testing.api.main:app --port 8000   # 打开 http://localhost:8000
 ```
 
-**注意**：当前默认全 mock（`--memory-provider stub` / `--llm mock` / `--judge mock`），
-检索不到记忆、判分固定 0.5 → 通过率必然为 0。这是**预期基线**，不是 bug。
+评测参数：`--memory-provider base|struct|full`、`--llm deepseek`、
+`--judge assert|moonshot`（默认 assert）、`--top-k`、`--threshold`、`--record-db`。
+需要 `.env` 配置 DEEPSEEK_API_KEY（回答生成）与 MOONSHOT_API_KEY（`--judge moonshot`）。
+
+单环节验证走独立单测，不依赖外部服务：
+```bash
+.venv\Scripts\python.exe -m pytest tests/test_struct_mem_sqlite.py tests/test_struct_mem_extract.py
+```
 
 ## 四、接入你自己的记忆系统（你的学习任务）
 
@@ -104,8 +110,8 @@ class MyMemoryProvider:
 # 2. 注册
 register_provider("mine", MyMemoryProvider)
 
-# 3. 跑真实评测
-python -m scripts.run_eval --phase base --memory-provider mine
+# 3. 跑真实评测（pytest 入口）
+python -m pytest tests/test_memory_eval.py -m layer1 --memory-provider mine
 ```
 
 v0.1 建议顺序：① `Memory` 数据模型 + `memories` 表（1.2，参考 `os_mem/storage.py` 的 DDL 注释）

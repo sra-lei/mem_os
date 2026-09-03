@@ -24,31 +24,56 @@ uv sync
 # 2. 配置 API Key：从模板创建 .env 并填入 Key
 #    cp .env.example .env   （模板见下方"配置"章节）
 
-# 3. 加载测试集（60 个 YAML 用例 → 评测库）
-uv run python -m scripts.load_test_cases
+# 3. 加载测试集到评测库（60 个 YAML 用例 → memos.db，供 Dashboard 用例库；评测本身直接读 YAML，可选）
+uv run python tests/load_test_cases.py
 ```
 
-## 运行评测
+## 运行评测（全链路 pytest）
+
+评测用例直接来自 `tests/test_cases/**/*.yaml`；记忆写入 → 检索 → DeepSeek 回答 → 判分全为真实链路，无 mock。
 
 ```bash
-# 冒烟：只跑 2 条，带完整日志
-uv run python -m scripts.run_eval --phase base --llm deepseek --judge moonshot --memory-provider base --limit 2 --verbose
+# layer1 全链路：base provider + DeepSeek 回答 + assert 本地判定（默认）
+uv run pytest tests/test_memory_eval.py -m layer1
 
-# 全量：v0.1 base 20 条
-uv run python -m scripts.run_eval --phase base --llm deepseek --judge moonshot --memory-provider base
+# layer2 结构化记忆：struct provider，fact 粒度细用更宽 top-k
+uv run pytest tests/test_memory_eval.py -m layer2 --memory-provider struct --top-k 15
+
+# layer3 + Moonshot LLM 判分 + 结果写回看板库
+uv run pytest tests/test_memory_eval.py -m layer3 --judge moonshot --record-db
+
+# 只跑单条（调试）
+uv run pytest tests/test_memory_eval.py -k bank_account
 ```
 
 | 参数 | 说明 | 默认 |
 |---|---|---|
-| `--phase` | `base` / `multi_session` / `proactive`（对应 layer1/2/3） | `base` |
-| `--llm` | 答案生成模型：`deepseek` / `mock` | `mock` |
-| `--judge` | 判分模型：`moonshot` / `mock` | `mock` |
-| `--memory-provider` | 记忆实现：`base`（真实存储+BM25）/ `stub`（占位） | `stub` |
-| `--top-k` | 检索返回记忆条数 | `3` |
-| `--limit` | 只跑前 N 条用例（调试用） | 全部 |
-| `--verbose` | 打印逐用例日志（会话/检索/答案/判分） | 关 |
+| `--memory-provider` | 记忆实现：`base`（全文存储+BM25）/ `struct`（LLM 提取+SQLite 双写+向量库）/ `full` | `base` |
+| `--llm` | 答案生成：`deepseek` | `deepseek` |
+| `--judge` | 判分：`assert`（本地确定性数字/关键词判定）/ `moonshot`（LLM-as-Judge） | `assert` |
+| `--top-k` | 检索返回记忆条数 | `5` |
+| `--threshold` | 判定通过阈值 | `0.7` |
+| `--record-db` | 评测结果写回 `memos.db`（EvalView Dashboard 可见） | 关 |
 
-评测结果（含每条用例的 **Token 消耗**：输入/输出）写入 `src/testing/data/memos.db`。
+> 需要 `.env` 配置 `DEEPSEEK_API_KEY`（答案生成）与 `MOONSHOT_API_KEY`（`--judge moonshot` 时）。
+
+**单环节验证**不依赖外部服务，独立 pytest 执行（无需任何 key）：
+
+```bash
+uv run pytest tests/test_struct_mem_sqlite.py    # 结构化记忆 SQLite 双写（INSERT/冲突 UPDATE/归档）
+uv run pytest tests/test_struct_mem_extract.py   # 事实提取纯逻辑（校验/去重/数字兜底/分段）
+```
+
+**手动真实验证工具**（非 pytest 用例，已在 conftest 排除自动收集；需在线 Milvus / .env，按需执行）：
+
+```bash
+uv run python tests/load_test_cases.py            # YAML 用例 → memos.db（Dashboard 用例库）
+uv run python tests/test_hybrid_retrieval.py      # 检索召回诊断：每条用例召回了什么
+uv run python tests/test_hybrid_retrieval.py --case layer1_01_bank_account
+uv run python tests/test_vec_storage.py           # 向量存储链路验证（写入 test_001~003 测试数据）
+```
+
+评测结果（`--record-db`）与用例库（`tests/load_test_cases.py`）写入 `src/testing/data/memos.db`。
 
 ## 评测看板（Dashboard）
 
@@ -77,26 +102,31 @@ src/
 │   ├── guide/              # 实现指南骨架（sanitizer 日志脱敏）
 │   └── infra/              # 基础设施：storage（SQLite）、retriever（SimpleBM25）、logger
 └── testing/                # 评测域（导入用 testing. 前缀）
-    ├── runner.py           # 评测编排：ingest → retrieve → answer → judge → record
-    ├── llm.py              # LLMClient（Mock / DeepSeek）+ Completion（含 token）
-    ├── judge.py            # JudgeProvider（Mock / Moonshot，JSON Schema 输出约束 + 限流节流）
-    ├── services/           # 评测数据存取（store_service）
+    ├── llm.py              # LLMClient（DeepSeek）+ Completion（含 token）
+    ├── judge.py            # JudgeProvider（Moonshot，JSON Schema 输出约束 + 限流节流）
+    ├── services/           # 评测数据存取（store_service，供 --record-db 上报）
     ├── db/                 # 评测库（src/testing/data/memos.db）
     └── api/                # FastAPI 看板（runs / cases / stats）
-scripts/                    # CLI：load_test_cases / run_eval
-tests/test_cases/           # 60 个评测用例（layer1/2/3，YAML）
+tests/                      # pytest 评测（test_memory_eval + 单环节单测）+ 手动验证脚本
+│   ├── conftest.py         # 评测 harness / 命令行参数 / collect_ignore（排除手动脚本）
+│   ├── test_memory_eval.py # 全链路评测（60 YAML 参数化，-m layer1/2/3）
+│   ├── test_struct_mem_*.py# 单环节单测（入库 / 事实提取，离线）
+│   ├── load_test_cases.py  # 工具：YAML 用例 → memos.db（uv run python 运行）
+│   ├── test_hybrid_retrieval.py  # 诊断：混合检索召回（uv run python 运行）
+│   ├── test_vec_storage.py       # 诊断：向量存储链路（uv run python 运行）
+│   └── test_cases/          # 60 个 YAML 评测用例
 frontend/                   # Vite + React + TS 看板
 ```
 
-### 评测流水线（每条用例）
+### 评测流水线（每条用例，pytest tests/test_memory_eval.py）
 
 ```
-测试用例 YAML
-  └─ 1. ingest      逐会话写入记忆（user + assistant 消息 → SQLite）
-  └─ 2. retrieve    用 user_question 做 BM25 检索，Top-K 记忆
+测试用例 YAML（tests/test_cases/**/*.yaml）
+  └─ 1. ingest      逐会话写入记忆（user + assistant 消息 → SQLite/向量库）
+  └─ 2. retrieve    用 user_question 检索，Top-K 记忆注入
   └─ 3. answer      DeepSeek 注入记忆生成答案（记录 token 输入/输出）
-  └─ 4. judge       Moonshot 按 evaluation_criteria 判分（JSON Schema 约束）
-  └─ 5. record      写 test_case_results（score/passed/actual/tokens/error）
+  └─ 4. judge       assert（默认，本地判定）或 Moonshot 按 criteria 判分
+  └─ 5. record      仅 --record-db 时写 test_case_results（score/passed/actual/tokens/error）
 ```
 
 ### 数据库隔离

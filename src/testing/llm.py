@@ -7,8 +7,7 @@ Two LLM roles exist in the pipeline:
   2. Judge          — independent LLM that grades the answer (see judge.py).
 
 Both go through this LLMClient protocol so a real provider (local Ollama /
-OpenAI-compatible API) can be dropped in later without changing the runner.
-The default MockLLM keeps the framework runnable with zero external services.
+OpenAI-compatible API) can be dropped in later without changing the caller.
 """
 from __future__ import annotations
 
@@ -16,6 +15,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from openai import OpenAI
+
 from testing.config import settings
 
 
@@ -39,20 +39,6 @@ class LLMClient(Protocol):
         """Return the assistant reply (with token usage) for one turn."""
         ...
 
-
-class MockLLM:
-    """Placeholder LLM: returns a fixed, clearly-marked string.
-
-    Replace with a real client (Ollama/OpenAI-compatible) by implementing
-    LLMClient and registering it in build_llm_client().
-    """
-
-    name = "mock"
-
-    def complete(self, memories: str, user: str) -> Completion:
-        return Completion(
-            text=f"[mock-answer] 未接入真实LLM。注入记忆 {len(memories)} 字符 / 问题: {user[:60]}",
-        )
 
 SYSTEM_PROMPT = '''
 # 角色
@@ -111,10 +97,8 @@ class AnswerGenerator:
         return self._llm.complete(memories, user=query)
 
 
-def build_llm_client(name: str) -> LLMClient:
-    """Factory used by the runner/CLI. Register your real provider here."""
-    if name == "mock":
-        return MockLLM()
-    elif name == "deepseek":
+def build_llm_client(name: str = "deepseek") -> LLMClient:
+    """LLM client 工厂（真实链路，无 mock）。"""
+    if name == "deepseek":
         return DeepSeekLLM()
-    raise ValueError(f"unknown llm client: {name!r} (available: mock)")
+    raise ValueError(f"unknown llm client: {name!r} (available: deepseek)")
