@@ -20,6 +20,20 @@ dependencies = [
 [dependency-groups]
 dev = [
     "ruff>=0.16.5",
+    "pytest>=8.0.0",
+    "pytest-xdist>=3.5.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+markers = [
+    "layer1: single-session recall tests",
+    "layer2: multi-session synthesis tests",
+    "layer3: cross-domain proactive tests",
 ]
 
 [build-system]

@@ -5,9 +5,11 @@ doc-kit - 纯向量化能力：文本 → embedding 向量
 from typing import List
 
 from openai import OpenAI, BadRequestError
-from loguru import logger
 
 from os_mem.configs.mem_settings import memory_settings
+from os_mem.infra.logger import get_logger
+
+_logger = get_logger("os_mem.vectorizer")
 
 class Vectorizer:
     """文本向量化器（基于阿里百炼 text-embedding-v2）"""
@@ -34,7 +36,7 @@ class Vectorizer:
             )
             return response.data[0].embedding
         except Exception as e:
-            logger.error(f"向量化文本失败: {e}")
+            _logger.error(f"向量化文本失败: {e}")
             raise
 
     def embed_batch(self, texts: List[str], batch_size: int = 10) -> List[List[float]]:
@@ -47,7 +49,7 @@ class Vectorizer:
         for i in range(0, len(texts), batch_size):
             batch = texts[i : i + batch_size]
             batch = [t.replace("\n", " ") for t in batch]
-            logger.info(
+            _logger.info(
                 f"向量化 {i + 1}-{min(i + batch_size, len(texts))}/{len(texts)}"
             )
             all_embeddings.extend(self._embed_batch_once(batch))
@@ -64,7 +66,7 @@ class Vectorizer:
         except BadRequestError as e:
             if len(batch) <= 1:
                 raise
-            logger.warning(f"批量过大被服务端拒绝（{len(batch)} 条），折半重试: {e}")
+            _logger.warning(f"批量过大被服务端拒绝（{len(batch)} 条），折半重试: {e}")
             mid = (len(batch) + 1) // 2
             return self._embed_batch_once(batch[:mid]) + self._embed_batch_once(batch[mid:])
 
