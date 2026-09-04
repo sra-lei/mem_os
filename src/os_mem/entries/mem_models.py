@@ -2,6 +2,7 @@ import uuid
 
 from sqlmodel import Field, SQLModel
 from datetime import datetime
+from sqlalchemy import UniqueConstraint
 
 # v1: conversation memory
 class ConversationMemory(SQLModel, table=True):
@@ -68,4 +69,31 @@ class StructuredMemory(SQLModel, table=True):
     source_chunk_id: str = Field(index=True, default="")  # ✅ 创建索引 (idx_memories_source_chunk)
     # ========== 时间戳 ==========
     created_at: datetime = Field(index=True, default_factory=datetime.utcnow) # ✅ 创建索引 (idx_memories_created_at)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+# ========== 会话处理账本（struct 入库原子化/状态机，见 docs/方案-会话处理状态机与原子入库.md） ==========
+class ConversationProcess(SQLModel, table=True):
+    """一次会话处理的账本行：保存会话原数据 + 不可逆的处理状态。
+
+    - 唯一键 (user_id, source_session_id)：DB 级兜底防重（claim 门禁的原子性双保险）
+    - status 只允许沿状态机合法边前进（PENDING → EXTRACTING → SAVING_SQLITE →
+      SAVING_VECTOR → COMPLETED；任一活跃态 → FAILED），见 core/state_machine.py
+    """
+    __tablename__: str = "conv_process"
+    __table_args__ = (
+        UniqueConstraint("user_id", "source_session_id", name="uq_conv_process_user_session"),
+    )
+
+    id: str = Field(default_factory=lambda: uuid.uuid4().hex, primary_key=True)
+    user_id: str = Field(index=True, nullable=False)
+    source_session_id: str = Field(index=True, nullable=False)
+    # 初始状态：已登记（claim 成功）；详见状态机
+    status: str = Field(index=True, default="PENDING")
+    # 会话原数据：messages 列表的 JSON 原文（审计/回溯用）
+    raw_payload: str = Field(default="")
+    # FAILED 时的错误摘要
+    last_error: str = Field(default="")
+
+    created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)

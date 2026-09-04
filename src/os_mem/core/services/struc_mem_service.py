@@ -3,12 +3,17 @@ import re
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
-from typing import List
+from typing import Callable, List, Optional
 
 from openai import OpenAI
 from pydantic import ValidationError
 from sqlmodel import select
 
+from os_mem.core.services.conv_process_service import (
+    STATUS_EXTRACTING,
+    STATUS_SAVING_SQLITE,
+    STATUS_SAVING_VECTOR,
+)
 from os_mem.entries.mem_models import StructuredMemory
 from os_mem.infra.logger import get_logger
 from os_mem.infra.storage import (
@@ -290,7 +295,19 @@ class StructuredMemService:
             session.commit()
         return written
 
-    def add_structured_memory(self, conversation: Conversation):
+    def add_structured_memory(
+        self,
+        conversation: Conversation,
+        on_stage: Optional[Callable[[str], None]] = None,
+    ):
+        """把一段会话的结构化记忆写入 SQLite + 向量库。
+
+        on_stage：可选阶段回调 —— 每个处理阶段「开始前」调用一次，参数为目标状态名
+        （EXTRACTING / SAVING_SQLITE / SAVING_VECTOR），由调用方（StructProvider）
+        接入会话处理状态机；为 None 时保持旧行为（不追踪）。
+        """
+        if on_stage:
+            on_stage(STATUS_EXTRACTING)
         llm_facts: List[MemoryFact] = self._extract_structured_facts(conversation)
 
         # LLM 提取兜底：从原文把含金额/编号/日期/百分比等精确 token 的句子原样入库，
@@ -303,6 +320,8 @@ class StructuredMemService:
 
         # SQLite 双写：结构化事实同步落库（审计/回溯 + 向量库重建兜底）。
         # 本地落库先于向量写入，保证即便 Milvus 写入失败，记忆仍持久化在 SQLite。
+        if on_stage:
+            on_stage(STATUS_SAVING_SQLITE)
         sqlite_written = self.save_structured_memories_to_sqlite(
             user_id=conversation.user_id,
             source_conversation_id=conversation.id or conversation.source_session_id or "",
@@ -311,6 +330,8 @@ class StructuredMemService:
         _logger.info(f"  落库 SQLite struct_memories: {sqlite_written} 条")
 
         # 逐个 embed → 改为批量 embed（DashScope 单批上限 10，自动折半重试）
+        if on_stage:
+            on_stage(STATUS_SAVING_VECTOR)
         records: list[dict] = []
         texts: list[str] = []
         for conv_fact in conv_facts:

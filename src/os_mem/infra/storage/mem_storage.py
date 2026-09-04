@@ -48,14 +48,20 @@ class MemoryDatabase:
         engine = self.get_engine()
         # 只建 os_mem 自己的表：SQLModel.metadata 是全局的，评测表
         # （testing.db.models）也注册在里面，绝不能建进记忆库
-        from os_mem.entries.mem_models import ConversationMemory, Message, StructuredMemory
+        from os_mem.entries.mem_models import (
+            ConversationMemory,
+            ConversationProcess,
+            Message,
+            StructuredMemory,
+        )
 
         SQLModel.metadata.create_all(
             engine,
             tables=[
-                ConversationMemory.__table__, 
+                ConversationMemory.__table__,
                 Message.__table__,
-                StructuredMemory.__table__
+                StructuredMemory.__table__,
+                ConversationProcess.__table__,
             ],
         )
         self._logger.info(f"Database initialized at {self.db_path}")
