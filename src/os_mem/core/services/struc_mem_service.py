@@ -9,7 +9,7 @@ from openai import OpenAI
 from pydantic import ValidationError
 from sqlmodel import select
 
-from os_mem.core.services.conv_process_service import (
+from os_mem.core.services.conv_meta_service import (
     STATUS_EXTRACTING,
     STATUS_SAVING_SQLITE,
     STATUS_SAVING_VECTOR,

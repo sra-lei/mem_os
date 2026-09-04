@@ -72,27 +72,39 @@ class StructuredMemory(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
-# ========== 会话处理账本（struct 入库原子化/状态机，见 docs/方案-会话处理状态机与原子入库.md） ==========
-class ConversationProcess(SQLModel, table=True):
-    """一次会话处理的账本行：保存会话原数据 + 不可逆的处理状态。
+# ========== 对话元数据表（conv_meta）：会话元数据 + 处理状态 ==========
+# 设计见 docs/方案-会话处理状态机与原子入库.md；命名定位为「对话元数据表」，
+# 处理状态是顺带管理字段（非独立处理账本）。会话原文(messages)不落本表，
+# 逐条消息存于 conv_messages（超长对话不入元数据行，避免膨胀/读放大风险）。
+class ConversationMeta(SQLModel, table=True):
+    """一次会话的元数据行，顺带管理处理状态（struct 入库会话级幂等/追踪）。
 
-    - 唯一键 (user_id, source_session_id)：DB 级兜底防重（claim 门禁的原子性双保险）
-    - status 只允许沿状态机合法边前进（PENDING → EXTRACTING → SAVING_SQLITE →
-      SAVING_VECTOR → COMPLETED；任一活跃态 → FAILED），见 core/state_machine.py
+    - 唯一键 (user_id, source_session_id)：同一会话只允许一行（DB 级防重）
+    - status 运行内只允许沿状态机合法边前进（PENDING→EXTRACTING→SAVING_SQLITE→
+      SAVING_VECTOR→COMPLETED；任一活跃态→FAILED）
+    - 重跑（非完成态 → EXTRACTING，含 FAILED 与崩溃残留的过期会话）只经 claim 的
+      单语句 CAS 条件更新，见 core/services/conv_meta_service.py
     """
-    __tablename__: str = "conv_process"
+    __tablename__: str = "conv_meta"
     __table_args__ = (
-        UniqueConstraint("user_id", "source_session_id", name="uq_conv_process_user_session"),
+        UniqueConstraint("user_id", "source_session_id", name="uq_conv_meta_user_session"),
     )
 
     id: str = Field(default_factory=lambda: uuid.uuid4().hex, primary_key=True)
     user_id: str = Field(index=True, nullable=False)
     source_session_id: str = Field(index=True, nullable=False)
-    # 初始状态：已登记（claim 成功）；详见状态机
+
+    # ---------- 会话元数据 ----------
+    message_count: int = Field(default=0)
+    started_at: datetime | None = Field(default=None)
+    ended_at: datetime | None = Field(default=None)
+
+    # ---------- 处理状态 ----------
+    # 初始：已登记（claim 成功）；详见状态机
     status: str = Field(index=True, default="PENDING")
-    # 会话原数据：messages 列表的 JSON 原文（审计/回溯用）
-    raw_payload: str = Field(default="")
-    # FAILED 时的错误摘要
+    # 重启次数（claim take-over 次数；0 = 首次处理）
+    attempts: int = Field(default=0)
+    # FAILED 时的错误摘要（重启时清空）
     last_error: str = Field(default="")
 
     created_at: datetime = Field(default_factory=datetime.utcnow)

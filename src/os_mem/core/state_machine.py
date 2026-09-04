@@ -70,7 +70,14 @@ class LinearStateMachine:
         return target in self.next_states(current)
 
     def validate(self, current: str, target: str) -> None:
-        """非法转移（未知状态 / 回退 / 跳级 / 终止态外出）抛 IllegalTransitionError。"""
+        """非法转移（未知状态 / 回退 / 跳级 / 终止态外出）抛 IllegalTransitionError。
+
+        同态（current == target）视为 no-op 通过：允许重复断言，也兼容
+        「claim 已把状态推进到阶段 X，紧接着该阶段开始标记仍上报 X」的编排。
+        （注意：FAILED/过期会话的整轮重启不走本机，由 claim 的 CAS 条件更新处理。）
+        """
+        if current == target:
+            return
         if current not in self._edges:
             raise IllegalTransitionError(
                 f"未知当前状态: {current!r}（合法: {sorted(self._edges)}）"

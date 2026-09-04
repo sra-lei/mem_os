@@ -50,7 +50,7 @@ class MemoryDatabase:
         # （testing.db.models）也注册在里面，绝不能建进记忆库
         from os_mem.entries.mem_models import (
             ConversationMemory,
-            ConversationProcess,
+            ConversationMeta,
             Message,
             StructuredMemory,
         )
@@ -61,7 +61,7 @@ class MemoryDatabase:
                 ConversationMemory.__table__,
                 Message.__table__,
                 StructuredMemory.__table__,
-                ConversationProcess.__table__,
+                ConversationMeta.__table__,
             ],
         )
         self._logger.info(f"Database initialized at {self.db_path}")
