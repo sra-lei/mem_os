@@ -4,20 +4,6 @@ from sqlmodel import Field, SQLModel
 from datetime import datetime
 from sqlalchemy import UniqueConstraint
 
-# v1: conversation memory
-class ConversationMemory(SQLModel, table=True):
-    __tablename__:str = "conv_memories"
-    
-    id: str = Field(default_factory=lambda: uuid.uuid4().hex, primary_key=True)
-    user_id: str = Field(index=True, nullable=False)
-    # 存储对话消息摘要信息
-    summary: str = Field(default="")       # 可选：简要摘要（留空即可）
-    # 元数据
-    source_session_id: str = Field(index=True, nullable=False)
-    started_at: datetime = Field(default_factory=datetime.utcnow)
-    ended_at: datetime = Field(default_factory=datetime.utcnow)
-    message_count: int = Field(default=0)
-
 # v1: note message
 class Message(SQLModel, table=True):
     """会话原文逐条行（唯一权威原文表）。

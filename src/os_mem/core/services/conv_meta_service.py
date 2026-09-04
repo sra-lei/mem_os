@@ -82,12 +82,14 @@ class ConversationMetaService:
         started_at: Optional[datetime] = None,
         ended_at: Optional[datetime] = None,
     ) -> Optional[ConversationMeta]:
-        """会话入库门禁：返回可处理记录，或 None（跳过）。
+        """struct 入库门禁：返回可处理记录（status=EXTRACTING），或 None（跳过）。
 
-        - 返回记录：status 已处于 EXTRACTING —— 本调用负责继续处理；
-          新建会话时为 PENDING（首个阶段开始标记会推进到 EXTRACTING）。
-        - 返回 None：COMPLETED（已入库完成）或 他人正在处理（含未过期的中途状态），
-          本次调用应整体跳过入库流程，不进入任何阶段。
+        协作语义（conv_meta 由 base 与 struct 共用，见 docs §2/§10）：
+        - 会话不存在 → 登记并**立即认领**（status=EXTRACTING，attempts=0）——
+          本调用负责继续处理；不做"登记后待办"的中间态（PENDING 留给登记方，见 ensure_registered）。
+        - 已存在：COMPLETED → 跳过；FAILED / PENDING（登记未认领）/ 租约过期中途态
+          → CAS 接管（attempts+1 → EXTRACTING）；未过期中途态 → 视为他人处理中，跳过。
+        - base(登记方) 只 ensure_registered，永不改 status —— 状态机只由 struct 管线驱动。
         """
         if not user_id or not source_session_id:
             raise ValueError("user_id 与 source_session_id 均不能为空")
@@ -100,12 +102,14 @@ class ConversationMetaService:
                 )
             ).first()
 
-            # 1) 从未见过该会话：插入（初始 PENDING + 元数据），唯一约束兜底并发
+            # 1) 从未见过该会话：登记 + 认领一体（初始即 EXTRACTING），唯一约束兜底并发。
+            #    不做"PENDING 待办"中间态：struct 同步路径 insert 后立即处理，
+            #    若先落 PENDING 再推进，两个并发实例会在窗口内双跑。
             if row is None:
                 row = ConversationMeta(
                     user_id=user_id,
                     source_session_id=source_session_id,
-                    status=STATUS_PENDING,
+                    status=STATUS_EXTRACTING,
                     message_count=message_count,
                     started_at=started_at,
                     ended_at=ended_at,
@@ -115,7 +119,7 @@ class ConversationMetaService:
                     session.commit()
                     session.refresh(row)
                     _logger.info(
-                        f"会话登记成功（PENDING）: user={user_id} session={source_session_id}"
+                        f"会话登记并认领（EXTRACTING）: user={user_id} session={source_session_id}"
                     )
                     return row
                 except IntegrityError:
@@ -134,7 +138,12 @@ class ConversationMetaService:
                 _logger.info(f"会话已入库完成（COMPLETED），跳过: session={source_session_id}")
                 return None
 
-            restartable = row.status == STATUS_FAILED or self._is_stale(row, now)
+            # PENDING = 登记未认领（由 base/登记方 ensure_registered 创建）：可直接接管；
+            # FAILED = 明确失败：可直接重启；中途态仅租约过期（崩溃残留）才可接管
+            restartable = (
+                row.status in (STATUS_FAILED, STATUS_PENDING)
+                or (row.status in _PROCESS_STAGES and self._is_stale(row, now))
+            )
             if not restartable:
                 _logger.info(
                     f"会话正在处理中（status={row.status}，租约未过期），本次跳过: "
@@ -156,9 +165,57 @@ class ConversationMetaService:
                 select(ConversationMeta).where(ConversationMeta.id == row.id)
             ).first()
 
+    def ensure_registered(
+        self,
+        user_id: str,
+        source_session_id: str,
+        *,
+        message_count: int = 0,
+        started_at: Optional[datetime] = None,
+        ended_at: Optional[datetime] = None,
+    ) -> Optional[ConversationMeta]:
+        """登记方（base/note 路径）用：仅登记元数据，**永不改动处理状态**。
+
+        - 会话行不存在 → INSERT（status=PENDING = 登记未认领，等 struct 管线接管处理）；
+        - 已存在（任意状态，含 struct 正在处理/已完成）→ 不动任何字段，返回 None。
+        与 struct 的 claim 语义互补：claim 认领并驱动状态，ensure_registered 只做登记，
+        二者共存不互相干扰（双写协作，见 docs §2/§10）。
+        """
+        if not user_id or not source_session_id:
+            raise ValueError("user_id 与 source_session_id 均不能为空")
+
+        with get_session() as session:
+            row = session.exec(
+                select(ConversationMeta).where(
+                    ConversationMeta.user_id == user_id,
+                    ConversationMeta.source_session_id == source_session_id,
+                )
+            ).first()
+            if row is not None:
+                return None
+            row = ConversationMeta(
+                user_id=user_id,
+                source_session_id=source_session_id,
+                status=STATUS_PENDING,
+                message_count=message_count,
+                started_at=started_at,
+                ended_at=ended_at,
+            )
+            try:
+                session.add(row)
+                session.commit()
+                session.refresh(row)
+                _logger.info(
+                    f"会话登记（PENDING，待 struct 处理）: user={user_id} session={source_session_id}"
+                )
+                return row
+            except IntegrityError:
+                session.rollback()
+                return None  # 并发插入竞争：他人已登记，视为已存在
+
     @staticmethod
     def _is_stale(row: ConversationMeta, now: datetime) -> bool:
-        """PENDING/中途状态超过租约窗口未推进 → 崩溃残留，可接管。"""
+        """中途状态超过租约窗口未推进 → 崩溃残留，可接管。"""
         if row.updated_at is None:
             return True
         age = (now - row.updated_at).total_seconds()

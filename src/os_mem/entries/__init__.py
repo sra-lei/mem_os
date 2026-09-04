@@ -1,3 +1,3 @@
-from .mem_models import ConversationMemory, Message, StructuredMemory
+from .mem_models import Message, StructuredMemory, ConversationMeta
 
-__all__ = ['ConversationMemory', 'Message', 'StructuredMemory']
+__all__ = ['Message', 'StructuredMemory', 'ConversationMeta']

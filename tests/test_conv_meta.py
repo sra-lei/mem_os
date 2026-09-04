@@ -3,10 +3,12 @@
 覆盖 docs/方案-会话处理状态机与原子入库.md：
 - §3.2 状态机：合法链通过，回退/跳级/终止态外出全部拒绝，FAILED 从任一活跃态可达，
   同态 no-op 允许
-- §3.3 claim 门禁：仅 COMPLETED 跳过；FAILED/过期(崩溃残留)接管重启；
-  未过期中途状态视为处理中 → 跳过；并发由 CAS + 唯一约束保证
+- §3.3 claim 门禁：新会话登记即认领(EXTRACTING)；COMPLETED 跳过；FAILED/PENDING/
+  租约过期中途态接管重启；未过期中途态视为处理中 → 跳过；并发由 CAS + 唯一约束保证
 - §3.4 StructProvider 编排：首次 ingest → COMPLETED；重复 ingest 跳过；
   失败 → FAILED；再次 ingest 重启接着处理
+- 方案1 合并协作：ensure_registered(仅登记 PENDING、永不改状态) 与 claim 互补，
+  base→struct / struct→base 任意先后正确
 - 元数据(message_count/started_at/ended_at)入库；原文 messages 不入本表
 
 全部无 LLM / 无 Milvus，走临时 sqlite。
@@ -188,7 +190,7 @@ def test_machine_failed_reachable_from_every_active_state():
 # --------------------------------------------------------------------- #
 #  claim 门禁
 # --------------------------------------------------------------------- #
-def test_claim_inserts_pending_with_metadata(tmp_memory_db):
+def test_claim_claims_new_conversation_with_metadata(tmp_memory_db):
     svc = _svc()
     started = datetime.utcnow() - timedelta(minutes=5)
     proc = svc.claim(
@@ -197,7 +199,8 @@ def test_claim_inserts_pending_with_metadata(tmp_memory_db):
     )
 
     assert proc is not None
-    assert proc.status == "PENDING"
+    # struct 路径：登记 + 认领一体（初始即 EXTRACTING，避免 PENDING 窗口并发双跑）
+    assert proc.status == "EXTRACTING"
     assert proc.message_count == 3
     assert proc.started_at == started
     assert proc.attempts == 0
@@ -205,7 +208,7 @@ def test_claim_inserts_pending_with_metadata(tmp_memory_db):
     rows = _load_rows(user_id="u1")
     assert len(rows) == 1
     assert rows[0].source_session_id == "s1"
-    assert rows[0].status == "PENDING"
+    assert rows[0].status == "EXTRACTING"
     assert not hasattr(rows[0], "raw_payload")  # 原文不存元数据表
 
 
@@ -330,3 +333,114 @@ def test_provider_metadata_stored_no_payload(tmp_memory_db):
     assert rows[0].message_count == 1
     assert rows[0].started_at is not None
     assert rows[0].ended_at is not None
+
+
+# --------------------------------------------------------------------- #
+#  base/struct 共享 conv_meta 的协作语义（方案1 合并）
+# --------------------------------------------------------------------- #
+def test_ensure_registered_inserts_pending_and_is_idempotent(tmp_memory_db):
+    svc = _svc()
+    row = svc.ensure_registered("u1", "s1", message_count=2)
+    assert row is not None
+    assert row.status == "PENDING"  # 登记未认领，等 struct 接管
+    assert row.attempts == 0
+
+    # 重复登记：不动任何字段
+    assert svc.ensure_registered("u1", "s1") is None
+    rows = _load_rows(user_id="u1", session_id="s1")
+    assert len(rows) == 1
+    assert rows[0].status == "PENDING"
+    assert rows[0].attempts == 0
+
+
+def test_struct_claim_takes_over_registered_pending(tmp_memory_db):
+    """base 先登记（PENDING）→ struct claim 立即接管（免租约），attempts 计数重启。"""
+    svc = _svc()
+    svc.ensure_registered("u1", "s1", message_count=1)
+
+    proc = svc.claim("u1", "s1")
+    assert proc is not None
+    assert proc.status == "EXTRACTING"
+    assert proc.attempts == 1  # 首次 struct 处理计一次接管
+
+    svc.mark(proc.id, "SAVING_SQLITE")
+    svc.mark(proc.id, "SAVING_VECTOR")
+    svc.mark(proc.id, "COMPLETED")
+    assert _load_rows(user_id="u1", session_id="s1")[0].status == "COMPLETED"
+
+
+def test_ensure_registered_never_touches_struct_active_row(tmp_memory_db):
+    """struct 正在处理（EXTRACTING 新鲜）→ base 登记不得抢/不得改状态。"""
+    svc = _svc()
+    proc = svc.claim("u1", "s1")  # struct 认领，EXTRACTING
+    assert svc.ensure_registered("u1", "s1") is None  # 已存在 → 不动
+    rows = _load_rows(user_id="u1", session_id="s1")
+    assert rows[0].status == "EXTRACTING"
+    assert rows[0].attempts == 0  # base 未接管，attempts 不被污染
+
+
+def test_base_ingest_registers_and_writes_messages_then_rerun_skips(tmp_memory_db):
+    """base provider：登记 conv_meta(PENDING) + 原文落库；重复 ingest 跳过不重写。"""
+    from os_mem.core.mem_provider.base_provider import BaseProvider
+
+    p = BaseProvider("bu1")
+    conv = _conversation("bu1", "bc1")
+    p.ingest(conv)
+    p.ingest(conv)  # 重复投递
+
+    meta = _load_rows(user_id="bu1", session_id="bc1")
+    assert len(meta) == 1
+    assert meta[0].status == "PENDING"      # base 只登记，状态留给 struct 驱动
+    assert meta[0].attempts == 0
+
+    # 原文只落一份（重跑被消息门禁跳过）
+    from os_mem.entries.mem_models import Message
+    from os_mem.infra.storage import get_session
+    from sqlmodel import select
+
+    with get_session() as session:
+        msgs = session.exec(
+            select(Message).where(
+                Message.user_id == "bu1", Message.source_session_id == "bc1",
+            )
+        ).all()
+    assert len(msgs) == 1
+
+    # struct 后处理同一会话：可接管并走到 COMPLETED
+    sp = _provider_with_dummy_service(user_id="bu1")
+    sp.ingest(conv)
+    assert _load_rows(user_id="bu1", session_id="bc1")[0].status == "COMPLETED"
+    assert _load_rows(user_id="bu1", session_id="bc1")[0].attempts == 1
+
+
+def test_base_ingest_after_struct_completed_adds_missing_messages_without_touching_status(tmp_memory_db):
+    """struct 先 COMPLETED（未存原文）→ base 后 ingest：补消息、不改 struct 状态。"""
+    from os_mem.core.mem_provider.base_provider import BaseProvider
+    from os_mem.entries.mem_models import Message
+    from os_mem.infra.storage import get_session
+    from sqlmodel import select
+
+    conv = _conversation("bu2", "bc2")
+    sp = _provider_with_dummy_service(user_id="bu2")
+    sp.ingest(conv)  # struct → COMPLETED（dummy 不写消息）
+    assert _load_rows(user_id="bu2", session_id="bc2")[0].status == "COMPLETED"
+
+    p = BaseProvider("bu2")
+    p.ingest(conv)  # base 补原文
+    with get_session() as session:
+        msgs = session.exec(
+            select(Message).where(
+                Message.user_id == "bu2", Message.source_session_id == "bc2",
+            )
+        ).all()
+    assert len(msgs) == 1  # 消息已补
+    assert _load_rows(user_id="bu2", session_id="bc2")[0].status == "COMPLETED"  # 状态未被碰
+
+    p.ingest(conv)  # base 再跑 → 原文已存在，跳过
+    with get_session() as session:
+        msgs = session.exec(
+            select(Message).where(
+                Message.user_id == "bu2", Message.source_session_id == "bc2",
+            )
+        ).all()
+    assert len(msgs) == 1

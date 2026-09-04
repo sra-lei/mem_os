@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Iterator
 import os
 
-from sqlalchemy import Engine
+from sqlalchemy import Engine, text
 from sqlmodel import Session, SQLModel, create_engine
 
 from os_mem.configs.mem_settings import memory_settings
@@ -49,7 +49,6 @@ class MemoryDatabase:
         # 只建 os_mem 自己的表：SQLModel.metadata 是全局的，评测表
         # （testing.db.models）也注册在里面，绝不能建进记忆库
         from os_mem.entries.mem_models import (
-            ConversationMemory,
             ConversationMeta,
             Message,
             StructuredMemory,
@@ -58,12 +57,14 @@ class MemoryDatabase:
         SQLModel.metadata.create_all(
             engine,
             tables=[
-                ConversationMemory.__table__,
                 Message.__table__,
                 StructuredMemory.__table__,
                 ConversationMeta.__table__,
             ],
         )
+        # 老库迁移：conv_memories 已被 conv_meta 取代（方案1 合并），数据不需迁移 → 删表
+        with engine.begin() as conn:
+            conn.execute(text("DROP TABLE IF EXISTS conv_memories"))
         # 老库迁移：conv_messages 补 seq/previous_content 列并回填 + 建唯一索引
         # （create_all 只建新表，不会给已存在表加列，故需显式 ALTER）
         self._migrate_conv_messages(engine)

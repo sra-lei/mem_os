@@ -5,7 +5,7 @@ from typing import List
 from sqlmodel import select
 
 from os_mem.models.mem_models import Memory
-from os_mem.entries.mem_models import ConversationMemory, Message
+from os_mem.entries.mem_models import Message
 from os_mem.infra.logger.logger import LoggerHelper, get_logger
 from os_mem.infra.retriever import SimpleBM25, RankBM25
 from os_mem.infra.storage import get_session
@@ -81,37 +81,19 @@ def upsert_conversation_messages(
     return written
 
 
+def has_conversation_messages(user_id: str, source_session_id: str) -> bool:
+    """该会话是否已有原文落库（base 重复投递门禁用，消息存在 = 已处理过）。"""
+    with get_session() as session:
+        row = session.exec(
+            select(Message.id).where(
+                Message.user_id == user_id,
+                Message.source_session_id == source_session_id,
+            ).limit(1)
+        ).first()
+        return row is not None
+
+
 class NoteMemService:
-     def save_user_memories(self, conversation: ConversationMemory, messages: List[str]) -> None:
-        with get_session() as session:
-            records = session.exec(
-                select(ConversationMemory).where(
-                    (ConversationMemory.user_id == conversation.user_id)
-                    & (ConversationMemory.source_session_id == conversation.source_session_id)
-                )
-            ).all()
-            if records:
-                _logger.warning(f"用户 {conversation.user_id} 的会话 {conversation.source_session_id} 已存在，跳过存储")
-                return
-
-            # 消息写入走公共 value 冲突 upsert（防双 provider / 重复投递双写）
-            upsert_conversation_messages(
-                session,
-                user_id=conversation.user_id,
-                source_session_id=conversation.source_session_id,
-                messages=messages,
-                started_at=conversation.started_at,
-            )
-
-            session.add(conversation)
-            session.commit()
-            session.refresh(conversation)
-            _logger.info(
-                f"note 会话已存储 user={conversation.user_id} "
-                f"session={conversation.source_session_id} messages={len(messages)}"
-            )
-
-
      def _expand_turn_with_context(self,
         messages: List[Message],
         turn_index: int, 
@@ -131,18 +113,13 @@ class NoteMemService:
                 f"note 检索 user={user_id} query={mask_pii(query)} top_k={top_k}"
             )
             with get_session() as session:
-                records = session.exec(
-                    select(ConversationMemory).where(ConversationMemory.user_id == user_id)
-                ).all()
-
                 messages = session.exec(
                     select(Message).where(Message.user_id == user_id)
                 ).all()
 
-            if not records or not messages:
-                _logger.info(f"note 检索 user={user_id}: 无会话/消息记录，返回空")
+            if not messages:
+                _logger.info(f"note 检索 user={user_id}: 无消息记录，返回空")
                 return []
-            _logger.debug(f"note 检索 user={user_id}: 会话 {len(records)} 条, 消息 {len(messages)} 条")
             # 构建文档（对话摘要）
             user_contents = []
             for msg in messages:
