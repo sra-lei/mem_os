@@ -20,7 +20,22 @@ class ConversationMemory(SQLModel, table=True):
 
 # v1: note message
 class Message(SQLModel, table=True):
-    __tablename__:str = "conv_messages"
+    """会话原文逐条行（唯一权威原文表）。
+
+    冲突键 (user_id, source_session_id, seq)：seq = 消息在会话中的序号（0 起）。
+    双 provider（note/base 与 struct/full）都可能写同一会话原文 —— 不做互斥，
+    统一走 value 冲突 upsert（见 note_mem_service.upsert_conversation_messages）：
+    同键已存在 → 后入覆盖，内容变化时旧值归档 previous_content；一致则跳过；
+    同键不存在 → INSERT。数据一致时双写无影响、不产生重复行。
+    """
+    __tablename__: str = "conv_messages"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id", "source_session_id", "seq",
+            name="uq_conv_messages_user_session_seq",
+        ),
+    )
+
     id: str = Field(default_factory=lambda: uuid.uuid4().hex, primary_key=True)
     user_id: str = Field(index=True, nullable=False)
     source_session_id: str = Field(index=True, nullable=False)
@@ -28,7 +43,11 @@ class Message(SQLModel, table=True):
     # 新增：PII 标记
     contains_pii: bool = Field(default=False)  # 是否包含 PII
     masked_text: str = Field(default="")       # 脱敏后的文本（调试用）
-    
+    # 消息冲突键：会话内序号（0 起）；旧库无此列的行由 init_db 迁移按 rowid 序回填
+    seq: int = Field(default=0, index=True)
+    # 内容被后入更新覆盖时的旧值归档（镜像 struct_memories.previous_fact）
+    previous_content: str = Field(default="")
+
     create_at: datetime = Field(default_factory=datetime.utcnow)
 
 ## v2 structured memory

@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 from typing import List
 
 from sqlmodel import select
@@ -12,6 +13,67 @@ from os_mem.infra.p2check import has_pii, mask_pii
 
 _logger: LoggerHelper = get_logger("StoreService")
 
+
+def upsert_conversation_messages(
+    session,
+    user_id: str,
+    source_session_id: str,
+    messages: List[str],
+    started_at=None,
+) -> int:
+    """逐条把会话原文写入 conv_messages（value 冲突 upsert，双 provider 共用）。
+
+    冲突键 (user_id, source_session_id, seq)，seq = 消息在会话中的原始序号（0 起）：
+    - 同键不存在           → INSERT；
+    - 同键已存在且内容不同 → 后入覆盖（content/PII 标记），旧值归档 previous_content；
+    - 同键已存在且内容一致 → no-op（双写一致时无影响、不产生重复行）。
+    与 struct_memories 的 (user_id, category, key) 冲突逻辑同构，供 note(base) 与
+    未来 struct/full 的 register 共用；只存 role ∈ {user, assistant} 的消息。
+    由调用方负责 commit。返回写入（INSERT + UPDATE）条数。
+    """
+    written = 0
+    for seq, m in enumerate(messages):
+        try:
+            msg = json.loads(m) if isinstance(m, str) else m
+            if not isinstance(msg, dict) or msg.get("role") not in ("user", "assistant"):
+                continue
+            msg_content = msg.get("content") or ""
+            has_pii_flag = has_pii(msg_content)
+            masked = mask_pii(msg_content) if has_pii_flag else None
+
+            existing = session.exec(
+                select(Message).where(
+                    Message.user_id == user_id,
+                    Message.source_session_id == source_session_id,
+                    Message.seq == seq,
+                )
+            ).first()
+            if existing is None:
+                session.add(Message(
+                    user_id=user_id,
+                    source_session_id=source_session_id,
+                    seq=seq,
+                    content=msg_content,
+                    contains_pii=has_pii_flag,
+                    masked_text=masked,
+                    create_at=started_at or datetime.utcnow(),
+                ))
+                written += 1
+            elif existing.content != msg_content:
+                # 后入的走记忆更新逻辑：新值覆盖，旧值归档（镜像 previous_fact）
+                existing.previous_content = existing.content
+                existing.content = msg_content
+                existing.contains_pii = has_pii_flag
+                existing.masked_text = masked
+                session.add(existing)
+                written += 1
+            # else: 数据一致 → 无影响（跳过）
+        except Exception as e:
+            _logger.error(f"存储消息失败: {e} - {m}")
+            continue
+    return written
+
+
 class NoteMemService:
      def save_user_memories(self, conversation: ConversationMemory, messages: List[str]) -> None:
         with get_session() as session:
@@ -24,32 +86,15 @@ class NoteMemService:
             if records:
                 _logger.warning(f"用户 {conversation.user_id} 的会话 {conversation.source_session_id} 已存在，跳过存储")
                 return
-            
-            for m in messages:
-                msg = json.loads(m) if isinstance(m, str) else m
-                try:
-                    # user + assistant 都存储：关键事实（账号、路由号等）常由
-                    # 客服(assistant)告知用户，只存 user 会丢失正确答案
-                    role = msg.get("role")
-                    if role in ("user", "assistant"):
-                        msg_content = msg.get("content")
-                        hasPii = has_pii(msg_content)
-                        message = Message(
-                            user_id=conversation.user_id,
-                            source_session_id=conversation.source_session_id,
-                            content=msg_content,
-                            # 新增字段：PII 标记
-                            contains_pii=hasPii,
-                            # 可选：存一份脱敏后的文本供日志查看
-                            masked_text=mask_pii(msg_content) if hasPii else None,
-                            create_at=conversation.started_at,
-                        )
-                        session.add(message)
-                        session.commit()
-                        session.refresh(message)
-                except Exception as e:
-                    _logger.error(f"存储消息失败: {e} - {m}")
-                    continue
+
+            # 消息写入走公共 value 冲突 upsert（防双 provider / 重复投递双写）
+            upsert_conversation_messages(
+                session,
+                user_id=conversation.user_id,
+                source_session_id=conversation.source_session_id,
+                messages=messages,
+                started_at=conversation.started_at,
+            )
 
             session.add(conversation)
             session.commit()

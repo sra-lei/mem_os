@@ -64,7 +64,55 @@ class MemoryDatabase:
                 ConversationMeta.__table__,
             ],
         )
+        # 老库迁移：conv_messages 补 seq/previous_content 列并回填 + 建唯一索引
+        # （create_all 只建新表，不会给已存在表加列，故需显式 ALTER）
+        self._migrate_conv_messages(engine)
         self._logger.info(f"Database initialized at {self.db_path}")
+
+    @staticmethod
+    def _migrate_conv_messages(engine: Engine) -> None:
+        """幂等迁移：让既有 conv_messages 具备消息冲突键 (user_id, source_session_id, seq)。
+
+        1) 缺列则 ALTER 补 seq / previous_content（带默认值）；
+        2) 旧数据 seq 全为 0：按 (user_id, source_session_id, rowid) 序回填 0..n-1；
+        3) 建唯一索引 uq_conv_messages_user_session_seq（新库由 create_all 已建，此步 no-op）。
+        """
+        from sqlalchemy import text
+
+        with engine.begin() as conn:
+            cols = {
+                row[1]
+                for row in conn.execute(text("PRAGMA table_info(conv_messages)")).fetchall()
+            }
+            if "seq" not in cols:
+                conn.execute(text(
+                    "ALTER TABLE conv_messages ADD COLUMN seq INTEGER NOT NULL DEFAULT 0"
+                ))
+            if "previous_content" not in cols:
+                conn.execute(text(
+                    "ALTER TABLE conv_messages ADD COLUMN previous_content TEXT NOT NULL DEFAULT ''"
+                ))
+
+            # 回填 seq=0 的行（旧数据特征）：按 (user, session) 分组、组内按 rowid 序
+            # 编 0..n-1；新写入的行带真实 seq 不受影响
+            rows = conn.execute(text(
+                "SELECT user_id, source_session_id, id FROM conv_messages WHERE seq = 0 "
+                "ORDER BY user_id, source_session_id, rowid"
+            )).fetchall()
+            group_seq: dict[tuple[str, str], int] = {}
+            for uid, sid, mid in rows:
+                key = (uid, sid)
+                i = group_seq.get(key, 0)
+                conn.execute(
+                    text("UPDATE conv_messages SET seq = :s WHERE id = :i"),
+                    {"s": i, "i": mid},
+                )
+                group_seq[key] = i + 1
+
+            conn.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_conv_messages_user_session_seq "
+                "ON conv_messages(user_id, source_session_id, seq)"
+            ))
 
 
 @contextmanager
