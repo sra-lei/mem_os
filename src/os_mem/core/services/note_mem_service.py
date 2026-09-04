@@ -11,7 +11,7 @@ from os_mem.infra.retriever import SimpleBM25, RankBM25
 from os_mem.infra.storage import get_session
 from os_mem.infra.p2check import has_pii, mask_pii
 
-_logger: LoggerHelper = get_logger("StoreService")
+_logger: LoggerHelper = get_logger("os_mem.note_mem")
 
 
 def upsert_conversation_messages(
@@ -32,6 +32,7 @@ def upsert_conversation_messages(
     由调用方负责 commit。返回写入（INSERT + UPDATE）条数。
     """
     written = 0
+    identical = 0
     for seq, m in enumerate(messages):
         try:
             msg = json.loads(m) if isinstance(m, str) else m
@@ -67,10 +68,16 @@ def upsert_conversation_messages(
                 existing.masked_text = masked
                 session.add(existing)
                 written += 1
-            # else: 数据一致 → 无影响（跳过）
+            else:
+                identical += 1  # 数据一致 → 无影响（跳过）
         except Exception as e:
             _logger.error(f"存储消息失败: {e} - {m}")
             continue
+    if written or identical:
+        _logger.info(
+            f"消息 upsert user={user_id} session={source_session_id} "
+            f"总={len(messages)} 写入={written} 一致跳过={identical}"
+        )
     return written
 
 
@@ -99,7 +106,10 @@ class NoteMemService:
             session.add(conversation)
             session.commit()
             session.refresh(conversation)
-            print(f"✅ 已存储对话: {conversation.id} ({len(messages)} 条消息)")
+            _logger.info(
+                f"note 会话已存储 user={conversation.user_id} "
+                f"session={conversation.source_session_id} messages={len(messages)}"
+            )
 
 
      def _expand_turn_with_context(self,
@@ -115,7 +125,11 @@ class NoteMemService:
 
      def search_user_memories(self, user_id: str, query: str, top_k: int = 3) -> List[Memory]:
             """检索用户相关对话"""
-            _logger.info(f"检索用户 {user_id} 的记忆: query={query}, top_k={top_k}")
+            from os_mem.infra.p2check import mask_pii
+
+            _logger.info(
+                f"note 检索 user={user_id} query={mask_pii(query)} top_k={top_k}"
+            )
             with get_session() as session:
                 records = session.exec(
                     select(ConversationMemory).where(ConversationMemory.user_id == user_id)
@@ -124,23 +138,22 @@ class NoteMemService:
                 messages = session.exec(
                     select(Message).where(Message.user_id == user_id)
                 ).all()
-            
+
             if not records or not messages:
+                _logger.info(f"note 检索 user={user_id}: 无会话/消息记录，返回空")
                 return []
-            _logger.info(f"检索用户 {user_id} 的对话记录: {len(records)} 条, 消息记录: {len(messages)} 条")
+            _logger.debug(f"note 检索 user={user_id}: 会话 {len(records)} 条, 消息 {len(messages)} 条")
             # 构建文档（对话摘要）
             user_contents = []
             for msg in messages:
                 user_contents.append(msg.content)
-            _logger.info(f"构建文档: {len(user_contents)} 条")
             # BM25 检索
-            # bm25 = SimpleBM25(user_contents)
             bm25 = RankBM25(user_contents)
             results = bm25.retrieve(query, top_k)
-    
+
             memories:List[Memory] = []
             for doc_idx, doc_text, score in results:
-                _logger.info(f"检索结果: {doc_idx}, {messages[doc_idx].masked_text}, {score}")
+                _logger.debug(f"note 检索命中: doc={doc_idx} masked={messages[doc_idx].masked_text} score={score}")
                 fact = self._expand_turn_with_context(messages, doc_idx, expand_before=1, expand_after=1)
                 memory = Memory(
                     user_id=user_id,

@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from datetime import timezone
 from pathlib import Path
 from typing import Any
 
@@ -86,10 +87,12 @@ class _JSONLSink:
         """`message` 是 loguru 的 Message 对象（带 record 属性）。"""
         record: dict[str, Any] = message.record
         payload: dict[str, Any] = {
+            # UTC 时间，带 Z 后缀（采集端无需猜时区）
             "timestamp": (
                 record["time"]
-                .replace(tzinfo=None)
+                .astimezone(timezone.utc)
                 .isoformat(timespec="milliseconds")
+                .replace("+00:00", "Z")
             ),
             "level": record["level"].name,
             "module": str(record["extra"].get("module", "os_mem")),

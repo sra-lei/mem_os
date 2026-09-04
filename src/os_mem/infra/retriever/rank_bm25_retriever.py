@@ -5,7 +5,7 @@ from os_mem.infra.logger import get_logger
 
 # 加载 jieba（首次约 0.5 秒）
 _jieba_loaded = False
-_logger = get_logger("RankBM25")
+_logger = get_logger("os_mem.retriever.rank_bm25")
 
 class RankBM25:
     def __init__(self, convs: List[str]):

@@ -9,7 +9,7 @@ from typing import List
 import math
 
 from os_mem.infra.logger import get_logger
-_logger = get_logger("SimpleBM25")
+_logger = get_logger("os_mem.retriever.simple_bm25")
 # 英文常用停用词（查询与文档统一过滤，避免 what/my/it/set 等词干扰关键词权重）
 _STOPWORDS = {
     "the", "a", "an", "and", "or", "but", "if", "then", "else", "for",

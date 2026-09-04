@@ -29,7 +29,7 @@ from os_mem.models.mem_models import MemoryFact, MemoryFacts
 from os_mem.configs import memory_settings
 
 
-_logger = get_logger("StrucMemStoreService")
+_logger = get_logger("os_mem.struc_mem")
 ALLOWED_CATEGORIES = ["personal", "contact", "preference", "health", "travel", "work", "finance", "family", "education", "other"]
 
 # 精确信息兜底：即便 LLM 提取遗漏，也要把含金额/编号/日期/百分比的原文句子捞进库。
@@ -306,9 +306,14 @@ class StructuredMemService:
         （EXTRACTING / SAVING_SQLITE / SAVING_VECTOR），由调用方（StructProvider）
         接入会话处理状态机；为 None 时保持旧行为（不追踪）。
         """
+        import time
+
+        t0 = time.perf_counter()
+        session_id = conversation.source_session_id or conversation.id or ""
         if on_stage:
             on_stage(STATUS_EXTRACTING)
         llm_facts: List[MemoryFact] = self._extract_structured_facts(conversation)
+        t_extract = time.perf_counter()
 
         # LLM 提取兜底：从原文把含金额/编号/日期/百分比等精确 token 的句子原样入库，
         # 避免结构化提取改写/省略精确数值（如 $2,400、CLM-2024-894327、2:30 PM）。
@@ -327,6 +332,7 @@ class StructuredMemService:
             source_conversation_id=conversation.id or conversation.source_session_id or "",
             facts=conv_facts,
         )
+        t_sqlite = time.perf_counter()
         _logger.info(f"  落库 SQLite struct_memories: {sqlite_written} 条")
 
         # 逐个 embed → 改为批量 embed（DashScope 单批上限 10，自动折半重试）
@@ -349,21 +355,30 @@ class StructuredMemService:
 
         if records:
             self.vector_store.add_structured_memories(records, embeddings)
-        _logger.info(f"  存储结构化记忆: {len(records)}（向量库 mem_os）")
+        _logger.info(
+            f"struct 入库完成 user={conversation.user_id} session={session_id} "
+            f"facts={len(records)} 提取={(t_extract - t0) * 1000:.0f}ms "
+            f"落库={(t_sqlite - t_extract) * 1000:.0f}ms "
+            f"向量={(time.perf_counter() - t_sqlite) * 1000:.0f}ms "
+            f"总={(time.perf_counter() - t0) * 1000:.0f}ms"
+        )
 
     def get_structured_memories(self, user_id: str, query: str, top_k: int = 3) -> List[StructuredMemory]:
         """根据 query 检索结构化记忆（混合检索 + 元数据过滤）"""
+        from os_mem.infra.p2check import mask_pii
+
+        masked_query = mask_pii(query)
         query_embedding: list[float] = []
         try:
             query_embedding = self.vectorizer.embed(query)
         except Exception as e:
-            _logger.error(f"Error embedding for query '{query}': {e}")
+            _logger.error(f"query 向量化失败 user={user_id} query={masked_query}: {e}")
 
         hits = self.vector_store.search(
             query_embedding, query_text=query, top_k=top_k, user_id=user_id,
         ) or []
         if not hits:
-            _logger.warning(f"没有查询到相关记忆 for query '{query}'，返回空列表")
+            _logger.warning(f"struct 检索无命中 user={user_id} query={masked_query}")
 
         _logger.info(f"  获取结构化记忆: {len(hits)} 条")
         memories: List[StructuredMemory] = []

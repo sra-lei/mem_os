@@ -33,7 +33,7 @@ from os_mem.entries.mem_models import ConversationMeta
 from os_mem.infra.logger import get_logger
 from os_mem.infra.storage import get_session
 
-_logger = get_logger("ConvMetaService")
+_logger = get_logger("os_mem.conv_meta")
 
 # ---- 状态常量（单一事实源：与 docs/方案-会话处理状态机与原子入库.md §3.2 一致） ----
 STATUS_PENDING = "PENDING"                # 初始：已登记，尚未进入任何阶段
