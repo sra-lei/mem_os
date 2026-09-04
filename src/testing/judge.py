@@ -10,6 +10,7 @@ EvalView需求文档.md phase-4 design).
 from __future__ import annotations
 
 import json
+import re
 import time
 from dataclasses import dataclass
 from typing import Protocol
@@ -149,3 +150,63 @@ def build_judge(name: str = "moonshot", threshold: float = 0.7) -> JudgeProvider
     if name == "moonshot":
         return MoonshotJudgeProvider()
     raise ValueError(f"unknown judge: {name!r} (available: moonshot)")
+
+
+# ------------------------------------------------------------------ #
+#  assert 判定（默认）：本地确定性数字/关键词命中，零成本、可复现。
+#  与 moonshot 输出结构一致（JudgeResult），调用方无需感知差异。
+# ------------------------------------------------------------------ #
+_NUM_RE = re.compile(r"\b\d{4,}\b")
+_WORD_RE = re.compile(r"[A-Za-z\u4e00-\u9fa5]{3,}")
+_STOPWORDS = {"the", "and", "for", "with", "that", "this", "you", "are"}
+
+
+def _key_numbers(text: str) -> list[str]:
+    """从期望文本里提取关键数字（账号/路由/金额/编号等）。"""
+    return _NUM_RE.findall(text or "")
+
+
+def assert_evaluate(query: str, expected: str, actual: str, threshold: float = 0.7) -> JudgeResult:
+    """本地确定性判定：检查实际答案是否包含期望答案的关键信息。
+
+    - 有数字时按数字命中率打分（账号/路由等场景最准）
+    - 无数字时退化为关键词子串匹配，命中率 >= threshold 视为通过
+    - 期望答案无可校验信息时默认通过
+    """
+    if not actual:
+        return JudgeResult(
+            score=0.0,
+            passed=False,
+            reasoning="assert 判定: 实际答案为空",
+        )
+
+    nums = _key_numbers(expected)
+    if nums:
+        missing = [n for n in nums if n not in actual]
+        passed = not missing
+        score = (len(nums) - len(missing)) / len(nums)
+        reasoning = (
+            f"assert 判定: 关键数字命中 {len(nums) - len(missing)}/{len(nums)}"
+            + (f"，缺失: {missing}" if missing else "")
+        )
+        return JudgeResult(score=score, passed=passed, reasoning=reasoning)
+
+    keys = [
+        w for w in _WORD_RE.findall((expected or "").lower())
+        if w not in _STOPWORDS
+    ]
+    if keys:
+        actual_lc = actual.lower()
+        hit = [w for w in keys if w in actual_lc]
+        score = len(hit) / len(keys)
+        return JudgeResult(
+            score=score,
+            passed=score >= threshold,
+            reasoning=f"assert 判定: 关键词命中 {len(hit)}/{len(keys)}",
+        )
+
+    return JudgeResult(
+        score=1.0,
+        passed=True,
+        reasoning="assert 判定: 期望答案无可校验关键信息，默认通过",
+    )

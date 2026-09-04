@@ -1,60 +1,27 @@
-"""pytest 评测 harness：全链路真实链路（无 mock 冒烟）。
+"""评测 pytest 胶水层 —— 只做 pytest 集成，业务逻辑在 src/testing/ 模块：
 
-评测只保留真实能力：
-  - memory-provider : base | struct | full（默认 base；真实存储/检索/LLM 提取）
-  - llm             : deepseek（真实答案生成）
-  - judge           : assert（本地确定性判定，默认）| moonshot（LLM-as-Judge）
-  - record-db       : 可选；评测结果写回 memos.db，供 EvalView Dashboard
+- 用例加载/分层      → testing.eval_cases   （YAML、layer 标记、phase 映射）
+- 执行编排            → testing.eval_harness （build_provider / run_case_pipeline）
+- 判定                → testing.judge       （assert_evaluate / build_judge）
+- 本文件职责：命令行参数、fixture 注入、动态参数化/打标 hook、可选 DB 上报
 
-单环节验证（入库 / 事实提取等）不通过本评测动态配置 —— 用独立单测文件：
-    pytest tests/test_struct_mem_extract.py      # 事实提取纯逻辑
-    pytest tests/test_struct_mem_sqlite.py       # SQLite 双写入库
-
-评测用例直接来自 tests/test_cases/**/*.yaml（不依赖 DB 导入），
-替代原 CLI (scripts/run_eval.py + src/testing/runner.py) 的入口职责。
-
-用法:
-    pytest tests/test_memory_eval.py -m layer1                 # base provider + assert
-    pytest tests/test_memory_eval.py -m layer2 --memory-provider struct --top-k 15
-    pytest tests/test_memory_eval.py -m layer3 --judge moonshot --record-db
+约定：test_eval_case 通过参数名自动注入 fixture（case_id/case_data 由
+pytest_generate_tests 参数化，其余为下方 fixture）。
 """
 from __future__ import annotations
 
 import json
-import re
-import sys
 import time
-from datetime import datetime
-from pathlib import Path
 from typing import Any
 
 import pytest
-import yaml
 
-# 手动真实验证脚本（非 pytest 用例）：需要在线 Milvus / 写 memos.db，
-# 排除自动收集以免把真实环境副作用带进测试会话；用 `uv run python tests/<file>` 单独跑。
-collect_ignore = [
-    "test_vec_storage.py",        # 向量存储链路真实验证（写入 test_001~003）
-    "test_hybrid_retrieval.py",   # 混合检索召回诊断（连真实 mem_os 库）
-]
+from testing.eval_cases import LAYER_MARKS, load_all_cases, mark_name_for_case
 
-ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
 
-TEST_CASES_DIR = ROOT / "tests" / "test_cases"
-
-# layer (YAML category) -> pytest mark name
-LAYER_MARKS = {"layer1": "layer1", "layer2": "layer2", "layer3": "layer3"}
-
-# layer -> (dashboard phase, version_target)
-LAYER_PHASE_VERSION = {
-    "layer1": ("base", "v0.1"),
-    "layer2": ("multi_session", "v0.2"),
-    "layer3": ("proactive", "v0.3"),
-}
-
-# 记录本次 session 的 run 汇总状态（--record-db 时使用）
+# ------------------------------------------------------------------ #
+#  会话级 run 状态（--record-db 上报用）
+# ------------------------------------------------------------------ #
 _SESSION_T0 = time.monotonic()
 _RUN: dict[str, Any] = {
     "run_id": None,
@@ -63,49 +30,6 @@ _RUN: dict[str, Any] = {
     "passed": 0,
     "recorded": 0,
 }
-
-
-def _parse_ts(value: Any) -> datetime:
-    """YAML timestamp -> datetime，缺失时用当前时间兜底。"""
-    if isinstance(value, datetime):
-        return value
-    if isinstance(value, str):
-        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
-            try:
-                return datetime.strptime(value, fmt)
-            except ValueError:
-                continue
-    return datetime.utcnow()
-
-
-def load_yaml_case(path: Path) -> dict:
-    """读取单个 YAML 用例，返回标准化 dict。"""
-    data = yaml.safe_load(path.read_text(encoding="utf-8"))
-    if not isinstance(data, dict) or not data.get("test_id"):
-        pytest.skip(f"invalid yaml (missing test_id): {path}")
-    return data
-
-
-def load_all_cases() -> list[tuple[str, dict]]:
-    """加载全部 YAML 用例，返回 [(case_id, data), ...]。"""
-    cases = []
-    for path in sorted(TEST_CASES_DIR.glob("**/*.yaml")):
-        data = load_yaml_case(path)
-        cases.append((data["test_id"], data))
-    return cases
-
-
-def phase_version_for_case(case_data: dict) -> tuple[str, str]:
-    """layer (YAML category) -> (dashboard phase, version_target)。"""
-    category = str(case_data.get("category", "")).lower()
-    return LAYER_PHASE_VERSION.get(category, (category or "base", "v0.1"))
-
-
-def build_provider(name: str, user_id: str):
-    """延迟导入 — 避免 module-level 触发 Milvus / LLM 连接。"""
-    from os_mem.provider import build_memory_provider
-
-    return build_memory_provider(name, user_id=user_id)
 
 
 # ------------------------------------------------------------------ #
@@ -128,6 +52,9 @@ def pytest_addoption(parser: pytest.Parser) -> None:
                     help="评测结果写回 memos.db（EvalView Dashboard 可见）")
 
 
+# ------------------------------------------------------------------ #
+#  配置 fixture（直读命令行参数）
+# ------------------------------------------------------------------ #
 @pytest.fixture(scope="session")
 def memory_provider_name(request: pytest.FixtureRequest) -> str:
     return request.config.getoption("--memory-provider")
@@ -154,10 +81,11 @@ def threshold(request: pytest.FixtureRequest) -> float:
 
 
 # ------------------------------------------------------------------ #
-#  核心流程 fixture — 延迟导入避免 module-level 副作用
+#  LLM 与判定 fixture
 # ------------------------------------------------------------------ #
 @pytest.fixture
 def llm_client(llm_name: str):
+    """延迟导入 — testing.llm 构建真实 client，避免收集期副作用。"""
     from testing.llm import build_llm_client
 
     return build_llm_client(llm_name)
@@ -170,102 +98,12 @@ def answer_generator(llm_client):
     return AnswerGenerator(llm_client)
 
 
-def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
-    """为 test_eval_case 动态生成参数化用例。"""
-    if "case_id" in metafunc.fixturenames and "case_data" in metafunc.fixturenames:
-        cases = load_all_cases()
-        ids = [cid for cid, _ in cases]
-        metafunc.parametrize("case_id,case_data", cases, ids=ids)
-
-
-def pytest_collection_modifyitems(
-    config: pytest.Config, items: list[pytest.Item],
-) -> None:
-    """根据 YAML category 自动打 layer 标记；统计评测用例总数（供 --record-db）。"""
-    config._eval_total = 0
-    for item in items:
-        if getattr(item, "originalname", None) == "test_eval_case":
-            config._eval_total += 1
-        if hasattr(item, "callspec"):
-            case_data = item.callspec.params.get("case_data")
-            if isinstance(case_data, dict):
-                category = str(case_data.get("category", "")).lower()
-                mark_name = LAYER_MARKS.get(category)
-                if mark_name:
-                    item.add_marker(getattr(pytest.mark, mark_name))
-
-
-# ------------------------------------------------------------------ #
-#  判定：assert（默认，本地确定性）| moonshot（LLM-as-Judge）
-#  两者返回结构一致（JudgeResult），测试代码无需感知差异。
-# ------------------------------------------------------------------ #
-
-_NUM_RE = re.compile(r"\b\d{4,}\b")
-_WORD_RE = re.compile(r"[A-Za-z\u4e00-\u9fa5]{3,}")
-_STOPWORDS = {"the", "and", "for", "with", "that", "this", "you", "are"}
-
-
-def _key_numbers(text: str) -> list[str]:
-    """从期望文本里提取关键数字（账号/路由/金额/编号等）。"""
-    return _NUM_RE.findall(text or "")
-
-
-def assert_evaluate(query: str, expected: str, actual: str, threshold: float = 0.7):
-    """本地确定性判定：检查实际答案是否包含期望答案的关键信息。
-
-    - 有数字时按数字命中率打分（账号/路由等场景最准）
-    - 无数字时退化为关键词子串匹配，命中率 >= threshold 视为通过
-    - 期望答案无可校验信息时默认通过
-
-    返回 ``testing.judge.JudgeResult``，与 moonshot 判定结果结构一致。
-    """
-    from testing.judge import JudgeResult  # 延迟导入，避免污染全局收集
-
-    if not actual:
-        return JudgeResult(
-            score=0.0,
-            passed=False,
-            reasoning="assert 判定: 实际答案为空",
-        )
-
-    nums = _key_numbers(expected)
-    if nums:
-        missing = [n for n in nums if n not in actual]
-        passed = not missing
-        score = (len(nums) - len(missing)) / len(nums)
-        reasoning = (
-            f"assert 判定: 关键数字命中 {len(nums) - len(missing)}/{len(nums)}"
-            + (f"，缺失: {missing}" if missing else "")
-        )
-        return JudgeResult(score=score, passed=passed, reasoning=reasoning)
-
-    keys = [
-        w for w in _WORD_RE.findall((expected or "").lower())
-        if w not in _STOPWORDS
-    ]
-    if keys:
-        actual_lc = actual.lower()
-        hit = [w for w in keys if w in actual_lc]
-        score = len(hit) / len(keys)
-        return JudgeResult(
-            score=score,
-            passed=score >= threshold,
-            reasoning=f"assert 判定: 关键词命中 {len(hit)}/{len(keys)}",
-        )
-
-    return JudgeResult(
-        score=1.0,
-        passed=True,
-        reasoning="assert 判定: 期望答案无可校验关键信息，默认通过",
-    )
-
-
 @pytest.fixture(scope="session")
 def verifier(judge_mode: str, threshold: float):
     """统一判定函数: ``verifier(query, expected, actual) -> JudgeResult``。
 
-    - assert（默认）: 本地确定性数字/关键词命中判定
-    - moonshot       : 调 ``MoonshotJudgeProvider``（把 expected 当 rubric 注入）
+    - assert（默认）: 本地确定性数字/关键词命中判定（testing.judge.assert_evaluate）
+    - moonshot       : 调 MoonshotJudgeProvider（把 expected 当 rubric 注入）
     """
 
     if judge_mode == "moonshot":
@@ -278,6 +116,8 @@ def verifier(judge_mode: str, threshold: float):
 
         return _verify
 
+    from testing.judge import assert_evaluate
+
     def _assert(query: str, expected: str, actual: str):
         return assert_evaluate(query, expected, actual, threshold=threshold)
 
@@ -285,64 +125,35 @@ def verifier(judge_mode: str, threshold: float):
 
 
 # ------------------------------------------------------------------ #
-#  用例执行流程
+#  动态参数化与打标
 # ------------------------------------------------------------------ #
-def run_case_pipeline(
-    case_data: dict,
-    memory_provider_name: str,
-    answer_generator,
-    top_k: int,
-):
-    """执行单个用例的 ingest → retrieve → answer 流程。
-
-    返回 (completion, retrieved_memories)：completion 含文本与 token 消耗，
-    retrieved_memories 为注入给 LLM 的记忆文本。
-    """
-    case_id = case_data["test_id"]
-    provider = build_provider(memory_provider_name, user_id=case_id)
-
-    histories = case_data.get("conversation_histories", [])
-    for conv in histories:
-        conversation = _build_conversation(conv, case_id)
-        provider.ingest(conversation)
-
-    query = case_data.get("user_question")
-    retrieved = provider.retrieve(query, top_k=top_k)
-    completion = answer_generator.answer(query=query, memories=retrieved)
-    return completion, retrieved
+def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
+    """把 tests/test_cases/**/*.yaml 参数化为 test_eval_case 用例。"""
+    if "case_id" in metafunc.fixturenames and "case_data" in metafunc.fixturenames:
+        cases = load_all_cases()
+        ids = [cid for cid, _ in cases]
+        metafunc.parametrize("case_id,case_data", cases, ids=ids)
 
 
-def _build_conversation(conv: dict, case_id: str):
-    """构造 Conversation 对象 — 延迟导入避免 module-level 副作用。"""
-    from os_mem.models import Conversation
-
-    return Conversation(
-        id=conv.get("conversation_id"),
-        user_id=case_id,
-        summary="",
-        messages=[
-            json.dumps(m, ensure_ascii=False)
-            for m in conv.get("messages", [])
-        ],
-        source_session_id=conv.get("conversation_id"),
-        started_at=_parse_ts(conv.get("timestamp")),
-        ended_at=_parse_ts(conv.get("ended_at") or conv.get("timestamp")),
-        message_count=len(conv.get("messages", [])),
-    )
-
-
-def expected_text_for_case(case_data: dict) -> str:
-    """判定/落库用的期望文本：优先 expected_behavior，缺省回退 rubric。"""
-    return str(
-        case_data.get("expected_behavior")
-        or case_data.get("evaluation_criteria")
-        or ""
-    )
+def pytest_collection_modifyitems(
+    config: pytest.Config, items: list[pytest.Item],
+) -> None:
+    """按 YAML category 自动打 layer 标记（-m layer1 过滤用）；统计用例总数。"""
+    config._eval_total = 0
+    for item in items:
+        if getattr(item, "originalname", None) == "test_eval_case":
+            config._eval_total += 1
+        if hasattr(item, "callspec"):
+            case_data = item.callspec.params.get("case_data")
+            if isinstance(case_data, dict):
+                mark_name = mark_name_for_case(case_data)
+                if mark_name:
+                    item.add_marker(getattr(pytest.mark, mark_name))
 
 
 # ------------------------------------------------------------------ #
 #  可选 DB 上报（--record-db）：结果写回 memos.db 供 EvalView。
-#  每个评测用例把现场写进 holder（request.node._eval_case），
+#  每个用例把现场写进 holder（request.node._eval_case），
 #  teardown 阶段由 pytest_runtest_makereport 统一落库（含异常用例）。
 # ------------------------------------------------------------------ #
 @pytest.fixture
