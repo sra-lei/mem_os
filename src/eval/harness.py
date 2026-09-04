@@ -1,15 +1,16 @@
-"""评测执行编排 —— 从 tests/conftest.py 拆出的运行层。
+"""评测执行编排 —— 评测运行库（eval 包）的运行层。
 
 职责：单个用例的 ingest → retrieve → answer 全流程（provider 构建 + 会话构造）。
 
-只依赖 os_mem 与 testing.eval_cases；不依赖 pytest —— 可在脚本/调试中直接调用。
+只依赖 os_mem 与 eval.cases；不依赖 pytest 与 testing（管理侧）——
+可在脚本/CLI/调试中直接调用。
 """
 
 from __future__ import annotations
 
 import json
 
-from testing.eval_cases import _parse_ts
+from eval.cases import _parse_ts
 
 
 def build_provider(name: str, user_id: str):

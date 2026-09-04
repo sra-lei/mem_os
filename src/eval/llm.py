@@ -16,7 +16,7 @@ from typing import Protocol
 
 from openai import OpenAI
 
-from testing.config import settings
+from eval.config import settings
 
 
 @dataclass

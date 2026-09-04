@@ -486,7 +486,7 @@ def update_progress(run_id: str, completed: int, total: int):
 
 ### Phase 4：迭代优化（做得美，预留详细设计见第十一章）
 10. 实时进度轮询（SSE + Polling 双模式，运行过程实时可见）
-11. 真实 LLM-as-Judge 评测接入（可插拔 Provider、调用记录、缓存、重评测）
+11. 真实 LLM-as-Judge 评测接入（可插拔 Provider、调用记录、缓存）
 12. 用例定义 CRUD 表单（新增/编辑/删除、批量导入 YAML、编辑审计、版本对比 diff）
 13. 导出报告（CSV 明细 + PDF 正式报告，支持单次运行 & 仪表盘汇总）
 
@@ -685,16 +685,9 @@ class RetryJudge:
     ...
 ```
 
-> **并发控制**：同一 `result_id` 的重评测加 DB 级乐观锁：
-> `UPDATE test_case_results SET judge_status='judging' WHERE id=? AND judge_status<>'judging'`
-> 返回 0 行说明有其他 worker 已在执行，提前返回（避免重复扣费）。
-
 #### 11.2.3 新增 API
 
 ```
-POST /api/cases/evaluate          手动触发：对指定 case_id 所有历史结果重新 Judge（后台任务）
-POST /api/runs/{id}/reevaluate    对单次运行所有失败/全部 case 重新 Judge（参数 scope=failed|all）
-GET  /api/runs/{id}/reevaluate/progress   后台任务进度（复用 progress 通道语义）
 GET  /api/judge/stats             仪表盘面板页用：本月调用量、Token、缓存命中率、Top-3 最慢 Provider
 ```
 
@@ -813,7 +806,7 @@ GET    /api/cases/{case_id}/diff?version_from=v0.1   返回 name/query/expected_
 | 导入 | 重复导入同一 YAML | `ON CONFLICT(case_id) DO NOTHING` 或按用户选择覆盖 |
 
 > **全局约定**：
-> - 所有后台任务（PDF 生成、批量重评测、批量导入）统一写 `background_tasks` 表（一表通用，不复用 test_runs 的 status），避免每个子系统各造一套。
+> - 所有后台任务（PDF 生成、批量导入）统一写 `background_tasks` 表（一表通用，不复用 test_runs 的 status），避免每个子系统各造一套。
 > - `progress` 写入节流：前端期望 2 秒刷新，但 DB 写操作最多 500ms 一次——在 runner 循环内加 `time.monotonic()` 时间窗节流，而不是每个 case 都写（避免高频 SQLite 锁冲突）。
 
 ---

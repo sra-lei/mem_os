@@ -1,11 +1,12 @@
-"""评测用例加载与分层 —— 从 tests/conftest.py 拆出的纯数据层。
+"""评测用例加载与分层 —— 评测运行库（eval 包）的纯数据层。
 
 职责：
 - 定位用例目录（锚定仓库根，不随 cwd 漂移）
-- 加载 YAML 用例（校验 test_id）
+- 加载 YAML 用例（校验 test_id；非法文件抛 ValueError）
 - category → layer 标记 / (phase, version) 映射
 
-不依赖 pytest / 不触发任何 os_mem 导入副作用，可独立单测。
+本模块不依赖 pytest / 不触发任何 os_mem 导入副作用：pytest 收集期的 skip
+语义由调用方（tests/conftest.py）自行处理，脚本/CLI 复用无需 pytest。
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-# 锚定仓库根：src/testing/eval_cases.py -> parents[2] = repo root
+# 锚定仓库根：src/eval/cases.py -> parents[2] = repo root
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CASES_DIR = _REPO_ROOT / "tests" / "test_cases"
 
@@ -43,13 +44,12 @@ def _parse_ts(value: Any) -> datetime:
 
 
 def load_yaml_case(path: Path) -> dict:
-    """读取单个 YAML 用例，返回标准化 dict。"""
-    import pytest
+    """读取单个 YAML 用例，返回标准化 dict；无 test_id 抛 ValueError。"""
     import yaml
 
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict) or not data.get("test_id"):
-        pytest.skip(f"invalid yaml (missing test_id): {path}")
+        raise ValueError(f"invalid yaml (missing test_id): {path}")
     return data
 
 

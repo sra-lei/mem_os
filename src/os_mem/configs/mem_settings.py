@@ -16,7 +16,7 @@ class MemorySetting(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     # ------------------------------------------------------------------
-    # DeepSeek — used by testing.llm.DeepSeekLLM as the answer generator
+    # DeepSeek — used by eval.llm.DeepSeekLLM as the answer generator
     # ------------------------------------------------------------------
     DEEPSEEK_BASE_URL: str = "https://api.deepseek.com"
     DEEPSEEK_API_KEY: str | None = None
@@ -32,7 +32,7 @@ class MemorySetting(BaseSettings):
 
     # ------------------------------------------------------------------
     #
-    # Ali — used by testing.llm.AliLLM as the answer generator
+    # Ali — used by eval.llm.AliLLM as the answer generator
     # ------------------------------------------------------------------
     DASHSCOPE_API_KEY: str | None = None
     DASHSCOPE_BASE_URL: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"

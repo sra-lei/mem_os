@@ -7,16 +7,15 @@
 
 ```
 src/
-├── os_mem/                  ← 记忆系统核心（你的地盘，导入用 os_mem. 前缀）
-│  __init__.py   对外公共 API：仅 provider 契约 + 两个能力
-│  provider.py   MemoryProvider 协议（ingest/retrieve）+ register_provider / build_memory_provider
-│  memory.py     Memory 数据模型（需求文档 1.2）
-│  core/         核心实现：generator（提取 1.3）← 你实现 / retriever（检索 1.4）← 你实现
-│                / prompt（注入 1.5）/ stub（占位，通过 build_memory_provider('stub') 获取）
-│  storage/      存储隔离：生产 os_mem.db / 评测临时库
-│  guide/        sanitizer 日志脱敏（1.1）← 你实现
-└── testing/                   ← 评测域（导入用 testing. 前缀）
-   ├── judge.py / llm.py       LLM 判分（Moonshot）/ 答案生成（DeepSeek）
+├── os_mem/                  ← 记忆系统核心（导入用 os_mem. 前缀）
+│  ...
+└── eval/                     ← 评测运行库（导入用 eval. 前缀；启动评测的能力都在这）
+   ├── llm.py                答案生成（DeepSeek / Ali，AnswerGenerator）
+   ├── judge.py              判定：assert_evaluate（本地）/ MoonshotJudgeProvider
+   ├── cases.py              YAML 用例加载、layer/phase 映射
+   ├── harness.py            build_provider / run_case_pipeline（执行编排）
+   └── config.py             评测运行配置（.env：DEEPSEEK_* / MOONSHOT_*）
+└── testing/                   ← 评测管理侧（导入用 testing. 前缀；只管用例/结果）
    ├── services/               store_service：评测数据上报（pytest --record-db）
    ├── api/                    评测 dashboard API（testing.api）
    └── db/                     评测数据存储 memos.db（testing.db）
@@ -53,8 +52,8 @@ test_case (test_case_definitions 表)
   │
   ├─ 1. ingest    对话历史逐段送入记忆系统生成记忆   ← os_mem provider.ingest（你实现）
   ├─ 2. retrieve  用 user_question 检索记忆 Top-K    ← os_mem provider.retrieve（你实现）
-  ├─ 3. answer    agent 把记忆注入上下文后生成回答     ← src/testing AnswerGenerator + LLMClient
-  ├─ 4. judge     用 evaluation_criteria 判分        ← src/testing JudgeProvider
+  ├─ 3. answer    agent 把记忆注入上下文后生成回答     ← eval.llm AnswerGenerator + LLMClient
+  ├─ 4. judge     用 evaluation_criteria 判分        ← eval.judge（assert 本地 / moonshot）
   └─ 5. record    写 test_case_results，更新进度
 ```
 

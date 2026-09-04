@@ -19,8 +19,8 @@ from __future__ import annotations
 import time
 
 import pytest
-from testing.eval_cases import expected_text_for_case, phase_version_for_case
-from testing.eval_harness import run_case_pipeline
+from eval.cases import expected_text_for_case, phase_version_for_case
+from eval.harness import run_case_pipeline
 
 
 def test_eval_case(

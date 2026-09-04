@@ -1,9 +1,10 @@
-"""评测 pytest 胶水层 —— 只做 pytest 集成，业务逻辑在 src/testing/ 模块：
+"""评测 pytest 胶水层 —— 只做 pytest 集成，业务逻辑按职责在 src/ 两包：
 
-- 用例加载/分层      → testing.eval_cases   （YAML、layer 标记、phase 映射）
-- 执行编排            → testing.eval_harness （build_provider / run_case_pipeline）
-- 判定                → testing.judge       （assert_evaluate / build_judge）
-- 本文件职责：命令行参数、fixture 注入、动态参数化/打标 hook、可选 DB 上报
+- 评测运行库 → src/eval/       （cases 用例加载、harness 执行编排、llm、judge）
+- 评测管理侧 → src/testing/    （db 模型、store_service 结果落库、EvalView api）
+
+本文件职责：命令行参数、fixture 注入、动态参数化/打标 hook、可选 DB 上报
+（--record-db 落 testing.services 管理的 memos.db）。
 
 约定：test_eval_case 通过参数名自动注入 fixture（case_id/case_data 由
 pytest_generate_tests 参数化，其余为下方 fixture）。
@@ -16,7 +17,7 @@ from typing import Any
 
 import pytest
 
-from testing.eval_cases import LAYER_MARKS, load_all_cases, mark_name_for_case
+from eval.cases import mark_name_for_case
 
 
 # ------------------------------------------------------------------ #
@@ -85,15 +86,15 @@ def threshold(request: pytest.FixtureRequest) -> float:
 # ------------------------------------------------------------------ #
 @pytest.fixture
 def llm_client(llm_name: str):
-    """延迟导入 — testing.llm 构建真实 client，避免收集期副作用。"""
-    from testing.llm import build_llm_client
+    """延迟导入 — eval.llm 构建真实 client，避免收集期副作用。"""
+    from eval.llm import build_llm_client
 
     return build_llm_client(llm_name)
 
 
 @pytest.fixture
 def answer_generator(llm_client):
-    from testing.llm import AnswerGenerator
+    from eval.llm import AnswerGenerator
 
     return AnswerGenerator(llm_client)
 
@@ -102,12 +103,12 @@ def answer_generator(llm_client):
 def verifier(judge_mode: str, threshold: float):
     """统一判定函数: ``verifier(query, expected, actual) -> JudgeResult``。
 
-    - assert（默认）: 本地确定性数字/关键词命中判定（testing.judge.assert_evaluate）
+    - assert（默认）: 本地确定性数字/关键词命中判定（eval.judge.assert_evaluate）
     - moonshot       : 调 MoonshotJudgeProvider（把 expected 当 rubric 注入）
     """
 
     if judge_mode == "moonshot":
-        from testing.judge import build_judge
+        from eval.judge import build_judge
 
         judge = build_judge("moonshot")
 
@@ -116,7 +117,7 @@ def verifier(judge_mode: str, threshold: float):
 
         return _verify
 
-    from testing.judge import assert_evaluate
+    from eval.judge import assert_evaluate
 
     def _assert(query: str, expected: str, actual: str):
         return assert_evaluate(query, expected, actual, threshold=threshold)
@@ -127,10 +128,23 @@ def verifier(judge_mode: str, threshold: float):
 # ------------------------------------------------------------------ #
 #  动态参数化与打标
 # ------------------------------------------------------------------ #
+def _load_cases_for_pytest():
+    """加载全部 YAML 用例；坏 YAML 抛 ValueError → 转 pytest.skip（与原语义一致：
+    收集期遇到非法用例则跳过评测模块收集）。eval 包本身保持 pytest-free。"""
+    from eval.cases import load_all_cases
+
+    try:
+        return load_all_cases()
+    except ValueError as e:
+        msg = str(e)
+    pytest.skip(msg)
+    return []  # unreachable（pytest.skip 抛出），仅为满足类型推断
+
+
 def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
     """把 tests/test_cases/**/*.yaml 参数化为 test_eval_case 用例。"""
     if "case_id" in metafunc.fixturenames and "case_data" in metafunc.fixturenames:
-        cases = load_all_cases()
+        cases = _load_cases_for_pytest()
         ids = [cid for cid, _ in cases]
         metafunc.parametrize("case_id,case_data", cases, ids=ids)
 
