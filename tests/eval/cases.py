@@ -15,7 +15,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-# 锚定仓库根：src/eval/cases.py -> parents[2] = repo root
+# 锚定仓库根：tests/eval/cases.py -> parents[2] = repo root
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CASES_DIR = _REPO_ROOT / "tests" / "test_cases"
 

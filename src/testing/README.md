@@ -9,16 +9,20 @@
 src/
 ├── os_mem/                  ← 记忆系统核心（导入用 os_mem. 前缀）
 │  ...
-└── eval/                     ← 评测运行库（导入用 eval. 前缀；启动评测的能力都在这）
-   ├── llm.py                答案生成（DeepSeek / Ali，AnswerGenerator）
-   ├── judge.py              判定：assert_evaluate（本地）/ MoonshotJudgeProvider
-   ├── cases.py              YAML 用例加载、layer/phase 映射
-   ├── harness.py            build_provider / run_case_pipeline（执行编排）
-   └── config.py             评测运行配置（.env：DEEPSEEK_* / MOONSHOT_*）
 └── testing/                   ← 评测管理侧（导入用 testing. 前缀；只管用例/结果）
    ├── services/               store_service：评测数据上报（pytest --record-db）
    ├── api/                    评测 dashboard API（testing.api）
    └── db/                     评测数据存储 memos.db（testing.db）
+
+tests/
+├── eval/                     ← 评测运行库（导入用 eval. 前缀；启动评测的能力都在这）
+│   ├── llm.py                答案生成（DeepSeek / Ali，AnswerGenerator）
+│   ├── judge.py              判定：assert_evaluate（本地）/ MoonshotJudgeProvider
+│   ├── cases.py              YAML 用例加载、layer/phase 映射
+│   ├── harness.py            build_provider / run_case_pipeline（执行编排）
+│   └── config.py             评测运行配置（.env：DEEPSEEK_* / MOONSHOT_*）
+├── unit/                     ← 单项单元测试（conv_meta / conv_messages / 事实抽取 / SQLite）
+└── test_memory_eval.py       ← 整体评测入口（pytest 全链路）
 memos.db                     ← 评测数据（test_runs / test_case_results / test_case_definitions）
 os_mem.db                    ← 未来记忆系统的独立库（与 memos.db 完全解耦）
 ```

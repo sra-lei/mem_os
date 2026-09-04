@@ -9,14 +9,7 @@ INSERT 与冲突 UPDATE（旧值归档 ``previous_fact``）。
 """
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
 import pytest
-
-ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
 
 
 @pytest.fixture()

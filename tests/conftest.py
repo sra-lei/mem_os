@@ -1,7 +1,8 @@
-"""评测 pytest 胶水层 —— 只做 pytest 集成，业务逻辑按职责在 src/ 两包：
+"""评测 pytest 胶水层 —— 只做 pytest 集成，业务逻辑按职责分布：
 
-- 评测运行库 → src/eval/       （cases 用例加载、harness 执行编排、llm、judge）
-- 评测管理侧 → src/testing/    （db 模型、store_service 结果落库、EvalView api）
+- 评测运行库 → tests/eval/   （cases 用例加载、harness 执行编排、llm、judge）
+- 评测管理侧 → src/testing/  （db 模型、store_service 结果落库、EvalView api）
+- 整体评测入口 → tests/test_memory_eval.py；单项单元测试 → tests/unit/
 
 本文件职责：命令行参数、fixture 注入、动态参数化/打标 hook、可选 DB 上报
 （--record-db 落 testing.services 管理的 memos.db）。
