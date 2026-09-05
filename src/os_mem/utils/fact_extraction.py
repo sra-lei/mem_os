@@ -19,6 +19,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from collections.abc import Callable
@@ -285,11 +286,16 @@ class FactExtractor:
                     if re.search(r'\$\s?\d|%|\b\d{4}-\d{4}-\d{4}-\d{4}\b', sent)
                     else 'other'
                 )
+                # key 用内容指纹而非聚合的 'verbatim_record'：多条兜底句共享一个
+                # key 会在 (user, key) 冲突 upsert 时互相覆盖（库里只留最后一条，
+                # 其余全部丢失——曾导致 13/17/20 的关键数字句在入库后被消灭）。
+                # 内容指纹：同句重跑同 key（幂等覆盖），异句不同 key（互不踩踏）。
+                digest = hashlib.sha1(sent.encode('utf-8')).hexdigest()[:12]
                 facts.append(
                     MemoryFact(
                         fact=sent,
                         category=category,
-                        key='verbatim_record',
+                        key=f'verbatim_{digest}',
                         value=sent,
                         confidence=0.85,
                     )

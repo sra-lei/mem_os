@@ -42,7 +42,24 @@ SYSTEM_PROMPT = """
 2. category 必须从以下列表中选取：
    personal, contact, preference, health, travel,
    work, finance, family, education, other
-3. key 是字段名（如 'email', 'seat_preference', 'checking_account_number'）
+3. key 是字段名（如 'email', 'seat_preference', 'checking_account_number'）。
+   **key 必须稳定且可复用**：同一概念只允许一个 key，全程复用，不得为同一件事的
+   不同说法发明新 key（如"48 小时内联系"与"24-48 小时内联系"都用同一个 key）。
+   候选 key 参考（按 category）：
+   - personal: full_name, date_of_birth, age, gender, ssn
+   - contact: email, phone_number, address, emergency_contact
+   - finance: account_number, card_number, routing_number, balance,
+     policy_number, claim_number, adjuster_contact_time, monthly_fee,
+     loan_balance, credit_limit, refund_amount, tuition_fee
+   - preference: seat_preference, meal_preference, communication_preference
+   - health: allergy, medication, doctor_name, medical_history, pet_name,
+     pet_breed, pet_weight, pet_condition, vet_visit_fee
+   - travel: confirmation_number, flight_number, seat_number, departure_time,
+     return_time, rental_confirmation
+   - education: course_name, professor, schedule, credit_count
+   - family: spouse_name, child_name, relationship
+   - work: employer, occupation, income
+   列表之外的场景可自拟 key，但必须语义精确且同类复用；禁止为同一事实生成多个近义 key。
 4. 按上述标准尽量提取（宁多勿漏），不要遗漏关键信息；最多 {max_facts} 条（防失控保险）
 5. 金额、编号、日期、时间、百分比、账号、余额、号码等**精确值必须原样保留**
    （含 $、千分位逗号、小数、连字符格式），不得省略、改写、四舍五入或合并进其他条目。
