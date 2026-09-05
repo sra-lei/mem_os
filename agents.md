@@ -147,6 +147,7 @@ uv run python tests/test_vec_storage.py
 ## 7. Git 工作流
 
 - **提交信息**：`type(scope): 中文描述`，type ∈ {feat, fix, refactor, chore, docs, test, perf}，scope 小写（如 os_mem, testing, eval, conv_meta）。单行 ≤ 72 字。
+- **提交信息编码（Windows 必读）**：PowerShell 直接 `git commit -m "中文"` 会把消息按系统 ANSI 编码传参、落库成乱码；中文提交信息一律先写入 UTF-8 无 BOM 临时文件，用 `git commit -F <file> -- <paths>` 提交，验证用 `git log --format=%s`（必要时先执行 `[Console]::OutputEncoding=[Text.Encoding]::UTF8` 再显示）。
 - **提交前**：`git status` 确认只含本任务文件；临时分析脚本（_tmp_*.py 等）删除或放 .tmp，**不提交**。
 - **禁止提交**：`.env`、`*.db`（唯一例外 `src/os_mem/data/memories.db` 因跨机同步被 `!` 白名单追踪）、日志、缓存。
 - **分支**：单人工作流，直接提交 main；不建临时分支/worktree。push 到 `remotes/github/main`。
