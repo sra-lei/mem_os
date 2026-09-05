@@ -23,9 +23,9 @@ from typing import Any, Protocol
 #  §10 来源锚定落地后：用同样的开关复测，验证本策略收益是否仍独立存在。
 # ========================================================================= #
 # 按 (category, key) 去重保各类代表（治 13/14/15/18/19 覆盖不足）
-ENABLE_DIVERSITY = False
+ENABLE_DIVERSITY = True
 # 过滤低信息 verbatim 句（治 02 新旧混入 / 碎片噪音）
-ENABLE_VERBATIM_GATE = False
+ENABLE_VERBATIM_GATE = True
 # ------------------------------------------------------------------------- #
 
 # diversity 策略的放大取回系数：候选 = top_k * N，再收敛回 top_k
