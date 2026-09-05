@@ -1,8 +1,26 @@
+"""事实提取任务 prompt 与 LLM 适配 —— 与通用客户端解耦。
 
+职责划分（2026-09 重构，为接入 LLM 网关铺路）：
+- ``os_mem.infra.llm.deepseek_client.DeepSeekClient`` 是
+  ``os_mem.infra.llm.base_client.ChatClient`` 契约的实现，只负责
+  「通用 client 创建 + ``chat(messages)``」，不感知任何业务 prompt。
+- 本模块负责「事实提取」这个任务的系统提示、消息拼装，并把任意满足
+  ``ChatClient`` 契约的 client（DeepSeek / 未来网关实现）适配成提取链路需要的
+  ``complete(dialog_text) -> raw_json`` 回调（见 ``FactExtractor``）。
 
-from openai import OpenAI
+因此修改提取 prompt（含 {max_facts} 占位等）只需改本文件；
+接入 LLM 网关时替换 ``deepseek_client`` 底层实现即可，本文件与提取链路无需改动。
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+
 from os_mem.configs.mem_settings import memory_settings
+from os_mem.infra.llm.base_client import ChatClient
 
+# 提取任务系统提示：{max_facts} 为单次提取事实数量上限占位，调用时由
+# ``build_extract_messages`` 用 memory_settings.DEEPSEEK_EXTRACT_MAX_FACTS 替换。
 SYSTEM_PROMPT = """
 你是一个信息提取助手。从以下对话中提取值得长期记忆的事实。
 
@@ -21,7 +39,8 @@ SYSTEM_PROMPT = """
 ## 提取规则
 1. 每条事实独立成句，格式为 "用户 ..."
 2. category 必须从以下列表中选取：
-   personal, contact, preference, health, travel, work, finance, family, education, other
+   personal, contact, preference, health, travel,
+   work, finance, family, education, other
 3. key 是字段名（如 'email', 'seat_preference', 'checking_account_number'）
 4. 按上述标准尽量提取（宁多勿漏），不要遗漏关键信息；最多 {max_facts} 条（防失控保险）
 5. 金额、编号、日期、时间、百分比、账号、余额、号码等**精确值必须原样保留**
@@ -49,49 +68,29 @@ SYSTEM_PROMPT = """
 }
 """
 
-class LLMClient:
-    def __init__(self) -> None:
-        self.client = OpenAI(   
-            api_key=memory_settings.DEEPSEEK_API_KEY,
-            base_url=memory_settings.DEEPSEEK_BASE_URL,
+
+def build_extract_messages(dialog_text: str) -> list[dict[str, str]]:
+    """拼装事实提取的完整 messages（system 提示 + 待提取对话）。"""
+    system = SYSTEM_PROMPT.replace(
+        '{max_facts}', str(memory_settings.DEEPSEEK_EXTRACT_MAX_FACTS)
+    )
+    return [
+        {'role': 'system', 'content': system},
+        {'role': 'user', 'content': f'请从以下对话中提取结构化事实：\n\n{dialog_text}'},
+    ]
+
+
+def build_extract_complete(client: ChatClient) -> Callable[[str], str]:
+    """把通用 LLM client 适配为 ``FactExtractor`` 期望的提取回调。
+
+    返回 ``(dialog_text) -> raw_json``：内部按事实提取任务要求拼装
+    system/user 消息并以 json_object 响应格式调用 ``client.chat``。
+    """
+    response_format = {'type': 'json_object'}
+
+    def complete(dialog_text: str) -> str:
+        return client.chat(
+            build_extract_messages(dialog_text), response_format=response_format
         )
 
-    def complete(self, dialog_text: str, retries: int = 3) -> str:
-        """调用 DeepSeek 提取结构化事实。
-
-        模型偶发返回空 content（deepseek-v4-flash 对长文本不稳定），
-        空返回时等待后重试（指数等待 1.5s/3s/4.5s），仍空则返回 "" 交给上层。
-        """
-        import time
-
-        for attempt in range(retries):
-            resp = self.client.chat.completions.create(
-                model=memory_settings.DEEPSEEK_MODEL,
-                messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT.replace(
-                        "{max_facts}", str(memory_settings.DEEPSEEK_EXTRACT_MAX_FACTS),
-                    )},
-                    {"role": "user", "content": f"请从以下对话中提取结构化事实：\n\n{dialog_text}"}
-                ],
-                response_format={"type": "json_object"},
-                temperature=memory_settings.DEEPSEEK_TEMPERATURE,
-                max_tokens=memory_settings.DEEPSEEK_MAX_TOKENS,
-                timeout=memory_settings.DEEPSEEK_TIMEOUT,
-            )
-            content = resp.choices[0].message.content
-            if content:
-                return content
-            # 模型/API 偶发返回空 content（限流或模型不稳定），
-            # 拉长退避时间等待恢复：3s / 6s / 9s
-            if attempt < retries - 1:
-                wait = 3.0 * (attempt + 1)
-                time.sleep(wait)
-        return ""
-
-
-_llm_client = None
-def get_llm_client() -> LLMClient:
-    global _llm_client
-    if _llm_client is None:
-        _llm_client = LLMClient()
-    return _llm_client
+    return complete

@@ -11,7 +11,8 @@ from os_mem.core.services.conv_meta_service import (
     STATUS_SAVING_VECTOR,
 )
 from os_mem.entries.mem_models import StructuredMemory
-from os_mem.infra.llm.llm_client import LLMClient, get_llm_client
+from os_mem.infra.llm.base_client import ChatClient
+from os_mem.infra.llm.deepseek_client import get_llm_client
 from os_mem.infra.logger import get_logger
 from os_mem.infra.storage import (
     MemoryVectorStore,
@@ -22,6 +23,7 @@ from os_mem.infra.storage import (
 )
 from os_mem.models import Conversation
 from os_mem.models.mem_models import MemoryFact
+from os_mem.utils.extract_prompt import build_extract_complete
 from os_mem.utils.fact_extraction import FactExtractor
 
 _logger = get_logger('os_mem.struc_mem')
@@ -32,9 +34,14 @@ _extractor = FactExtractor()
 
 class StructuredMemService:
     def __init__(
-        self, client: LLMClient, vectorizer: Vectorizer, vector_store: MemoryVectorStore
+        self,
+        client: ChatClient,
+        vectorizer: Vectorizer,
+        vector_store: MemoryVectorStore,
     ) -> None:
         self.client = client
+        # 通用 client 适配为事实提取 complete 回调（prompt 见 utils/extract_prompt）
+        self._extract_complete = build_extract_complete(client)
         self.vectorizer = vectorizer
         self.vector_store = vector_store
 
@@ -111,7 +118,7 @@ class StructuredMemService:
         # LLM 结构化提取（分段/并行/降级，见 FactExtractor）
         llm_facts: list[MemoryFact] = _extractor.extract_structured_facts(
             dialog_text,
-            complete=self.client.complete,
+            complete=self._extract_complete,
         )
         t_extract = time.perf_counter()
 
