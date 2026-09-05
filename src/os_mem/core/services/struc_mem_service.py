@@ -226,9 +226,26 @@ class StructuredMemService:
     def get_structured_memories(
         self, user_id: str, query: str, top_k: int = 3
     ) -> list[StructuredMemory]:
-        """根据 query 检索结构化记忆（混合检索 + 元数据过滤）"""
+        """根据 query 检索结构化记忆（混合检索 + 元数据过滤）。
+
+        检索策略层（可插拔，见 os_mem.core.retrieval_strategies）：
+        - 开关在 retrieval_strategies.py 顶部布尔变量（ENABLE_DIVERSITY /
+          ENABLE_VERBATIM_GATE），评测手动改 True/False 即可回退基线；
+        - diversity 开启时需放大取回候选（top_k × 倍数）再收敛；
+        - 策略只作用于候选列表 → 注入列表，不改搜索本身 → §10 来源锚定落地后可
+          原样复用并复测收益。
+        """
+        from os_mem.core.retrieval_strategies import (
+            DIVERSITY_FETCH_MULTIPLIER,
+            ENABLE_DIVERSITY,
+            apply_retrieval_strategies,
+        )
         from os_mem.infra.p2check import mask_pii
 
+        # diversity 需放大取回（去重收敛后才有足够不同 key 填满 top_k）
+        fetch_k = (
+            top_k * DIVERSITY_FETCH_MULTIPLIER if ENABLE_DIVERSITY else top_k
+        )
         masked_query = mask_pii(query)
         query_embedding: list[float] = []
         try:
@@ -240,7 +257,7 @@ class StructuredMemService:
             self.vector_store.search(
                 query_embedding,
                 query_text=query,
-                top_k=top_k,
+                top_k=fetch_k,
                 user_id=user_id,
             )
             or []
@@ -248,7 +265,13 @@ class StructuredMemService:
         if not hits:
             _logger.warning(f'struct 检索无命中 user={user_id} query={masked_query}')
 
-        _logger.info(f'  获取结构化记忆: {len(hits)} 条')
+        # 检索策略后处理（全关时直出前 top_k = 基线）
+        hits = apply_retrieval_strategies(query, hits, top_k)
+
+        _logger.info(
+            f'  获取结构化记忆: {len(hits)} 条'
+            f'（fetch={fetch_k} top_k={top_k}）'
+        )
         memories: list[StructuredMemory] = []
         allowed = {'id', 'fact', 'category', 'key', 'value', 'user_id', 'updated_at'}
         for hit in hits:
@@ -271,3 +294,14 @@ def get_structured_mem_service() -> StructuredMemService:
             get_llm_client(), _vectorizer, _vector_store
         )
     return _structured_mem_service
+
+
+# ========================================================================= #
+#  检索策略开关（评测用）—— 唯一控制点在 os_mem/core/retrieval_strategies.py 顶部：
+#  ENABLE_DIVERSITY = False   # 按 (category, key) 去重保各类代表
+#                            #   （治 13/14/15/18/19 覆盖不足）
+#  ENABLE_VERBATIM_GATE = False  # 过滤低信息 verbatim 句
+#                               #   （治 02 新旧混入 / 碎片噪音）
+#  评测对比基线：两个都设 False（默认）即为无策略直出。
+#  §10 来源锚定落地后：用同样开关复测，验证本策略收益是否仍独立存在。
+# ========================================================================= #
