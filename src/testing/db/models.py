@@ -21,7 +21,7 @@ def utcnow() -> datetime:
 
 # ---------- test_runs ----------
 class TestRun(SQLModel, table=True):
-    __tablename__: str = 'test_runs'
+    __tablename__: str = 'test_runs'  # pyright: ignore[reportIncompatibleVariableOverride]
 
     id: str = Field(default_factory=lambda: uuid.uuid4().hex, primary_key=True)
     version: str = Field(index=True)  # 'v0.1' | 'v0.2' | ...
@@ -42,7 +42,7 @@ class TestRun(SQLModel, table=True):
 
 # ---------- test_case_results ----------
 class TestCaseResult(SQLModel, table=True):
-    __tablename__: str = 'test_case_results'
+    __tablename__: str = 'test_case_results'  # pyright: ignore[reportIncompatibleVariableOverride]
 
     id: str = Field(default_factory=lambda: uuid.uuid4().hex, primary_key=True)
     run_id: str = Field(index=True, foreign_key='test_runs.id')
@@ -66,7 +66,7 @@ class TestCaseResult(SQLModel, table=True):
 
 # ---------- test_case_definitions ----------
 class TestCaseDefinition(SQLModel, table=True):
-    __tablename__: str = 'test_case_definitions'
+    __tablename__: str = 'test_case_definitions'  # pyright: ignore[reportIncompatibleVariableOverride]
 
     case_id: str = Field(primary_key=True)
     name: str
