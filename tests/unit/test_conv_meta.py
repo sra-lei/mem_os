@@ -16,12 +16,20 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from pathlib import Path
+from typing import TYPE_CHECKING, Callable, Iterator, Optional
 
 import pytest
 
+if TYPE_CHECKING:
+    from os_mem.core.mem_provider.struct_provider import StructProvider
+    from os_mem.core.services.conv_meta_service import ConversationMetaService
+    from os_mem.entries.mem_models import ConversationMeta
+    from os_mem.models import Conversation
+
 
 @pytest.fixture()
-def tmp_memory_db(tmp_path, monkeypatch):
+def tmp_memory_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     """把记忆库指向临时文件，避免污染真实 os_mem.db。"""
     from os_mem.infra.storage import mem_storage
 
@@ -32,13 +40,16 @@ def tmp_memory_db(tmp_path, monkeypatch):
     mem_storage.MemoryDatabase._engines.clear()
 
 
-def _svc():
+def _svc() -> ConversationMetaService:
     from os_mem.core.services.conv_meta_service import get_conversation_meta_service
 
     return get_conversation_meta_service()
 
 
-def _load_rows(user_id=None, session_id=None):
+def _load_rows(
+    user_id: str | None = None,
+    session_id: str | None = None,
+) -> list[ConversationMeta]:
     from sqlmodel import select
 
     from os_mem.entries.mem_models import ConversationMeta
@@ -53,7 +64,7 @@ def _load_rows(user_id=None, session_id=None):
         return session.exec(q).all()
 
 
-def _age_row(meta_id, seconds=3600):
+def _age_row(meta_id: str, seconds: int = 3600) -> None:
     """把行改旧，模拟「进程崩溃后租约过期」的残留会话。"""
     from sqlmodel import select
 
@@ -70,7 +81,11 @@ def _age_row(meta_id, seconds=3600):
         session.commit()
 
 
-def _conversation(user_id, session_id, messages=('{"role":"user","content":"hi"}',)):
+def _conversation(
+    user_id: str,
+    session_id: str,
+    messages: tuple[str, ...] = ('{"role":"user","content":"hi"}',),
+) -> Conversation:
     from os_mem.models import Conversation
 
     return Conversation(
@@ -83,17 +98,23 @@ def _conversation(user_id, session_id, messages=('{"role":"user","content":"hi"}
     )
 
 
-def _provider_with_dummy_service(user_id="u1", fail_on_ingest: bool = False):
+def _provider_with_dummy_service(
+    user_id: str = "u1", fail_on_ingest: bool = False,
+) -> StructProvider:
     """用假 service 替换真实（LLM/Milvus）链路，只验证编排逻辑。"""
     from os_mem.core.mem_provider.struct_provider import StructProvider
 
     class DummyService:
-        def __init__(self):
+        def __init__(self) -> None:
             self.calls = 0
             self.seen_stages: list[str] = []
             self.fail_on_ingest = fail_on_ingest
 
-        def add_structured_memory(self, conversation, on_stage=None):
+        def add_structured_memory(
+            self,
+            conversation: Conversation,
+            on_stage: Optional[Callable[[str], None]] = None,
+        ) -> None:
             self.calls += 1
             if on_stage is not None:
                 for stage in ("EXTRACTING", "SAVING_SQLITE", "SAVING_VECTOR"):
@@ -111,7 +132,7 @@ def _provider_with_dummy_service(user_id="u1", fail_on_ingest: bool = False):
 # --------------------------------------------------------------------- #
 #  状态机
 # --------------------------------------------------------------------- #
-def test_machine_full_forward_chain_ok():
+def test_machine_full_forward_chain_ok() -> None:
     from os_mem.core.services.conv_meta_service import (
         STATUS_COMPLETED,
         STATUS_EXTRACTING,
@@ -134,7 +155,7 @@ def test_machine_full_forward_chain_ok():
     assert m.is_terminal(STATUS_COMPLETED)
 
 
-def test_machine_rejects_illegal_transitions():
+def test_machine_rejects_illegal_transitions() -> None:
     from os_mem.core.state_machine import IllegalTransitionError
     from os_mem.core.services.conv_meta_service import (
         STATUS_COMPLETED,
@@ -162,7 +183,7 @@ def test_machine_rejects_illegal_transitions():
             m.validate(cur, nxt)
 
 
-def test_machine_same_state_noop_allowed():
+def test_machine_same_state_noop_allowed() -> None:
     from os_mem.core.services.conv_meta_service import (
         STATUS_EXTRACTING,
         process_state_machine,
@@ -173,7 +194,7 @@ def test_machine_same_state_noop_allowed():
     m.validate(STATUS_EXTRACTING, STATUS_EXTRACTING)
 
 
-def test_machine_failed_reachable_from_every_active_state():
+def test_machine_failed_reachable_from_every_active_state() -> None:
     from os_mem.core.services.conv_meta_service import process_state_machine
 
     m = process_state_machine()
@@ -184,7 +205,7 @@ def test_machine_failed_reachable_from_every_active_state():
 # --------------------------------------------------------------------- #
 #  claim 门禁
 # --------------------------------------------------------------------- #
-def test_claim_claims_new_conversation_with_metadata(tmp_memory_db):
+def test_claim_claims_new_conversation_with_metadata(tmp_memory_db: Path) -> None:
     svc = _svc()
     started = datetime.utcnow() - timedelta(minutes=5)
     proc = svc.claim(
@@ -206,7 +227,7 @@ def test_claim_claims_new_conversation_with_metadata(tmp_memory_db):
     assert not hasattr(rows[0], "raw_payload")  # 原文不存元数据表
 
 
-def test_claim_skips_completed_but_restarts_failed(tmp_memory_db):
+def test_claim_skips_completed_but_restarts_failed(tmp_memory_db: Path) -> None:
     svc = _svc()
     proc = svc.claim("u1", "s1")
 
@@ -236,7 +257,7 @@ def test_claim_skips_completed_but_restarts_failed(tmp_memory_db):
     assert _load_rows(user_id="u1", session_id="s2")[0].status == "COMPLETED"
 
 
-def test_claim_active_fresh_is_in_flight_but_stale_is_takeover(tmp_memory_db):
+def test_claim_active_fresh_is_in_flight_but_stale_is_takeover(tmp_memory_db: Path) -> None:
     svc = _svc()
     proc = svc.claim("u1", "s1")
 
@@ -253,7 +274,7 @@ def test_claim_active_fresh_is_in_flight_but_stale_is_takeover(tmp_memory_db):
     assert taken.attempts == 1
 
 
-def test_claim_different_sessions_and_users_independent(tmp_memory_db):
+def test_claim_different_sessions_and_users_independent(tmp_memory_db: Path) -> None:
     svc = _svc()
     assert svc.claim("u1", "s1") is not None
     assert svc.claim("u1", "s2") is not None
@@ -261,7 +282,7 @@ def test_claim_different_sessions_and_users_independent(tmp_memory_db):
     assert len(_load_rows(user_id="u1")) == 2
 
 
-def test_claim_rejects_empty_ids(tmp_memory_db):
+def test_claim_rejects_empty_ids(tmp_memory_db: Path) -> None:
     svc = _svc()
     with pytest.raises(ValueError):
         svc.claim("", "s1")
@@ -272,7 +293,7 @@ def test_claim_rejects_empty_ids(tmp_memory_db):
 # --------------------------------------------------------------------- #
 #  StructProvider 编排
 # --------------------------------------------------------------------- #
-def test_provider_first_ingest_completed_duplicate_skipped(tmp_memory_db):
+def test_provider_first_ingest_completed_duplicate_skipped(tmp_memory_db: Path) -> None:
     p = _provider_with_dummy_service()
     conv = _conversation("u1", "conv-1")
 
@@ -291,7 +312,7 @@ def test_provider_first_ingest_completed_duplicate_skipped(tmp_memory_db):
     assert _load_rows(user_id="u1")[0].status == "COMPLETED"
 
 
-def test_provider_failure_then_reingest_restarts_to_completed(tmp_memory_db):
+def test_provider_failure_then_reingest_restarts_to_completed(tmp_memory_db: Path) -> None:
     p = _provider_with_dummy_service(fail_on_ingest=True)
     conv = _conversation("u1", "conv-2")
 
@@ -318,7 +339,7 @@ def test_provider_failure_then_reingest_restarts_to_completed(tmp_memory_db):
     assert _load_rows(user_id="u1")[0].last_error == ""
 
 
-def test_provider_metadata_stored_no_payload(tmp_memory_db):
+def test_provider_metadata_stored_no_payload(tmp_memory_db: Path) -> None:
     p = _provider_with_dummy_service()
     p.ingest(_conversation("u1", "conv-3"))
 
@@ -332,7 +353,7 @@ def test_provider_metadata_stored_no_payload(tmp_memory_db):
 # --------------------------------------------------------------------- #
 #  base/struct 共享 conv_meta 的协作语义（方案1 合并）
 # --------------------------------------------------------------------- #
-def test_ensure_registered_inserts_pending_and_is_idempotent(tmp_memory_db):
+def test_ensure_registered_inserts_pending_and_is_idempotent(tmp_memory_db: Path) -> None:
     svc = _svc()
     row = svc.ensure_registered("u1", "s1", message_count=2)
     assert row is not None
@@ -347,7 +368,7 @@ def test_ensure_registered_inserts_pending_and_is_idempotent(tmp_memory_db):
     assert rows[0].attempts == 0
 
 
-def test_struct_claim_takes_over_registered_pending(tmp_memory_db):
+def test_struct_claim_takes_over_registered_pending(tmp_memory_db: Path) -> None:
     """base 先登记（PENDING）→ struct claim 立即接管（免租约），attempts 计数重启。"""
     svc = _svc()
     svc.ensure_registered("u1", "s1", message_count=1)
@@ -363,7 +384,7 @@ def test_struct_claim_takes_over_registered_pending(tmp_memory_db):
     assert _load_rows(user_id="u1", session_id="s1")[0].status == "COMPLETED"
 
 
-def test_ensure_registered_never_touches_struct_active_row(tmp_memory_db):
+def test_ensure_registered_never_touches_struct_active_row(tmp_memory_db: Path) -> None:
     """struct 正在处理（EXTRACTING 新鲜）→ base 登记不得抢/不得改状态。"""
     svc = _svc()
     proc = svc.claim("u1", "s1")  # struct 认领，EXTRACTING
@@ -373,7 +394,7 @@ def test_ensure_registered_never_touches_struct_active_row(tmp_memory_db):
     assert rows[0].attempts == 0  # base 未接管，attempts 不被污染
 
 
-def test_base_ingest_registers_and_writes_messages_then_rerun_skips(tmp_memory_db):
+def test_base_ingest_registers_and_writes_messages_then_rerun_skips(tmp_memory_db: Path) -> None:
     """base provider：登记 conv_meta(PENDING) + 原文落库；重复 ingest 跳过不重写。"""
     from os_mem.core.mem_provider.base_provider import BaseProvider
 
@@ -407,7 +428,7 @@ def test_base_ingest_registers_and_writes_messages_then_rerun_skips(tmp_memory_d
     assert _load_rows(user_id="bu1", session_id="bc1")[0].attempts == 1
 
 
-def test_base_ingest_after_struct_completed_adds_missing_messages_without_touching_status(tmp_memory_db):
+def test_base_ingest_after_struct_completed_adds_missing_messages_without_touching_status(tmp_memory_db: Path) -> None:
     """struct 先 COMPLETED（未存原文）→ base 后 ingest：补消息、不改 struct 状态。"""
     from os_mem.core.mem_provider.base_provider import BaseProvider
     from os_mem.entries.mem_models import Message

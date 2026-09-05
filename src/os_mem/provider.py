@@ -23,7 +23,7 @@ class MemoryProvider(Protocol):
                   (LLM extraction, ≤3 facts per session, PII-redacted logging)
       - retrieve: module 1.4 — BM25 over the user's memories, top-k, k=3 default
     """
-    def __init__(self, user_id: str):
+    def __init__(self, user_id: str) -> None:
         """Initialize the memory provider with the given user ID."""
         ...
 

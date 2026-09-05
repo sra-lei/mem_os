@@ -55,7 +55,7 @@ MAX_FALLBACK_FACTS = 60
 class FactExtractor:
     """事实抽取链路的内聚工具类（线程安全：除 LLM 回调外无共享可变状态）。"""
 
-    def __init__(self, complete: Optional[Callable[[str], str]] = None):
+    def __init__(self, complete: Optional[Callable[[str], str]] = None) -> None:
         """complete：``(dialog_text) -> raw_json`` 的 LLM 回调；也可在调用时按次传入。"""
         self._complete = complete
 
@@ -130,7 +130,10 @@ class FactExtractor:
     # ------------------------------------------------------------------ #
     #  LLM 提取（单段 + 编排）
     # ------------------------------------------------------------------ #
-    def _resolve_complete(self, complete) -> Callable[[str], str]:
+    def _resolve_complete(
+        self,
+        complete: Optional[Callable[[str], str]] = None,
+    ) -> Callable[[str], str]:
         fn = complete or self._complete
         if fn is None:
             raise ValueError("FactExtractor 需要 LLM complete 回调（构造或调用时传入）")

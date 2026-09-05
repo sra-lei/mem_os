@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import delete as sa_delete
@@ -50,7 +50,7 @@ def list_runs(
     phase: Optional[str] = Query(None),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
-):
+) -> RunListResponse:
     with get_session() as session:
         stmt = select(TestRun).order_by(TestRun.run_at.desc())
         if version:
@@ -88,7 +88,7 @@ def list_runs(
 
 
 @router.get("/versions", response_model=list[str])
-def list_run_versions():
+def list_run_versions() -> list[str]:
     """Return distinct run versions for filter dropdowns (newest first)."""
     with get_session() as session:
         stmt = (
@@ -101,7 +101,7 @@ def list_run_versions():
 
 
 @router.get("/{run_id}", response_model=RunDetailResponse)
-def get_run(run_id: str):
+def get_run(run_id: str) -> RunDetailResponse:
     with get_session() as session:
         run = session.get(TestRun, run_id)
         if run is None:
@@ -147,7 +147,7 @@ def get_run(run_id: str):
 
 
 @router.get("/{run_id}/progress", response_model=RunProgress)
-def get_run_progress(run_id: str):
+def get_run_progress(run_id: str) -> RunProgress:
     with get_session() as session:
         run = session.get(TestRun, run_id)
         if run is None:
@@ -172,7 +172,7 @@ def get_run_progress(run_id: str):
 
 
 @router.get("/{run_id}/chart")
-def get_run_chart(run_id: str):
+def get_run_chart(run_id: str) -> dict[str, Any]:
     """Return chart-friendly data for a single run."""
     with get_session() as session:
         run = session.get(TestRun, run_id)
@@ -214,7 +214,7 @@ def get_run_chart(run_id: str):
 
 
 @router.post("", response_model=CreateRunResponse, status_code=201)
-def create_run(req: CreateRunRequest):
+def create_run(req: CreateRunRequest) -> CreateRunResponse:
     """Create a run placeholder (status='running'); the runner fills results later."""
     import uuid
 
@@ -244,7 +244,7 @@ def create_run(req: CreateRunRequest):
 # NOTE: concrete-path routes must be declared before "/{run_id}" wildcard routes.
 
 @router.delete("")
-def clear_all_runs():
+def clear_all_runs() -> dict[str, int]:
     """Delete ALL runs together with their case results (irreversible).
 
     Refuses while any run is still 'running' to avoid the runner writing
@@ -273,7 +273,7 @@ def clear_all_runs():
 
 
 @router.delete("/{run_id}")
-def delete_run(run_id: str):
+def delete_run(run_id: str) -> dict[str, Any]:
     """Delete one run and all its case results (irreversible)."""
     with get_session() as session:
         run = session.get(TestRun, run_id)

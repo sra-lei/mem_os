@@ -26,7 +26,7 @@ from typing import Optional
 
 from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
-from sqlmodel import select
+from sqlmodel import Session, select
 
 from os_mem.core.state_machine import IllegalTransitionError, LinearStateMachine
 from os_mem.entries.mem_models import ConversationMeta
@@ -222,7 +222,7 @@ class ConversationMetaService:
         return age > _LEASE_SECONDS
 
     @staticmethod
-    def _cas_take_over(session, row_id: str, observed_status: str) -> bool:
+    def _cas_take_over(session: Session, row_id: str, observed_status: str) -> bool:
         """原子接管：仅当当前状态仍是观测值时置为 EXTRACTING 并 attempts+1。
 
         返回是否更新成功（1 行）。SQLite 单写者下，两个并发接管只有一个匹配。
@@ -246,7 +246,7 @@ class ConversationMetaService:
     # ------------------------------------------------------------------ #
     # 运行内状态推进（严格状态机，不可逆）
     # ------------------------------------------------------------------ #
-    def _load(self, meta_id: str, session) -> ConversationMeta:
+    def _load(self, meta_id: str, session: Session) -> ConversationMeta:
         row = session.exec(
             select(ConversationMeta).where(ConversationMeta.id == meta_id)
         ).first()

@@ -2,10 +2,10 @@
 from __future__ import annotations
 
 from datetime import timedelta
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
-from sqlmodel import select, func, and_, case
+from sqlmodel import Session, select, func, and_, case
 
 from testing.db import get_session
 from testing.db.models import TestRun, TestCaseResult, TestCaseDefinition, utcnow
@@ -47,7 +47,7 @@ def _fill_run_derived(s: RunSummary) -> RunSummary:
     return s
 
 
-def _build_failing_cases(session, limit: int = 20) -> List[FailingCase]:
+def _build_failing_cases(session: Session, limit: int = 20) -> List[FailingCase]:
     """Rich failing-case rows (category, latest run metadata, pass/fail totals)
     consumed by the React Dashboard's failing-cards grid."""
 
@@ -136,7 +136,7 @@ def _build_failing_cases(session, limit: int = 20) -> List[FailingCase]:
 
 
 @router.get("/overview", response_model=OverviewStats)
-def overview_stats():
+def overview_stats() -> OverviewStats:
     with get_session() as session:
         # 1) total_runs + latest run
         total_runs = session.exec(select(func.count(TestRun.id))).one()
@@ -203,7 +203,7 @@ def overview_stats():
 # Internal helpers (shared by dashboard / trend / by-category endpoints)
 # ---------------------------------------------------------------------------
 
-def _recent_runs(session, limit: int) -> List[RunSummary]:
+def _recent_runs(session: Session, limit: int) -> List[RunSummary]:
     """Return the most recent `limit` runs with derived name/failed filled."""
     stmt = select(TestRun).order_by(TestRun.run_at.desc()).limit(limit)
     return [
@@ -212,7 +212,7 @@ def _recent_runs(session, limit: int) -> List[RunSummary]:
     ]
 
 
-def _trend_points(session, limit: int) -> List[TrendPoint]:
+def _trend_points(session: Session, limit: int) -> List[TrendPoint]:
     """Return historical pass-rate trend points.
 
     Fetches the latest `limit` runs ordered by `run_at` DESC so the sample
@@ -246,7 +246,7 @@ def _trend_points(session, limit: int) -> List[TrendPoint]:
     return points
 
 
-def _category_rows(session, *, run_id: Optional[str] = None):
+def _category_rows(session: Session, *, run_id: Optional[str] = None) -> list[Any]:
     """Return (category, total_count, passed_count, avg_latency_ms) tuples.
 
     Scoped to a specific run when `run_id` is provided; otherwise aggregated
@@ -267,7 +267,7 @@ def _category_rows(session, *, run_id: Optional[str] = None):
     return session.exec(stmt).all()
 
 
-def _build_category_stats(session, *, run_id: Optional[str] = None) -> List[CategoryStat]:
+def _build_category_stats(session: Session, *, run_id: Optional[str] = None) -> List[CategoryStat]:
     stats: List[CategoryStat] = []
     for row in _category_rows(session, run_id=run_id):
         category = row[0] or "unknown"
@@ -292,7 +292,7 @@ def _build_category_stats(session, *, run_id: Optional[str] = None) -> List[Cate
 # ---------------------------------------------------------------------------
 
 @router.get("/dashboard", response_model=DashboardStats)
-def dashboard_stats():
+def dashboard_stats() -> DashboardStats:
     """Single-shot aggregation used by the React Dashboard page."""
     with get_session() as session:
         overview = overview_stats()  # computed via the overview endpoint above
@@ -345,21 +345,21 @@ def dashboard_stats():
 
 
 @router.get("/trend", response_model=List[TrendPoint])
-def trend_stats(limit: int = Query(10, ge=1, le=100)):
+def trend_stats(limit: int = Query(10, ge=1, le=100)) -> List[TrendPoint]:
     """Pass-rate trend points ordered chronologically (ascending run_at)."""
     with get_session() as session:
         return _trend_points(session, limit=limit)
 
 
 @router.get("/by-category", response_model=List[CategoryStat])
-def by_category_stats_global():
+def by_category_stats_global() -> List[CategoryStat]:
     """Per-category pass+latency stats aggregated across ALL historical runs."""
     with get_session() as session:
         return _build_category_stats(session)
 
 
 @router.get("/by-category/{run_id}", response_model=List[CategoryStat])
-def by_category_stats_for_run(run_id: str):
+def by_category_stats_for_run(run_id: str) -> List[CategoryStat]:
     """Per-category pass+latency stats scoped to one specific run."""
     with get_session() as session:
         # Validate run exists so 404 surfaces for garbage IDs

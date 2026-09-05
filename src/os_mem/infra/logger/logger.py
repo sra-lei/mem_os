@@ -44,7 +44,7 @@ class _JSONLSink:
     超过 14 天的老文件在 init 阶段清理一次。
     """
 
-    def __init__(self, log_dir: Path, base_name: str = "app", retention_days: int = 14):
+    def __init__(self, log_dir: Path, base_name: str = "app", retention_days: int = 14) -> None:
         self._log_dir = log_dir
         self._base_name = base_name
         self._retention_days = retention_days
@@ -167,7 +167,7 @@ class LoggerHelper:
     保持原接口（debug/info/warning/error/critical），调用方零改动。
     """
 
-    def __init__(self, name: str = "os_mem", level: int | None = None):
+    def __init__(self, name: str = "os_mem", level: int | None = None) -> None:
         self._module = name
         self._logger = _loguru_root.bind(module=name)
 

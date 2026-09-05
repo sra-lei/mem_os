@@ -10,15 +10,20 @@
 约定：test_eval_case 通过参数名自动注入 fixture（case_id/case_data 由
 pytest_generate_tests 参数化，其余为下方 fixture）。
 """
+
 from __future__ import annotations
 
 import json
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any, Callable
 
 import pytest
 
 from eval.cases import mark_name_for_case
+
+if TYPE_CHECKING:
+    from eval.judge import JudgeResult
+    from eval.llm import AnswerGenerator, LLMClient
 
 
 # ------------------------------------------------------------------ #
@@ -26,11 +31,11 @@ from eval.cases import mark_name_for_case
 # ------------------------------------------------------------------ #
 _SESSION_T0 = time.monotonic()
 _RUN: dict[str, Any] = {
-    "run_id": None,
-    "phase": None,
-    "version": None,
-    "passed": 0,
-    "recorded": 0,
+    'run_id': None,
+    'phase': None,
+    'version': None,
+    'passed': 0,
+    'recorded': 0,
 }
 
 
@@ -38,55 +43,78 @@ _RUN: dict[str, Any] = {
 #  命令行参数
 # ------------------------------------------------------------------ #
 def pytest_addoption(parser: pytest.Parser) -> None:
-    group = parser.getgroup("memos-eval")
-    group.addoption("--memory-provider", default="base",
-                    choices=["base", "struct", "full"],
-                    help="memory provider: base | struct | full (default: base)")
-    group.addoption("--llm", default="deepseek",
-                    help="answer llm client: deepseek (default: deepseek)")
-    group.addoption("--top-k", type=int, default=5,
-                    help="retrieval top-k (default: 5)")
-    group.addoption("--judge", default="assert", choices=["assert", "moonshot"],
-                    help="judge: assert (default) | moonshot (LLM judge)")
-    group.addoption("--threshold", type=float, default=0.7,
-                    help="judge pass threshold (default: 0.7)")
-    group.addoption("--record-db", action="store_true",
-                    help="评测结果写回 memos.db（EvalView Dashboard 可见）")
+    group = parser.getgroup('memos-eval')
+    group.addoption(
+        '--memory-provider',
+        default='base',
+        choices=['base', 'struct', 'full'],
+        help='memory provider: base | struct | full (default: base)',
+    )
+    group.addoption(
+        '--llm',
+        default='deepseek',
+        help='answer llm client: deepseek (default: deepseek)',
+    )
+    group.addoption('--top-k', type=int, default=5, help='retrieval top-k (default: 5)')
+    group.addoption(
+        '--judge',
+        default='assert',
+        choices=['assert', 'moonshot'],
+        help='judge: assert (default) | moonshot (LLM judge)',
+    )
+    group.addoption(
+        '--threshold',
+        type=float,
+        default=0.7,
+        help='judge pass threshold (default: 0.7)',
+    )
+    group.addoption(
+        '--record-db',
+        action='store_true',
+        help='评测结果写回 memos.db（EvalView Dashboard 可见）',
+    )
+    group.addoption(
+        '--limit',
+        type=int,
+        default=0,
+        metavar='N',
+        help='只运行前 N 条评测用例（在 -m/-k 过滤之后截取），0 表示不限 (default: 0)',
+    )
 
 
 # ------------------------------------------------------------------ #
 #  配置 fixture（直读命令行参数）
 # ------------------------------------------------------------------ #
-@pytest.fixture(scope="session")
+@pytest.fixture(scope='session')
 def memory_provider_name(request: pytest.FixtureRequest) -> str:
-    return request.config.getoption("--memory-provider")
+    return request.config.getoption('--memory-provider')
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope='session')
 def llm_name(request: pytest.FixtureRequest) -> str:
-    return request.config.getoption("--llm")
+    return request.config.getoption('--llm')
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope='session')
 def top_k(request: pytest.FixtureRequest) -> int:
-    return request.config.getoption("--top-k")
+    return request.config.getoption('--top-k')
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope='session')
 def judge_mode(request: pytest.FixtureRequest) -> str:
-    return request.config.getoption("--judge")
+    return request.config.getoption('--judge')
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope='session')
 def threshold(request: pytest.FixtureRequest) -> float:
-    return request.config.getoption("--threshold")
+    return request.config.getoption('--threshold')
 
 
 # ------------------------------------------------------------------ #
 #  LLM 与判定 fixture
 # ------------------------------------------------------------------ #
 @pytest.fixture
-def llm_client(llm_name: str):
+def llm_client(llm_name: str) -> LLMClient:
     """延迟导入 — eval.llm 构建真实 client，避免收集期副作用。"""
     from eval.llm import build_llm_client
 
@@ -94,33 +122,36 @@ def llm_client(llm_name: str):
 
 
 @pytest.fixture
-def answer_generator(llm_client):
+def answer_generator(llm_client: LLMClient) -> AnswerGenerator:
     from eval.llm import AnswerGenerator
 
     return AnswerGenerator(llm_client)
 
 
-@pytest.fixture(scope="session")
-def verifier(judge_mode: str, threshold: float):
+@pytest.fixture(scope='session')
+def verifier(
+    judge_mode: str,
+    threshold: float,
+) -> Callable[[str, str, str], JudgeResult]:
     """统一判定函数: ``verifier(query, expected, actual) -> JudgeResult``。
 
     - assert（默认）: 本地确定性数字/关键词命中判定（eval.judge.assert_evaluate）
     - moonshot       : 调 MoonshotJudgeProvider（把 expected 当 rubric 注入）
     """
 
-    if judge_mode == "moonshot":
+    if judge_mode == 'moonshot':
         from eval.judge import build_judge
 
-        judge = build_judge("moonshot")
+        judge = build_judge('moonshot')
 
-        def _verify(query: str, expected: str, actual: str):
+        def _verify(query: str, expected: str, actual: str) -> JudgeResult:
             return judge.evaluate(query=query, criteria=expected, actual=actual)
 
         return _verify
 
     from eval.judge import assert_evaluate
 
-    def _assert(query: str, expected: str, actual: str):
+    def _assert(query: str, expected: str, actual: str) -> JudgeResult:
         return assert_evaluate(query, expected, actual, threshold=threshold)
 
     return _assert
@@ -129,7 +160,7 @@ def verifier(judge_mode: str, threshold: float):
 # ------------------------------------------------------------------ #
 #  动态参数化与打标
 # ------------------------------------------------------------------ #
-def _load_cases_for_pytest():
+def _load_cases_for_pytest() -> list[tuple[str, dict[str, Any]]]:
     """加载全部 YAML 用例；坏 YAML 抛 ValueError → 转 pytest.skip（与原语义一致：
     收集期遇到非法用例则跳过评测模块收集）。eval 包本身保持 pytest-free。"""
     from eval.cases import load_all_cases
@@ -144,26 +175,54 @@ def _load_cases_for_pytest():
 
 def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
     """把 tests/test_cases/**/*.yaml 参数化为 test_eval_case 用例。"""
-    if "case_id" in metafunc.fixturenames and "case_data" in metafunc.fixturenames:
+    if 'case_id' in metafunc.fixturenames and 'case_data' in metafunc.fixturenames:
         cases = _load_cases_for_pytest()
         ids = [cid for cid, _ in cases]
-        metafunc.parametrize("case_id,case_data", cases, ids=ids)
+        metafunc.parametrize('case_id,case_data', cases, ids=ids)
 
 
 def pytest_collection_modifyitems(
-    config: pytest.Config, items: list[pytest.Item],
+    config: pytest.Config,
+    items: list[pytest.Item],
 ) -> None:
     """按 YAML category 自动打 layer 标记（-m layer1 过滤用）；统计用例总数。"""
     config._eval_total = 0
     for item in items:
-        if getattr(item, "originalname", None) == "test_eval_case":
+        if getattr(item, 'originalname', None) == 'test_eval_case':
             config._eval_total += 1
-        if hasattr(item, "callspec"):
-            case_data = item.callspec.params.get("case_data")
+        if hasattr(item, 'callspec'):
+            case_data = item.callspec.params.get('case_data')
             if isinstance(case_data, dict):
                 mark_name = mark_name_for_case(case_data)
                 if mark_name:
                     item.add_marker(getattr(pytest.mark, mark_name))
+
+
+def pytest_collection_finish(session: pytest.Session) -> None:
+    """--limit N：在 -m/-k 等过滤完成后，仅保留前 N 条评测用例。
+
+    放在 collection_finish（而非 modifyitems）是因为 -m/-k 去选由
+    _pytest.mark 的 pytest_collection_modifyitems 实现执行，而 conftest
+    的同名 hook 默认排在其前；此处 session.items 已是最终待跑集合。
+    同时把 config._eval_total 收窄为实际入选数，保证 --record-db 的
+    total_cases/pending 统计不被未选中的用例撑大。
+    """
+    cfg = session.config
+    limit = cfg.getoption('--limit')
+    if not limit or limit <= 0:
+        return
+    eval_items = [
+        it
+        for it in session.items
+        if getattr(it, 'originalname', None) == 'test_eval_case'
+    ]
+    dropped = eval_items[limit:]
+    if not dropped:
+        return
+    for item in dropped:
+        session.items.remove(item)
+    cfg.hook.pytest_deselected(items=dropped)
+    cfg._eval_total = len(eval_items) - len(dropped)
 
 
 # ------------------------------------------------------------------ #
@@ -175,22 +234,22 @@ def pytest_collection_modifyitems(
 def eval_case(request: pytest.FixtureRequest) -> dict[str, Any]:
     """评测用例现场：test_eval_case 在此填充结果，teardown 统一上报。"""
     holder: dict[str, Any] = {
-        "config": request.config,
-        "case_id": None,
-        "case_name": None,
-        "case_data": None,
-        "query": None,
-        "expected": None,
-        "phase": None,
-        "version": None,
-        "actual": None,
-        "retrieved": None,
-        "score": None,
-        "passed": None,
-        "error": None,
-        "latency_ms": None,
-        "tokens_input": None,
-        "tokens_output": None,
+        'config': request.config,
+        'case_id': None,
+        'case_name': None,
+        'case_data': None,
+        'query': None,
+        'expected': None,
+        'phase': None,
+        'version': None,
+        'actual': None,
+        'retrieved': None,
+        'score': None,
+        'passed': None,
+        'error': None,
+        'latency_ms': None,
+        'tokens_input': None,
+        'tokens_output': None,
     }
     request.node._eval_case = holder
     return holder
@@ -198,8 +257,8 @@ def eval_case(request: pytest.FixtureRequest) -> dict[str, Any]:
 
 def _flush_eval_case(holder: dict[str, Any]) -> None:
     """把单个评测用例结果写入 memos.db（首次调用时创建 run 记录）。"""
-    cfg = holder["config"]
-    if not cfg.getoption("--record-db") or holder["case_id"] is None:
+    cfg = holder['config']
+    if not cfg.getoption('--record-db') or holder['case_id'] is None:
         return
     import uuid
     from types import SimpleNamespace
@@ -207,68 +266,89 @@ def _flush_eval_case(holder: dict[str, Any]) -> None:
     from testing.services.store_service import get_store_service
 
     svc = get_store_service()
-    if _RUN["run_id"] is None:
-        _RUN.update(run_id=f"run_{uuid.uuid4().hex[:10]}",
-                    phase=holder["phase"], version=holder["version"])
-        snapshot = json.dumps({
-            "memory_provider": cfg.getoption("--memory-provider"),
-            "llm": cfg.getoption("--llm"),
-            "judge": cfg.getoption("--judge"),
-            "top_k": cfg.getoption("--top-k"),
-            "threshold": cfg.getoption("--threshold"),
-        }, ensure_ascii=False)
-        total = max(int(getattr(cfg, "_eval_total", 0) or 0), 1)
+    if _RUN['run_id'] is None:
+        _RUN.update(
+            run_id=f'run_{uuid.uuid4().hex[:10]}',
+            phase=holder['phase'],
+            version=holder['version'],
+        )
+        snapshot = json.dumps(
+            {
+                'memory_provider': cfg.getoption('--memory-provider'),
+                'llm': cfg.getoption('--llm'),
+                'judge': cfg.getoption('--judge'),
+                'top_k': cfg.getoption('--top-k'),
+                'threshold': cfg.getoption('--threshold'),
+            },
+            ensure_ascii=False,
+        )
+        total = max(int(getattr(cfg, '_eval_total', 0) or 0), 1)
         svc.record_test_run(
-            [None] * total, _RUN["run_id"],
-            _RUN["version"], _RUN["phase"], snapshot, notes=None,
+            [None] * total,
+            _RUN['run_id'],
+            _RUN['version'],
+            _RUN['phase'],
+            snapshot,
+            notes=None,
         )
 
     case = SimpleNamespace(
-        case_id=holder["case_id"],
-        name=holder["case_name"] or holder["case_id"],
-        expected_answer=holder["expected"] or "",
+        case_id=holder['case_id'],
+        name=holder['case_name'] or holder['case_id'],
+        expected_answer=holder['expected'] or '',
     )
     svc.record_result(
-        _RUN["run_id"], holder["version"] or _RUN["version"],
-        holder["phase"] or _RUN["phase"], case,
-        passed=bool(holder["passed"]),
-        score=holder["score"],
-        actual=holder["actual"],
-        retrieved=holder["retrieved"] or "",
-        error=holder["error"],
-        latency_ms=int(holder["latency_ms"] or 0),
-        tokens_input=holder["tokens_input"],
-        tokens_output=holder["tokens_output"],
+        _RUN['run_id'],
+        holder['version'] or _RUN['version'],
+        holder['phase'] or _RUN['phase'],
+        case,
+        passed=bool(holder['passed']),
+        score=holder['score'],
+        actual=holder['actual'],
+        retrieved=holder['retrieved'] or '',
+        error=holder['error'],
+        latency_ms=int(holder['latency_ms'] or 0),
+        tokens_input=holder['tokens_input'],
+        tokens_output=holder['tokens_output'],
     )
-    _RUN["recorded"] += 1
-    if holder["passed"]:
-        _RUN["passed"] += 1
+    _RUN['recorded'] += 1
+    if holder['passed']:
+        _RUN['passed'] += 1
 
 
-@pytest.hookimpl(trylast=True)
+@pytest.hookimpl(tryfirst=True)
 def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo) -> None:
-    """评测用例 teardown 后统一上报（覆盖断言失败与异常路径）。"""
-    if call.when == "teardown":
-        holder = getattr(item, "_eval_case", None)
-        if holder is not None and holder.get("case_id") is not None:
+    """评测用例 teardown 后统一上报（覆盖断言失败与异常路径）。
+
+    注意：pytest_runtest_makereport 是 firstresult hook——内置 runner 一旦返回
+    TestReport（非 None）pluggy 即停止调用后续实现。本 hook 只做落库副作用
+    且返回 None，因此必须 tryfirst 排在内置实现之前才会被执行；用 trylast
+    会被 firstresult 短路、导致 --record-db 静默失效。
+    """
+    if call.when == 'teardown':
+        holder = getattr(item, '_eval_case', None)
+        if holder is not None and holder.get('case_id') is not None:
             _flush_eval_case(holder)
 
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     """--record-db 时收尾本次 run 记录（status/completed + 通过率）。"""
-    if _RUN["run_id"] is None:
+    if _RUN['run_id'] is None:
         return
     total = max(
-        int(getattr(session.config, "_eval_total", 0) or 0),
-        _RUN["recorded"],
+        int(getattr(session.config, '_eval_total', 0) or 0),
+        _RUN['recorded'],
         1,
     )
     from testing.services.store_service import get_store_service
 
     svc = get_store_service()
     svc.update_progress(
-        _RUN["run_id"], _RUN["recorded"], total, "completed",
-        passed_count=_RUN["passed"],
-        pass_rate=round(_RUN["passed"] / max(_RUN["recorded"], 1), 4),
+        _RUN['run_id'],
+        _RUN['recorded'],
+        total,
+        'completed',
+        passed_count=_RUN['passed'],
+        pass_rate=round(_RUN['passed'] / max(_RUN['recorded'], 1), 4),
         duration_seconds=round(time.monotonic() - _SESSION_T0, 3),
     )

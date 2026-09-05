@@ -26,7 +26,7 @@ class MemoryDatabase:
         else Path(_db_raw)
     ).resolve()
 
-    def __init__(self):
+    def __init__(self) -> None:
         pass
     
     @classmethod

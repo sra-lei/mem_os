@@ -15,7 +15,7 @@ _logger = get_logger("os_mem.provider.struct")
 class StructProvider():
     messages: list[str]
 
-    def __init__(self, user_id: str):
+    def __init__(self, user_id: str) -> None:
         self.user_id = user_id
         self.service = get_structured_mem_service()
 

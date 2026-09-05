@@ -9,18 +9,24 @@
 from __future__ import annotations
 
 import json
+from typing import TYPE_CHECKING, Any
 
 from eval.cases import _parse_ts
 
+if TYPE_CHECKING:
+    from eval.llm import AnswerGenerator, Completion
+    from os_mem.models import Conversation
+    from os_mem.provider import MemoryProvider
 
-def build_provider(name: str, user_id: str):
+
+def build_provider(name: str, user_id: str) -> MemoryProvider:
     """延迟导入 — 避免 module-level 触发 Milvus / LLM 连接。"""
     from os_mem.provider import build_memory_provider
 
     return build_memory_provider(name, user_id=user_id)
 
 
-def _build_conversation(conv: dict, case_id: str):
+def _build_conversation(conv: dict[str, Any], case_id: str) -> Conversation:
     """构造 Conversation 对象 — 延迟导入避免 module-level 副作用。"""
     from os_mem.models import Conversation
 
@@ -40,11 +46,11 @@ def _build_conversation(conv: dict, case_id: str):
 
 
 def run_case_pipeline(
-    case_data: dict,
+    case_data: dict[str, Any],
     memory_provider_name: str,
-    answer_generator,
+    answer_generator: AnswerGenerator,
     top_k: int,
-):
+) -> tuple[Completion, str]:
     """执行单个用例的 ingest → retrieve → answer 流程。
 
     返回 (completion, retrieved_memories)：completion 含文本与 token 消耗，

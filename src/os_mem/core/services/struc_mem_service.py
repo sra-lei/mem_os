@@ -31,7 +31,7 @@ _extractor = FactExtractor()
 
 
 class StructuredMemService:
-    def __init__(self, client: LLMClient, vectorizer: Vectorizer, vector_store: MemoryVectorStore):
+    def __init__(self, client: LLMClient, vectorizer: Vectorizer, vector_store: MemoryVectorStore) -> None:
         self.client = client
         self.vectorizer = vectorizer
         self.vector_store = vector_store
@@ -90,7 +90,7 @@ class StructuredMemService:
         self,
         conversation: Conversation,
         on_stage: Optional[Callable[[str], None]] = None,
-    ):
+    ) -> None:
         """把一段会话的结构化记忆写入 SQLite + 向量库。
 
         on_stage：可选阶段回调 —— 每个处理阶段「开始前」调用一次，参数为目标状态名
@@ -188,7 +188,7 @@ _vector_store = get_memory_vector_store()
 _structured_mem_service = None
 
 
-def get_structured_mem_service():
+def get_structured_mem_service() -> StructuredMemService:
     global _structured_mem_service
     if _structured_mem_service is None:
         _structured_mem_service = StructuredMemService(get_llm_client(), _vectorizer, _vector_store)

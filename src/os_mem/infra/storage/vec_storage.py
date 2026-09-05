@@ -34,7 +34,7 @@ class MemoryVectorStore:
         self,
         collection_name: str = "mem_os",
         dim: int | None = None,
-    ):
+    ) -> None:
         self.collection_name = collection_name
         self.dim = dim or getattr(memory_settings, "embedding_dim", 1024)
         self.client: MilvusClient = MilvusClient(

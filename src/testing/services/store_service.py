@@ -9,7 +9,7 @@ from testing.db.models import TestCaseDefinition, TestCaseResult, TestRun, utcno
 
 _db_off = False
 class StoreService:
-    def __init__(self):
+    def __init__(self) -> None:
         init_db()
         pass
 

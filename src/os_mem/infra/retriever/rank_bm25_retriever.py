@@ -8,12 +8,12 @@ _jieba_loaded = False
 _logger = get_logger("os_mem.retriever.rank_bm25")
 
 class RankBM25:
-    def __init__(self, convs: List[str]):
+    def __init__(self, convs: List[str]) -> None:
         self.convs = convs
         self._load_jieba()
         _logger.info("RankBM25 初始化完成")
 
-    def _load_jieba(self):
+    def _load_jieba(self) -> None:
         global _jieba_loaded
         if not _jieba_loaded:
             #jieba.load_user_dict("data/user_dict.txt")
@@ -35,7 +35,7 @@ class RankBM25:
             # 英文：按空格分词，去除空白
             return [w.strip() for w in text.split() if len(w.strip()) > 0]
 
-    def _build_index(self):
+    def _build_index(self) -> None:
         self.all_documents = []  # 原始文本
         self.all_tokenized = []  # 分词后的文本（用于 BM25）
         
@@ -69,7 +69,7 @@ class RankBM25:
                 response.append((idx, self.all_documents[idx], scores[idx]))
         return response
 
-def __main__():
+def __main__() -> None:
     # 英文（保持不变）
     print(RankBM25Retriever._tokenize("What is my account number?"))
     # → ['What', 'is', 'my', 'account', 'number?']

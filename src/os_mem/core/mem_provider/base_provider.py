@@ -22,7 +22,7 @@ class BaseProvider():
     消息写入走公共 value 冲突 upsert（幂等，双 provider 双写免疫）。
     """
 
-    def __init__(self, user_id: str):
+    def __init__(self, user_id: str) -> None:
         self.user_id = user_id
         self.store = get_note_mem_service()  # 仅检索用（search_user_memories）
 

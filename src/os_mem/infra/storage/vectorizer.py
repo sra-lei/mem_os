@@ -19,7 +19,7 @@ class Vectorizer:
         model: str = None,
         api_key: str = None,
         base_url: str = None,
-    ):
+    ) -> None:
         self.model = model or memory_settings.EMBEDDING_MODEL
         self.client = OpenAI(
             api_key=api_key or memory_settings.DASHSCOPE_API_KEY,

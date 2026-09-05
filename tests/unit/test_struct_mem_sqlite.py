@@ -9,11 +9,18 @@ INSERT 与冲突 UPDATE（旧值归档 ``previous_fact``）。
 """
 from __future__ import annotations
 
+from pathlib import Path
+from typing import TYPE_CHECKING, Iterator
+
 import pytest
+
+if TYPE_CHECKING:
+    from os_mem.entries.mem_models import StructuredMemory
+    from os_mem.models.mem_models import MemoryFact
 
 
 @pytest.fixture()
-def tmp_memory_db(tmp_path, monkeypatch):
+def tmp_memory_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     """把记忆库指向临时文件，避免污染真实 memories.db。"""
     from os_mem.infra.storage import mem_storage
 
@@ -24,7 +31,13 @@ def tmp_memory_db(tmp_path, monkeypatch):
     mem_storage.MemoryDatabase._engines.clear()
 
 
-def _make_fact(fact, category, key, value, confidence=0.8):
+def _make_fact(
+    fact: str,
+    category: str,
+    key: str,
+    value: str,
+    confidence: float = 0.8,
+) -> MemoryFact:
     from os_mem.models.mem_models import MemoryFact
 
     return MemoryFact(
@@ -32,7 +45,7 @@ def _make_fact(fact, category, key, value, confidence=0.8):
     )
 
 
-def _query_rows(user_id):
+def _query_rows(user_id: str) -> list[StructuredMemory]:
     from sqlmodel import select
 
     from os_mem.entries.mem_models import StructuredMemory
@@ -44,7 +57,7 @@ def _query_rows(user_id):
         ).all()
 
 
-def test_insert_and_conflict_update(tmp_memory_db):
+def test_insert_and_conflict_update(tmp_memory_db: Path) -> None:
     from os_mem.core.services.struc_mem_service import StructuredMemService
 
     user_id = "user-1"
@@ -94,7 +107,7 @@ def test_insert_and_conflict_update(tmp_memory_db):
     assert rows[0].source_conversation_id == "conv-2"
 
 
-def test_multi_fact_insert_and_no_conflict_on_different_key(tmp_memory_db):
+def test_multi_fact_insert_and_no_conflict_on_different_key(tmp_memory_db: Path) -> None:
     from os_mem.core.services.struc_mem_service import StructuredMemService
 
     user_id = "user-2"
@@ -117,7 +130,7 @@ def test_multi_fact_insert_and_no_conflict_on_different_key(tmp_memory_db):
     assert all(r.previous_fact == "" for r in rows)
 
 
-def test_empty_facts_noop(tmp_memory_db):
+def test_empty_facts_noop(tmp_memory_db: Path) -> None:
     from os_mem.core.services.struc_mem_service import StructuredMemService
 
     assert (

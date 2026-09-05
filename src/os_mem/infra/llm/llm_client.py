@@ -50,7 +50,7 @@ SYSTEM_PROMPT = """
 """
 
 class LLMClient:
-    def __init__(self):
+    def __init__(self) -> None:
         self.client = OpenAI(   
             api_key=memory_settings.DEEPSEEK_API_KEY,
             base_url=memory_settings.DEEPSEEK_BASE_URL,
@@ -90,7 +90,7 @@ class LLMClient:
 
 
 _llm_client = None
-def get_llm_client():
+def get_llm_client() -> LLMClient:
     global _llm_client
     if _llm_client is None:
         _llm_client = LLMClient()

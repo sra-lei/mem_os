@@ -6,6 +6,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
+from sqlalchemy import Engine
 from sqlmodel import Session, SQLModel, create_engine
 
 from . import models  # noqa: F401  - ensures models registered
@@ -17,7 +18,7 @@ _DB_URL = f"sqlite:///{_DB_PATH}"
 _engine = None
 
 
-def get_engine():
+def get_engine() -> Engine:
     global _engine
     if _engine is None:
         # SQLite 不会自动创建父目录

@@ -90,7 +90,7 @@ class AnswerGenerator:
     Injection is delegated to os_mem.prompt.format_injection (module 1.5).
     """
 
-    def __init__(self, llm: LLMClient):
+    def __init__(self, llm: LLMClient) -> None:
         self._llm = llm
 
     def answer(self, query: str, memories: str) -> Completion:

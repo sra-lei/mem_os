@@ -11,7 +11,7 @@ _logger = get_logger("os_mem.provider.full")
 class FullTextProvider():
     """Full-text memory provider：近期会话常驻内存，快速响应调用端（不落库、不调 LLM）。"""
 
-    def __init__(self, user_id: str):
+    def __init__(self, user_id: str) -> None:
         self.user_id = user_id
         self.messages: list[str] = []
 

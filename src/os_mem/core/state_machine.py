@@ -23,7 +23,7 @@ class LinearStateMachine:
         stages: list[str],
         complete: str = "COMPLETED",
         failed: str = "FAILED",
-    ):
+    ) -> None:
         """由有序阶段自动生成合法边。
 
         initial → stages[0] → stages[1] → … → stages[-1] → complete

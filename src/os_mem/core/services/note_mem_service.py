@@ -1,8 +1,8 @@
 import json
 from datetime import datetime
-from typing import List
+from typing import List, Optional
 
-from sqlmodel import select
+from sqlmodel import Session, select
 
 from os_mem.models.mem_models import Memory
 from os_mem.entries.mem_models import Message
@@ -15,11 +15,11 @@ _logger: LoggerHelper = get_logger("os_mem.note_mem")
 
 
 def upsert_conversation_messages(
-    session,
+    session: Session,
     user_id: str,
     source_session_id: str,
     messages: List[str],
-    started_at=None,
+    started_at: Optional[datetime] = None,
 ) -> int:
     """逐条把会话原文写入 conv_messages（value 冲突 upsert，双 provider 共用）。
 

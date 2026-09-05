@@ -13,39 +13,46 @@ tests/test_struct_mem_*.py 单测。
     pytest tests/test_memory_eval.py --memory-provider struct --top-k 15
     pytest tests/test_memory_eval.py --judge moonshot --record-db # LLM 判分 + 落库看板
     pytest tests/test_memory_eval.py -k bank_account              # 按名称过滤单条
+    pytest tests/test_memory_eval.py --limit 1                    # 过滤后只跑 1 条（快速验证）
 """
+
 from __future__ import annotations
 
 import time
+from typing import TYPE_CHECKING, Any, Callable
 
 import pytest
 from eval.cases import expected_text_for_case, phase_version_for_case
 from eval.harness import run_case_pipeline
+
+if TYPE_CHECKING:
+    from eval.judge import JudgeResult
+    from eval.llm import AnswerGenerator
 
 
 def test_eval_case(
     case_id: str,
     case_data: dict,
     memory_provider_name: str,
-    answer_generator,
+    answer_generator: AnswerGenerator,
     top_k: int,
-    verifier,
-    eval_case,
+    verifier: Callable[[str, str, str], JudgeResult],
+    eval_case: dict[str, Any],
 ) -> None:
     """单个评测用例：ingest → retrieve → answer → judge。
 
     判定结果经 ``eval_case`` 现场在 teardown 由 conftest 统一上报 DB
     （仅 ``--record-db`` 时），断言失败与 provider 异常均会记录。
     """
-    query = case_data.get("user_question")
+    query = case_data.get('user_question')
     if not query:
-        pytest.skip(f"{case_id}: 无 user_question")
+        pytest.skip(f'{case_id}: 无 user_question')
 
     phase, version = phase_version_for_case(case_data)
     expected = expected_text_for_case(case_data)
     eval_case.update(
         case_id=case_id,
-        case_name=str(case_data.get("title") or case_id),
+        case_name=str(case_data.get('title') or case_id),
         case_data=case_data,
         query=query,
         expected=expected,
@@ -56,7 +63,10 @@ def test_eval_case(
     t0 = time.monotonic()
     try:
         completion, retrieved = run_case_pipeline(
-            case_data, memory_provider_name, answer_generator, top_k,
+            case_data,
+            memory_provider_name,
+            answer_generator,
+            top_k,
         )
         latency_ms = int((time.monotonic() - t0) * 1000)
         actual = completion.text
@@ -64,7 +74,7 @@ def test_eval_case(
     except Exception as exc:  # noqa: BLE001 — 记录 error 后上抛，交给 pytest 报告
         eval_case.update(
             passed=False,
-            error=f"{type(exc).__name__}: {exc}",
+            error=f'{type(exc).__name__}: {exc}',
             latency_ms=int((time.monotonic() - t0) * 1000),
         )
         raise
@@ -76,12 +86,12 @@ def test_eval_case(
         passed=result.passed,
         error=result.error or None,
         latency_ms=latency_ms,
-        tokens_input=getattr(completion, "prompt_tokens", None),
-        tokens_output=getattr(completion, "completion_tokens", None),
+        tokens_input=getattr(completion, 'prompt_tokens', None),
+        tokens_output=getattr(completion, 'completion_tokens', None),
     )
     assert result.passed, (
-        f"{case_id}: 判定未通过\n"
-        f"  判定: {result.reasoning}\n"
-        f"  期望: {expected[:300]}\n"
-        f"  实际回答: {actual[:500]}"
+        f'{case_id}: 判定未通过\n'
+        f'  判定: {result.reasoning}\n'
+        f'  期望: {expected[:300]}\n'
+        f'  实际回答: {actual[:500]}'
     )

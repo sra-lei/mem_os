@@ -50,7 +50,7 @@ app.include_router(stats_router)
 
 
 @app.get("/health")
-def health():
+def health() -> dict[str, str]:
     return {"status": "ok", "service": "evalview"}
 
 
@@ -60,7 +60,7 @@ if _FRONTEND_DIR.exists() and any(_FRONTEND_DIR.iterdir()):
     app.mount("/", StaticFiles(directory=str(_FRONTEND_DIR), html=True), name="frontend")
 else:
     @app.get("/", include_in_schema=False)
-    async def root():
+    async def root() -> dict[str, str]:
         return {
             "msg": "frontend dist missing - please run `cd frontend && npm install && npm run build` first",
             "expected": str(_DIST_DIR),

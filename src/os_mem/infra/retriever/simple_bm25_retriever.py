@@ -30,7 +30,7 @@ _STOPWORDS = {
 
 # 简陋的 BM25 实现（单用户规模足够）
 class SimpleBM25:
-    def __init__(self, documents: List[str]):
+    def __init__(self, documents: List[str]) -> None:
         self.documents = documents
         self._build_index()
         _logger.info("SimpleBM25 初始化完成")
@@ -39,7 +39,7 @@ class SimpleBM25:
     def _tokenize(text: str) -> List[str]:
         return [w for w in text.lower().split() if w not in _STOPWORDS]
 
-    def _build_index(self):
+    def _build_index(self) -> None:
         # 简单词频统计
         self.doc_freq = {}
         self.doc_lengths = []

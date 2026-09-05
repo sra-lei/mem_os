@@ -21,7 +21,13 @@ from os_mem.models.mem_models import MemoryFact
 from os_mem.utils.fact_extraction import FactExtractor
 
 
-def _fact(fact, category="finance", key="k", value="v", confidence=0.8):
+def _fact(
+    fact: str,
+    category: str = "finance",
+    key: str = "k",
+    value: str = "v",
+    confidence: float = 0.8,
+) -> MemoryFact:
     return MemoryFact(fact=fact, category=category, key=key, value=value,
                       confidence=confidence)
 
@@ -30,7 +36,7 @@ def _fact(fact, category="finance", key="k", value="v", confidence=0.8):
 #  validate_response
 # ------------------------------------------------------------------ #
 class TestValidateResponse:
-    def test_valid_json_array(self):
+    def test_valid_json_array(self) -> None:
         raw = ('[{"fact":"用户邮箱是 a@b.com","category":"contact",'
                '"key":"email","value":"a@b.com","confidence":0.9}]')
         facts = FactExtractor.validate_response(raw)
@@ -38,13 +44,13 @@ class TestValidateResponse:
         assert facts[0].category == "contact"
         assert facts[0].value == "a@b.com"
 
-    def test_dict_wrapper_format(self):
+    def test_dict_wrapper_format(self) -> None:
         raw = ('{"facts":[{"fact":"f","category":"personal","key":"name",'
                '"value":"x","confidence":0.7}]}')
         facts = FactExtractor.validate_response(raw)
         assert len(facts) == 1
 
-    def test_markdown_code_fence_stripped(self):
+    def test_markdown_code_fence_stripped(self) -> None:
         raw = (
             '```json\n'
             '[{"fact":"f","category":"preference","key":"k","value":"v"}]\n'
@@ -53,19 +59,19 @@ class TestValidateResponse:
         facts = FactExtractor.validate_response(raw)
         assert len(facts) == 1
 
-    def test_unknown_category_rejected(self):
+    def test_unknown_category_rejected(self) -> None:
         raw = ('[{"fact":"f","category":"not_allowed","key":"k",'
                '"value":"v","confidence":0.8}]')
         assert FactExtractor.validate_response(raw) == []
 
-    def test_confidence_out_of_range_rejected(self):
+    def test_confidence_out_of_range_rejected(self) -> None:
         raw = json.dumps([{
             "fact": "f", "category": "personal",
             "key": "k", "value": "v", "confidence": 1.5,
         }])
         assert FactExtractor.validate_response(raw) == []
 
-    def test_invalid_json_returns_empty(self):
+    def test_invalid_json_returns_empty(self) -> None:
         assert FactExtractor.validate_response("{not json") == []
         assert FactExtractor.validate_response("") == []
 
@@ -74,14 +80,14 @@ class TestValidateResponse:
 #  dedup_facts
 # ------------------------------------------------------------------ #
 class TestDedupFacts:
-    def test_dedup_by_category_key_value(self):
+    def test_dedup_by_category_key_value(self) -> None:
         a = _fact("事实", "finance", "account", "4429853327")
         b = _fact("事实", "finance", "account", "4429853327")  # 与 a 完全相同
         c = _fact("事实", "finance", "account", "8847293001")  # 同 key 不同 value 保留
         out = FactExtractor.dedup_facts([a, b, c])
         assert len(out) == 2
 
-    def test_keeps_different_category_same_value(self):
+    def test_keeps_different_category_same_value(self) -> None:
         a = _fact("事实", "finance", "amount", "$2,400")
         b = _fact("事实", "contact", "amount", "$2,400")
         assert len(FactExtractor.dedup_facts([a, b])) == 2
@@ -91,10 +97,10 @@ class TestDedupFacts:
 #  fallback_numeric_facts
 # ------------------------------------------------------------------ #
 class TestFallbackNumericFacts:
-    def _run(self, text):
+    def _run(self, text: str) -> list[MemoryFact]:
         return FactExtractor.fallback_numeric_facts(text)
 
-    def test_picks_amount_phone_verbatim_sentences(self):
+    def test_picks_amount_phone_verbatim_sentences(self) -> None:
         text = (
             '{"role":"user","content":"我的支票账户每月自动扣款 $2,400。"}\n'
             '{"role":"user","content":"如有问题拨打 916-555-8899 联系客服。"}\n'
@@ -104,23 +110,23 @@ class TestFallbackNumericFacts:
         assert len(facts) == 2
         assert all("$2,400" in f.fact or "916-555-8899" in f.fact for f in facts)
 
-    def test_category_mapped_finance_for_amount(self):
+    def test_category_mapped_finance_for_amount(self) -> None:
         raw = json.dumps({"role": "user", "content": "我的卡号 4532-8876-9901-3345。"},
                          ensure_ascii=False)
         facts = self._run(raw)
         assert facts and facts[0].category == "finance"
 
-    def test_plain_sentence_dropped(self):
+    def test_plain_sentence_dropped(self) -> None:
         raw = json.dumps({"role": "user", "content": "我喜欢用这款产品，觉得很好。"},
                          ensure_ascii=False)
         facts = self._run(raw)
         assert facts == []
 
-    def test_too_short_sentence_dropped(self):
+    def test_too_short_sentence_dropped(self) -> None:
         facts = self._run('{"role":"user","content":"$5 ok。"}')
         assert facts == []
 
-    def test_max_facts_cap(self):
+    def test_max_facts_cap(self) -> None:
         import json as _json
 
         lines = [
@@ -137,10 +143,10 @@ class TestFallbackNumericFacts:
 #  chunk_dialog
 # ------------------------------------------------------------------ #
 class TestChunkDialog:
-    def test_short_dialog_single_chunk(self):
+    def test_short_dialog_single_chunk(self) -> None:
         assert len(FactExtractor.chunk_dialog("短文本")) == 1
 
-    def test_long_dialog_split_with_overlap(self):
+    def test_long_dialog_split_with_overlap(self) -> None:
         lines = [f"第{i}条消息内容填充占位。".ljust(60, "啊") for i in range(1, 60)]
         chunks = FactExtractor.chunk_dialog("\n".join(lines), max_chars=300, overlap=5)
         assert len(chunks) >= 2
@@ -156,7 +162,11 @@ class TestChunkDialog:
 class FakeComplete:
     """按文本长度返回不同结果，用于区分短对话单次 / 长对话并行调用。"""
 
-    def __init__(self, payload_by_call=None, fail=False):
+    def __init__(
+        self,
+        payload_by_call: dict[int, str] | None = None,
+        fail: bool = False,
+    ) -> None:
         self.calls: list[str] = []
         self.payload_by_call = payload_by_call or {}
         self.fail = fail
@@ -173,13 +183,13 @@ class FakeComplete:
 
 
 class TestExtractStructuredFacts:
-    def test_short_dialog_single_llm_call(self):
+    def test_short_dialog_single_llm_call(self) -> None:
         fx = FactExtractor()
         out = fx.extract_structured_facts("短对话内容", complete=FakeComplete())
         assert len(out) == 1
         assert out[0].key == "account"
 
-    def test_retries_then_degrade_to_raw_conversation(self):
+    def test_retries_then_degrade_to_raw_conversation(self) -> None:
         """LLM 一直返回非法 JSON → 重试后降级为 raw_conversation 事实。"""
         fx = FactExtractor()
         out = fx.extract_structured_facts(
@@ -189,7 +199,7 @@ class TestExtractStructuredFacts:
         assert out[0].key == "raw_conversation"
         assert out[0].confidence == 0.1
 
-    def test_retry_recovers_after_bad_output(self):
+    def test_retry_recovers_after_bad_output(self) -> None:
         """第 1 次非法、第 2 次合法 → 重试恢复，不降级。"""
         good = ('[{"fact":"用户邮箱 a@b.com","category":"contact",'
                 '"key":"email","value":"a@b.com","confidence":0.9}]')
@@ -199,7 +209,7 @@ class TestExtractStructuredFacts:
         assert len(out) == 1
         assert out[0].key == "email"
 
-    def test_long_dialog_parallel_calls_and_cross_chunk_dedup(self):
+    def test_long_dialog_parallel_calls_and_cross_chunk_dedup(self) -> None:
         """长对话分段 → 多次 LLM 调用；跨段重复事实被去重。"""
         dedup_ok = ('[{"fact":"用户账户 4429853327","category":"finance",'
                     '"key":"account","value":"4429853327","confidence":0.95}]')
@@ -215,7 +225,7 @@ class TestExtractStructuredFacts:
         assert len(out) == 1
         assert out[0].key == "account"
 
-    def test_requires_complete_callback(self):
+    def test_requires_complete_callback(self) -> None:
         fx = FactExtractor()  # 未注入 complete
         with pytest.raises(ValueError, match="complete"):
             fx.extract_structured_facts("hi")
