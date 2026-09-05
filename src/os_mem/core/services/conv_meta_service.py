@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import os
 from datetime import datetime
-from typing import Optional
 
 from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
@@ -33,15 +32,15 @@ from os_mem.entries.mem_models import ConversationMeta
 from os_mem.infra.logger import get_logger
 from os_mem.infra.storage import get_session
 
-_logger = get_logger("os_mem.conv_meta")
+_logger = get_logger('os_mem.conv_meta')
 
 # ---- 状态常量（单一事实源：与 docs/方案-会话处理状态机与原子入库.md §3.2 一致） ----
-STATUS_PENDING = "PENDING"                # 初始：已登记，尚未进入任何阶段
-STATUS_EXTRACTING = "EXTRACTING"          # 阶段1：LLM 结构化提取（含数字兜底）
-STATUS_SAVING_SQLITE = "SAVING_SQLITE"    # 阶段2：struct_memories 落库
-STATUS_SAVING_VECTOR = "SAVING_VECTOR"    # 阶段3：向量化 + Milvus 写入
-STATUS_COMPLETED = "COMPLETED"            # 终止：全部完成（唯一跳过态）
-STATUS_FAILED = "FAILED"                  # 异常终止（非完成态：下次 claim 重启）
+STATUS_PENDING = 'PENDING'  # 初始：已登记，尚未进入任何阶段
+STATUS_EXTRACTING = 'EXTRACTING'  # 阶段1：LLM 结构化提取（含数字兜底）
+STATUS_SAVING_SQLITE = 'SAVING_SQLITE'  # 阶段2：struct_memories 落库
+STATUS_SAVING_VECTOR = 'SAVING_VECTOR'  # 阶段3：向量化 + Milvus 写入
+STATUS_COMPLETED = 'COMPLETED'  # 终止：全部完成（唯一跳过态）
+STATUS_FAILED = 'FAILED'  # 异常终止（非完成态：下次 claim 重启）
 
 # struct 入库的阶段顺序（新增阶段时同步更新此处与方案文档）
 _PROCESS_STAGES = [
@@ -59,7 +58,7 @@ _process_machine = LinearStateMachine(
 
 # 租约窗口：PENDING/中途阶段超过该时长未推进 → 视为崩溃残留，允许接管重启。
 # 环境变量 CONV_LEASE_SECONDS 可覆盖（默认 30 分钟，需大于单个最长阶段耗时）。
-_LEASE_SECONDS = int(os.getenv("CONV_LEASE_SECONDS", "1800"))
+_LEASE_SECONDS = int(os.getenv('CONV_LEASE_SECONDS', '1800'))
 
 _LAST_ERROR_MAX_LEN = 500
 
@@ -79,20 +78,22 @@ class ConversationMetaService:
         source_session_id: str,
         *,
         message_count: int = 0,
-        started_at: Optional[datetime] = None,
-        ended_at: Optional[datetime] = None,
-    ) -> Optional[ConversationMeta]:
+        started_at: datetime | None = None,
+        ended_at: datetime | None = None,
+    ) -> ConversationMeta | None:
         """struct 入库门禁：返回可处理记录（status=EXTRACTING），或 None（跳过）。
 
         协作语义（conv_meta 由 base 与 struct 共用，见 docs §2/§10）：
         - 会话不存在 → 登记并**立即认领**（status=EXTRACTING，attempts=0）——
-          本调用负责继续处理；不做"登记后待办"的中间态（PENDING 留给登记方，见 ensure_registered）。
+          本调用负责继续处理；不做"登记后待办"的中间态
+          （PENDING 留给登记方，见 ensure_registered）。
         - 已存在：COMPLETED → 跳过；FAILED / PENDING（登记未认领）/ 租约过期中途态
           → CAS 接管（attempts+1 → EXTRACTING）；未过期中途态 → 视为他人处理中，跳过。
-        - base(登记方) 只 ensure_registered，永不改 status —— 状态机只由 struct 管线驱动。
+        - base(登记方) 只 ensure_registered，永不改 status ——
+          状态机只由 struct 管线驱动。
         """
         if not user_id or not source_session_id:
-            raise ValueError("user_id 与 source_session_id 均不能为空")
+            raise ValueError('user_id 与 source_session_id 均不能为空')
 
         with get_session() as session:
             row = session.exec(
@@ -102,7 +103,8 @@ class ConversationMetaService:
                 )
             ).first()
 
-            # 1) 从未见过该会话：登记 + 认领一体（初始即 EXTRACTING），唯一约束兜底并发。
+            # 1) 从未见过该会话：登记 + 认领一体（初始即 EXTRACTING），
+            #    唯一约束兜底并发。
             #    不做"PENDING 待办"中间态：struct 同步路径 insert 后立即处理，
             #    若先落 PENDING 再推进，两个并发实例会在窗口内双跑。
             if row is None:
@@ -119,7 +121,8 @@ class ConversationMetaService:
                     session.commit()
                     session.refresh(row)
                     _logger.info(
-                        f"会话登记并认领（EXTRACTING）: user={user_id} session={source_session_id}"
+                        f'会话登记并认领（EXTRACTING）: user={user_id} '
+                        f'session={source_session_id}'
                     )
                     return row
                 except IntegrityError:
@@ -135,19 +138,21 @@ class ConversationMetaService:
             # 2) 已存在：按状态判定是否「接着处理」
             now = datetime.utcnow()
             if row.status == STATUS_COMPLETED:
-                _logger.info(f"会话已入库完成（COMPLETED），跳过: session={source_session_id}")
+                _logger.info(
+                    f'会话已入库完成（COMPLETED），跳过: session={source_session_id}'
+                )
                 return None
 
-            # PENDING = 登记未认领（由 base/登记方 ensure_registered 创建）：可直接接管；
+            # PENDING = 登记未认领（由 base/登记方 ensure_registered 创建）：
+            #   可直接接管；
             # FAILED = 明确失败：可直接重启；中途态仅租约过期（崩溃残留）才可接管
-            restartable = (
-                row.status in (STATUS_FAILED, STATUS_PENDING)
-                or (row.status in _PROCESS_STAGES and self._is_stale(row, now))
+            restartable = row.status in (STATUS_FAILED, STATUS_PENDING) or (
+                row.status in _PROCESS_STAGES and self._is_stale(row, now)
             )
             if not restartable:
                 _logger.info(
-                    f"会话正在处理中（status={row.status}，租约未过期），本次跳过: "
-                    f"session={source_session_id}"
+                    f'会话正在处理中（status={row.status}，租约未过期），本次跳过: '
+                    f'session={source_session_id}'
                 )
                 return None
 
@@ -155,11 +160,12 @@ class ConversationMetaService:
             taken = self._cas_take_over(session, row.id, observed_status=row.status)
             if not taken:
                 _logger.warning(
-                    f"会话接管竞争失败（他人已接管），本次跳过: session={source_session_id}"
+                    f'会话接管竞争失败（他人已接管），本次跳过: '
+                    f'session={source_session_id}'
                 )
                 return None
             _logger.info(
-                f"会话接管重启（attempts+1 → EXTRACTING）: session={source_session_id}"
+                f'会话接管重启（attempts+1 → EXTRACTING）: session={source_session_id}'
             )
             return session.exec(
                 select(ConversationMeta).where(ConversationMeta.id == row.id)
@@ -171,9 +177,9 @@ class ConversationMetaService:
         source_session_id: str,
         *,
         message_count: int = 0,
-        started_at: Optional[datetime] = None,
-        ended_at: Optional[datetime] = None,
-    ) -> Optional[ConversationMeta]:
+        started_at: datetime | None = None,
+        ended_at: datetime | None = None,
+    ) -> ConversationMeta | None:
         """登记方（base/note 路径）用：仅登记元数据，**永不改动处理状态**。
 
         - 会话行不存在 → INSERT（status=PENDING = 登记未认领，等 struct 管线接管处理）；
@@ -182,7 +188,7 @@ class ConversationMetaService:
         二者共存不互相干扰（双写协作，见 docs §2/§10）。
         """
         if not user_id or not source_session_id:
-            raise ValueError("user_id 与 source_session_id 均不能为空")
+            raise ValueError('user_id 与 source_session_id 均不能为空')
 
         with get_session() as session:
             row = session.exec(
@@ -206,7 +212,8 @@ class ConversationMetaService:
                 session.commit()
                 session.refresh(row)
                 _logger.info(
-                    f"会话登记（PENDING，待 struct 处理）: user={user_id} session={source_session_id}"
+                    f'会话登记（PENDING，待 struct 处理）: user={user_id} '
+                    f'session={source_session_id}'
                 )
                 return row
             except IntegrityError:
@@ -236,7 +243,7 @@ class ConversationMetaService:
             .values(
                 status=STATUS_EXTRACTING,
                 attempts=ConversationMeta.attempts + 1,
-                last_error="",
+                last_error='',
                 updated_at=datetime.utcnow(),
             )
         )
@@ -251,11 +258,13 @@ class ConversationMetaService:
             select(ConversationMeta).where(ConversationMeta.id == meta_id)
         ).first()
         if row is None:
-            raise KeyError(f"conv_meta 记录不存在: {meta_id}")
+            raise KeyError(f'conv_meta 记录不存在: {meta_id}')
         return row
 
     def mark(self, meta_id: str, target: str) -> ConversationMeta:
-        """阶段开始前调用：沿状态机合法边推进到 target（同态 no-op，非法转移抛异常）。"""
+        """阶段开始前调用：沿状态机合法边推进到 target（同态 no-op，
+        非法转移抛异常）。
+        """
         with get_session() as session:
             row = self._load(meta_id, session)
             _process_machine.validate(row.status, target)
@@ -264,7 +273,7 @@ class ConversationMetaService:
             session.add(row)
             session.commit()
             session.refresh(row)
-            _logger.info(f"会话状态推进: {meta_id} → {target}")
+            _logger.info(f'会话状态推进: {meta_id} → {target}')
             return row
 
     def fail(self, meta_id: str, error: Exception | str) -> ConversationMeta:
@@ -280,15 +289,15 @@ class ConversationMetaService:
             session.add(row)
             session.commit()
             session.refresh(row)
-            _logger.error(f"会话处理失败（FAILED）: {meta_id} — {row.last_error}")
+            _logger.error(f'会话处理失败（FAILED）: {meta_id} — {row.last_error}')
             return row
 
-    def get(self, meta_id: str) -> Optional[ConversationMeta]:
+    def get(self, meta_id: str) -> ConversationMeta | None:
         with get_session() as session:
             return self._load(meta_id, session)
 
 
-_conv_meta_service: Optional[ConversationMetaService] = None
+_conv_meta_service: ConversationMetaService | None = None
 
 
 def get_conversation_meta_service() -> ConversationMetaService:
@@ -299,14 +308,14 @@ def get_conversation_meta_service() -> ConversationMetaService:
 
 
 __all__ = [
-    "STATUS_PENDING",
-    "STATUS_EXTRACTING",
-    "STATUS_SAVING_SQLITE",
-    "STATUS_SAVING_VECTOR",
-    "STATUS_COMPLETED",
-    "STATUS_FAILED",
-    "ConversationMetaService",
-    "get_conversation_meta_service",
-    "process_state_machine",
-    "IllegalTransitionError",
+    'STATUS_PENDING',
+    'STATUS_EXTRACTING',
+    'STATUS_SAVING_SQLITE',
+    'STATUS_SAVING_VECTOR',
+    'STATUS_COMPLETED',
+    'STATUS_FAILED',
+    'ConversationMetaService',
+    'get_conversation_meta_service',
+    'process_state_machine',
+    'IllegalTransitionError',
 ]

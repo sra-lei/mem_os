@@ -13,11 +13,13 @@
 
 全部无 LLM / 无 Milvus，走临时 sqlite。
 """
+
 from __future__ import annotations
 
+from collections.abc import Callable, Iterator
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Iterator, Optional
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -33,8 +35,8 @@ def tmp_memory_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[P
     """把记忆库指向临时文件，避免污染真实 os_mem.db。"""
     from os_mem.infra.storage import mem_storage
 
-    db_file = tmp_path / "test_memories.db"
-    monkeypatch.setattr(mem_storage.MemoryDatabase, "db_path", db_file)
+    db_file = tmp_path / 'test_memories.db'
+    monkeypatch.setattr(mem_storage.MemoryDatabase, 'db_path', db_file)
     mem_storage.MemoryDatabase._engines.clear()
     yield db_file
     mem_storage.MemoryDatabase._engines.clear()
@@ -99,7 +101,8 @@ def _conversation(
 
 
 def _provider_with_dummy_service(
-    user_id: str = "u1", fail_on_ingest: bool = False,
+    user_id: str = 'u1',
+    fail_on_ingest: bool = False,
 ) -> StructProvider:
     """用假 service 替换真实（LLM/Milvus）链路，只验证编排逻辑。"""
     from os_mem.core.mem_provider.struct_provider import StructProvider
@@ -113,15 +116,15 @@ def _provider_with_dummy_service(
         def add_structured_memory(
             self,
             conversation: Conversation,
-            on_stage: Optional[Callable[[str], None]] = None,
+            on_stage: Callable[[str], None] | None = None,
         ) -> None:
             self.calls += 1
             if on_stage is not None:
-                for stage in ("EXTRACTING", "SAVING_SQLITE", "SAVING_VECTOR"):
+                for stage in ('EXTRACTING', 'SAVING_SQLITE', 'SAVING_VECTOR'):
                     on_stage(stage)
                     self.seen_stages.append(stage)
             if self.fail_on_ingest:
-                raise RuntimeError("boom: vector write failed")
+                raise RuntimeError('boom: vector write failed')
 
     p = StructProvider.__new__(StructProvider)  # 跳过 __init__（避免构造真实 service）
     p.user_id = user_id
@@ -150,13 +153,12 @@ def test_machine_full_forward_chain_ok() -> None:
         (STATUS_SAVING_VECTOR, STATUS_COMPLETED),
     ]
     for cur, nxt in chain:
-        assert m.can_transition(cur, nxt), f"{cur} → {nxt} 应合法"
+        assert m.can_transition(cur, nxt), f'{cur} → {nxt} 应合法'
         m.validate(cur, nxt)  # 不抛即通过
     assert m.is_terminal(STATUS_COMPLETED)
 
 
 def test_machine_rejects_illegal_transitions() -> None:
-    from os_mem.core.state_machine import IllegalTransitionError
     from os_mem.core.services.conv_meta_service import (
         STATUS_COMPLETED,
         STATUS_EXTRACTING,
@@ -166,17 +168,21 @@ def test_machine_rejects_illegal_transitions() -> None:
         STATUS_SAVING_VECTOR,
         process_state_machine,
     )
+    from os_mem.core.state_machine import IllegalTransitionError
 
     m = process_state_machine()
     illegal = [
-        (STATUS_EXTRACTING, STATUS_PENDING),              # 回退
-        (STATUS_SAVING_VECTOR, STATUS_EXTRACTING),        # 回退
-        (STATUS_PENDING, STATUS_SAVING_SQLITE),           # 跳级
-        (STATUS_PENDING, STATUS_COMPLETED),               # 跳级
-        (STATUS_COMPLETED, STATUS_EXTRACTING),            # 完成态外出
-        (STATUS_COMPLETED, STATUS_FAILED),                # 完成态外出
-        (STATUS_FAILED, STATUS_EXTRACTING),               # 失败态不可经 mark 重启（重启只走 claim CAS）
-        ("UNKNOWN", STATUS_EXTRACTING),                   # 未知状态
+        (STATUS_EXTRACTING, STATUS_PENDING),  # 回退
+        (STATUS_SAVING_VECTOR, STATUS_EXTRACTING),  # 回退
+        (STATUS_PENDING, STATUS_SAVING_SQLITE),  # 跳级
+        (STATUS_PENDING, STATUS_COMPLETED),  # 跳级
+        (STATUS_COMPLETED, STATUS_EXTRACTING),  # 完成态外出
+        (STATUS_COMPLETED, STATUS_FAILED),  # 完成态外出
+        (
+            STATUS_FAILED,
+            STATUS_EXTRACTING,
+        ),  # 失败态不可经 mark 重启（重启只走 claim CAS）
+        ('UNKNOWN', STATUS_EXTRACTING),  # 未知状态
     ]
     for cur, nxt in illegal:
         with pytest.raises(IllegalTransitionError):
@@ -199,7 +205,7 @@ def test_machine_failed_reachable_from_every_active_state() -> None:
 
     m = process_state_machine()
     for cur in m.active_states:
-        assert m.can_transition(cur, "FAILED"), f"{cur} → FAILED 应合法"
+        assert m.can_transition(cur, 'FAILED'), f'{cur} → FAILED 应合法'
 
 
 # --------------------------------------------------------------------- #
@@ -209,85 +215,90 @@ def test_claim_claims_new_conversation_with_metadata(tmp_memory_db: Path) -> Non
     svc = _svc()
     started = datetime.utcnow() - timedelta(minutes=5)
     proc = svc.claim(
-        "u1", "s1",
-        message_count=3, started_at=started, ended_at=started + timedelta(minutes=1),
+        'u1',
+        's1',
+        message_count=3,
+        started_at=started,
+        ended_at=started + timedelta(minutes=1),
     )
 
     assert proc is not None
     # struct 路径：登记 + 认领一体（初始即 EXTRACTING，避免 PENDING 窗口并发双跑）
-    assert proc.status == "EXTRACTING"
+    assert proc.status == 'EXTRACTING'
     assert proc.message_count == 3
     assert proc.started_at == started
     assert proc.attempts == 0
 
-    rows = _load_rows(user_id="u1")
+    rows = _load_rows(user_id='u1')
     assert len(rows) == 1
-    assert rows[0].source_session_id == "s1"
-    assert rows[0].status == "EXTRACTING"
-    assert not hasattr(rows[0], "raw_payload")  # 原文不存元数据表
+    assert rows[0].source_session_id == 's1'
+    assert rows[0].status == 'EXTRACTING'
+    assert not hasattr(rows[0], 'raw_payload')  # 原文不存元数据表
 
 
 def test_claim_skips_completed_but_restarts_failed(tmp_memory_db: Path) -> None:
     svc = _svc()
-    proc = svc.claim("u1", "s1")
+    proc = svc.claim('u1', 's1')
 
     # COMPLETED → 跳过（唯一真正终止态）
-    for st in ("EXTRACTING", "SAVING_SQLITE", "SAVING_VECTOR", "COMPLETED"):
+    for st in ('EXTRACTING', 'SAVING_SQLITE', 'SAVING_VECTOR', 'COMPLETED'):
         svc.mark(proc.id, st)
-    assert svc.claim("u1", "s1") is None
-    rows = _load_rows(user_id="u1")
+    assert svc.claim('u1', 's1') is None
+    rows = _load_rows(user_id='u1')
     assert len(rows) == 1
-    assert rows[0].status == "COMPLETED"
+    assert rows[0].status == 'COMPLETED'
     assert rows[0].attempts == 0
 
     # FAILED → 立即重启：attempts+1、last_error 清空、状态回 EXTRACTING
-    proc2 = svc.claim("u1", "s2")
-    svc.fail(proc2.id, "some error")
-    assert _load_rows(user_id="u1", session_id="s2")[0].status == "FAILED"
+    proc2 = svc.claim('u1', 's2')
+    svc.fail(proc2.id, 'some error')
+    assert _load_rows(user_id='u1', session_id='s2')[0].status == 'FAILED'
 
-    restarted = svc.claim("u1", "s2")
+    restarted = svc.claim('u1', 's2')
     assert restarted is not None
-    assert restarted.status == "EXTRACTING"
+    assert restarted.status == 'EXTRACTING'
     assert restarted.attempts == 1
-    assert restarted.last_error == ""
+    assert restarted.last_error == ''
     # 重启后可继续走完
-    svc.mark(restarted.id, "SAVING_SQLITE")
-    svc.mark(restarted.id, "SAVING_VECTOR")
-    svc.mark(restarted.id, "COMPLETED")
-    assert _load_rows(user_id="u1", session_id="s2")[0].status == "COMPLETED"
+    svc.mark(restarted.id, 'SAVING_SQLITE')
+    svc.mark(restarted.id, 'SAVING_VECTOR')
+    svc.mark(restarted.id, 'COMPLETED')
+    assert _load_rows(user_id='u1', session_id='s2')[0].status == 'COMPLETED'
 
 
-def test_claim_active_fresh_is_in_flight_but_stale_is_takeover(tmp_memory_db: Path) -> None:
+def test_claim_active_fresh_is_in_flight_but_stale_is_takeover(
+    tmp_memory_db: Path,
+) -> None:
     svc = _svc()
-    proc = svc.claim("u1", "s1")
+    proc = svc.claim('u1', 's1')
 
     # 中途状态（未过期）→ 视为处理中，跳过
-    svc.mark(proc.id, "EXTRACTING")
-    assert svc.claim("u1", "s1") is None
-    assert _load_rows(user_id="u1")[0].status == "EXTRACTING"
+    svc.mark(proc.id, 'EXTRACTING')
+    assert svc.claim('u1', 's1') is None
+    assert _load_rows(user_id='u1')[0].status == 'EXTRACTING'
 
     # 租约过期（崩溃残留）→ 接管重启
     _age_row(proc.id, seconds=3600)
-    taken = svc.claim("u1", "s1")
+    taken = svc.claim('u1', 's1')
     assert taken is not None
-    assert taken.status == "EXTRACTING"
+    assert taken.status == 'EXTRACTING'
     assert taken.attempts == 1
 
 
 def test_claim_different_sessions_and_users_independent(tmp_memory_db: Path) -> None:
     svc = _svc()
-    assert svc.claim("u1", "s1") is not None
-    assert svc.claim("u1", "s2") is not None
-    assert svc.claim("u2", "s1") is not None
-    assert len(_load_rows(user_id="u1")) == 2
+    assert svc.claim('u1', 's1') is not None
+    assert svc.claim('u1', 's2') is not None
+    assert svc.claim('u2', 's1') is not None
+    assert len(_load_rows(user_id='u1')) == 2
 
 
 def test_claim_rejects_empty_ids(tmp_memory_db: Path) -> None:
     svc = _svc()
     with pytest.raises(ValueError):
-        svc.claim("", "s1")
+        svc.claim('', 's1')
     with pytest.raises(ValueError):
-        svc.claim("u1", "")
+        svc.claim('u1', '')
 
 
 # --------------------------------------------------------------------- #
@@ -295,55 +306,57 @@ def test_claim_rejects_empty_ids(tmp_memory_db: Path) -> None:
 # --------------------------------------------------------------------- #
 def test_provider_first_ingest_completed_duplicate_skipped(tmp_memory_db: Path) -> None:
     p = _provider_with_dummy_service()
-    conv = _conversation("u1", "conv-1")
+    conv = _conversation('u1', 'conv-1')
 
     p.ingest(conv)
     assert p.service.calls == 1
-    assert p.service.seen_stages == ["EXTRACTING", "SAVING_SQLITE", "SAVING_VECTOR"]
-    rows = _load_rows(user_id="u1")
+    assert p.service.seen_stages == ['EXTRACTING', 'SAVING_SQLITE', 'SAVING_VECTOR']
+    rows = _load_rows(user_id='u1')
     assert len(rows) == 1
-    assert rows[0].status == "COMPLETED"
+    assert rows[0].status == 'COMPLETED'
     assert rows[0].message_count == 1
     assert rows[0].attempts == 0
 
     # COMPLETED 会话重复投递：整体跳过，不再触达 add_structured_memory
     p.ingest(conv)
     assert p.service.calls == 1
-    assert _load_rows(user_id="u1")[0].status == "COMPLETED"
+    assert _load_rows(user_id='u1')[0].status == 'COMPLETED'
 
 
-def test_provider_failure_then_reingest_restarts_to_completed(tmp_memory_db: Path) -> None:
+def test_provider_failure_then_reingest_restarts_to_completed(
+    tmp_memory_db: Path,
+) -> None:
     p = _provider_with_dummy_service(fail_on_ingest=True)
-    conv = _conversation("u1", "conv-2")
+    conv = _conversation('u1', 'conv-2')
 
     # 第一次：异常 → FAILED + last_error，异常向上抛
-    with pytest.raises(RuntimeError, match="boom"):
+    with pytest.raises(RuntimeError, match='boom'):
         p.ingest(conv)
-    rows = _load_rows(user_id="u1")
-    assert rows[0].status == "FAILED"
-    assert "boom" in rows[0].last_error
+    rows = _load_rows(user_id='u1')
+    assert rows[0].status == 'FAILED'
+    assert 'boom' in rows[0].last_error
 
     # 第二次（非完成态 → 接着处理）：仍失败 → FAILED，attempts 递增
-    with pytest.raises(RuntimeError, match="boom"):
+    with pytest.raises(RuntimeError, match='boom'):
         p.ingest(conv)
     assert p.service.calls == 2
-    assert _load_rows(user_id="u1")[0].status == "FAILED"
-    assert _load_rows(user_id="u1")[0].attempts == 1
+    assert _load_rows(user_id='u1')[0].status == 'FAILED'
+    assert _load_rows(user_id='u1')[0].attempts == 1
 
     # 第三次（故障恢复）：重启接着处理直到 COMPLETED
     p.service.fail_on_ingest = False
     p.ingest(conv)
     assert p.service.calls == 3
-    assert _load_rows(user_id="u1")[0].status == "COMPLETED"
-    assert _load_rows(user_id="u1")[0].attempts == 2
-    assert _load_rows(user_id="u1")[0].last_error == ""
+    assert _load_rows(user_id='u1')[0].status == 'COMPLETED'
+    assert _load_rows(user_id='u1')[0].attempts == 2
+    assert _load_rows(user_id='u1')[0].last_error == ''
 
 
 def test_provider_metadata_stored_no_payload(tmp_memory_db: Path) -> None:
     p = _provider_with_dummy_service()
-    p.ingest(_conversation("u1", "conv-3"))
+    p.ingest(_conversation('u1', 'conv-3'))
 
-    rows = _load_rows(user_id="u1", session_id="conv-3")
+    rows = _load_rows(user_id='u1', session_id='conv-3')
     assert len(rows) == 1
     assert rows[0].message_count == 1
     assert rows[0].started_at is not None
@@ -353,109 +366,122 @@ def test_provider_metadata_stored_no_payload(tmp_memory_db: Path) -> None:
 # --------------------------------------------------------------------- #
 #  base/struct 共享 conv_meta 的协作语义（方案1 合并）
 # --------------------------------------------------------------------- #
-def test_ensure_registered_inserts_pending_and_is_idempotent(tmp_memory_db: Path) -> None:
+def test_ensure_registered_inserts_pending_and_is_idempotent(
+    tmp_memory_db: Path,
+) -> None:
     svc = _svc()
-    row = svc.ensure_registered("u1", "s1", message_count=2)
+    row = svc.ensure_registered('u1', 's1', message_count=2)
     assert row is not None
-    assert row.status == "PENDING"  # 登记未认领，等 struct 接管
+    assert row.status == 'PENDING'  # 登记未认领，等 struct 接管
     assert row.attempts == 0
 
     # 重复登记：不动任何字段
-    assert svc.ensure_registered("u1", "s1") is None
-    rows = _load_rows(user_id="u1", session_id="s1")
+    assert svc.ensure_registered('u1', 's1') is None
+    rows = _load_rows(user_id='u1', session_id='s1')
     assert len(rows) == 1
-    assert rows[0].status == "PENDING"
+    assert rows[0].status == 'PENDING'
     assert rows[0].attempts == 0
 
 
 def test_struct_claim_takes_over_registered_pending(tmp_memory_db: Path) -> None:
     """base 先登记（PENDING）→ struct claim 立即接管（免租约），attempts 计数重启。"""
     svc = _svc()
-    svc.ensure_registered("u1", "s1", message_count=1)
+    svc.ensure_registered('u1', 's1', message_count=1)
 
-    proc = svc.claim("u1", "s1")
+    proc = svc.claim('u1', 's1')
     assert proc is not None
-    assert proc.status == "EXTRACTING"
+    assert proc.status == 'EXTRACTING'
     assert proc.attempts == 1  # 首次 struct 处理计一次接管
 
-    svc.mark(proc.id, "SAVING_SQLITE")
-    svc.mark(proc.id, "SAVING_VECTOR")
-    svc.mark(proc.id, "COMPLETED")
-    assert _load_rows(user_id="u1", session_id="s1")[0].status == "COMPLETED"
+    svc.mark(proc.id, 'SAVING_SQLITE')
+    svc.mark(proc.id, 'SAVING_VECTOR')
+    svc.mark(proc.id, 'COMPLETED')
+    assert _load_rows(user_id='u1', session_id='s1')[0].status == 'COMPLETED'
 
 
 def test_ensure_registered_never_touches_struct_active_row(tmp_memory_db: Path) -> None:
     """struct 正在处理（EXTRACTING 新鲜）→ base 登记不得抢/不得改状态。"""
     svc = _svc()
-    proc = svc.claim("u1", "s1")  # struct 认领，EXTRACTING
-    assert svc.ensure_registered("u1", "s1") is None  # 已存在 → 不动
-    rows = _load_rows(user_id="u1", session_id="s1")
-    assert rows[0].status == "EXTRACTING"
+    svc.claim('u1', 's1')  # struct 认领，EXTRACTING
+    assert svc.ensure_registered('u1', 's1') is None  # 已存在 → 不动
+    rows = _load_rows(user_id='u1', session_id='s1')
+    assert rows[0].status == 'EXTRACTING'
     assert rows[0].attempts == 0  # base 未接管，attempts 不被污染
 
 
-def test_base_ingest_registers_and_writes_messages_then_rerun_skips(tmp_memory_db: Path) -> None:
+def test_base_ingest_registers_and_writes_messages_then_rerun_skips(
+    tmp_memory_db: Path,
+) -> None:
     """base provider：登记 conv_meta(PENDING) + 原文落库；重复 ingest 跳过不重写。"""
     from os_mem.core.mem_provider.base_provider import BaseProvider
 
-    p = BaseProvider("bu1")
-    conv = _conversation("bu1", "bc1")
+    p = BaseProvider('bu1')
+    conv = _conversation('bu1', 'bc1')
     p.ingest(conv)
     p.ingest(conv)  # 重复投递
 
-    meta = _load_rows(user_id="bu1", session_id="bc1")
+    meta = _load_rows(user_id='bu1', session_id='bc1')
     assert len(meta) == 1
-    assert meta[0].status == "PENDING"      # base 只登记，状态留给 struct 驱动
+    assert meta[0].status == 'PENDING'  # base 只登记，状态留给 struct 驱动
     assert meta[0].attempts == 0
 
     # 原文只落一份（重跑被消息门禁跳过）
+    from sqlmodel import select
+
     from os_mem.entries.mem_models import Message
     from os_mem.infra.storage import get_session
-    from sqlmodel import select
 
     with get_session() as session:
         msgs = session.exec(
             select(Message).where(
-                Message.user_id == "bu1", Message.source_session_id == "bc1",
+                Message.user_id == 'bu1',
+                Message.source_session_id == 'bc1',
             )
         ).all()
     assert len(msgs) == 1
 
     # struct 后处理同一会话：可接管并走到 COMPLETED
-    sp = _provider_with_dummy_service(user_id="bu1")
+    sp = _provider_with_dummy_service(user_id='bu1')
     sp.ingest(conv)
-    assert _load_rows(user_id="bu1", session_id="bc1")[0].status == "COMPLETED"
-    assert _load_rows(user_id="bu1", session_id="bc1")[0].attempts == 1
+    assert _load_rows(user_id='bu1', session_id='bc1')[0].status == 'COMPLETED'
+    assert _load_rows(user_id='bu1', session_id='bc1')[0].attempts == 1
 
 
-def test_base_ingest_after_struct_completed_adds_missing_messages_without_touching_status(tmp_memory_db: Path) -> None:
+def test_base_ingest_after_struct_completed_adds_missing_messages(
+    tmp_memory_db: Path,
+) -> None:
     """struct 先 COMPLETED（未存原文）→ base 后 ingest：补消息、不改 struct 状态。"""
+    from sqlmodel import select
+
     from os_mem.core.mem_provider.base_provider import BaseProvider
     from os_mem.entries.mem_models import Message
     from os_mem.infra.storage import get_session
-    from sqlmodel import select
 
-    conv = _conversation("bu2", "bc2")
-    sp = _provider_with_dummy_service(user_id="bu2")
+    conv = _conversation('bu2', 'bc2')
+    sp = _provider_with_dummy_service(user_id='bu2')
     sp.ingest(conv)  # struct → COMPLETED（dummy 不写消息）
-    assert _load_rows(user_id="bu2", session_id="bc2")[0].status == "COMPLETED"
+    assert _load_rows(user_id='bu2', session_id='bc2')[0].status == 'COMPLETED'
 
-    p = BaseProvider("bu2")
+    p = BaseProvider('bu2')
     p.ingest(conv)  # base 补原文
     with get_session() as session:
         msgs = session.exec(
             select(Message).where(
-                Message.user_id == "bu2", Message.source_session_id == "bc2",
+                Message.user_id == 'bu2',
+                Message.source_session_id == 'bc2',
             )
         ).all()
     assert len(msgs) == 1  # 消息已补
-    assert _load_rows(user_id="bu2", session_id="bc2")[0].status == "COMPLETED"  # 状态未被碰
+    assert (
+        _load_rows(user_id='bu2', session_id='bc2')[0].status == 'COMPLETED'
+    )  # 状态未被碰
 
     p.ingest(conv)  # base 再跑 → 原文已存在，跳过
     with get_session() as session:
         msgs = session.exec(
             select(Message).where(
-                Message.user_id == "bu2", Message.source_session_id == "bc2",
+                Message.user_id == 'bu2',
+                Message.source_session_id == 'bc2',
             )
         ).all()
     assert len(msgs) == 1

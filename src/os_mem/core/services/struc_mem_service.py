@@ -1,7 +1,7 @@
 import time
 import uuid
+from collections.abc import Callable
 from datetime import datetime
-from typing import Callable, List, Optional
 
 from sqlmodel import select
 
@@ -11,6 +11,7 @@ from os_mem.core.services.conv_meta_service import (
     STATUS_SAVING_VECTOR,
 )
 from os_mem.entries.mem_models import StructuredMemory
+from os_mem.infra.llm.llm_client import LLMClient, get_llm_client
 from os_mem.infra.logger import get_logger
 from os_mem.infra.storage import (
     MemoryVectorStore,
@@ -19,19 +20,20 @@ from os_mem.infra.storage import (
     get_session,
     get_vectorizer,
 )
-from os_mem.infra.llm.llm_client import get_llm_client, LLMClient
 from os_mem.models import Conversation
 from os_mem.models.mem_models import MemoryFact
 from os_mem.utils.fact_extraction import FactExtractor
 
-_logger = get_logger("os_mem.struc_mem")
+_logger = get_logger('os_mem.struc_mem')
 
 # 事实抽取工具类（校验/分段/去重/数字兜底/编排）—— 从本服务内聚抽出，见 os_mem/utils/
 _extractor = FactExtractor()
 
 
 class StructuredMemService:
-    def __init__(self, client: LLMClient, vectorizer: Vectorizer, vector_store: MemoryVectorStore) -> None:
+    def __init__(
+        self, client: LLMClient, vectorizer: Vectorizer, vector_store: MemoryVectorStore
+    ) -> None:
         self.client = client
         self.vectorizer = vectorizer
         self.vector_store = vector_store
@@ -40,7 +42,7 @@ class StructuredMemService:
     def save_structured_memories_to_sqlite(
         user_id: str,
         source_conversation_id: str,
-        facts: List[MemoryFact],
+        facts: list[MemoryFact],
     ) -> int:
         """把结构化事实落库到 SQLite ``struct_memories`` 表（与向量库双写）。
 
@@ -73,15 +75,17 @@ class StructuredMemService:
                     existing.updated_at = now
                     session.add(existing)
                 else:
-                    session.add(StructuredMemory(
-                        user_id=user_id,
-                        fact=f.fact,
-                        category=f.category,
-                        key=f.key,
-                        value=f.value,
-                        confidence=f.confidence,
-                        source_conversation_id=source_conversation_id,
-                    ))
+                    session.add(
+                        StructuredMemory(
+                            user_id=user_id,
+                            fact=f.fact,
+                            category=f.category,
+                            key=f.key,
+                            value=f.value,
+                            confidence=f.confidence,
+                            source_conversation_id=source_conversation_id,
+                        )
+                    )
                 written += 1
             session.commit()
         return written
@@ -89,7 +93,7 @@ class StructuredMemService:
     def add_structured_memory(
         self,
         conversation: Conversation,
-        on_stage: Optional[Callable[[str], None]] = None,
+        on_stage: Callable[[str], None] | None = None,
     ) -> None:
         """把一段会话的结构化记忆写入 SQLite + 向量库。
 
@@ -99,14 +103,15 @@ class StructuredMemService:
         事实抽取逻辑见 ``os_mem.utils.fact_extraction.FactExtractor``。
         """
         t0 = time.perf_counter()
-        session_id = conversation.source_session_id or conversation.id or ""
-        dialog_text = "\n".join(item for item in conversation.messages)
+        session_id = conversation.source_session_id or conversation.id or ''
+        dialog_text = '\n'.join(item for item in conversation.messages)
 
         if on_stage:
             on_stage(STATUS_EXTRACTING)
         # LLM 结构化提取（分段/并行/降级，见 FactExtractor）
-        llm_facts: List[MemoryFact] = _extractor.extract_structured_facts(
-            dialog_text, complete=self.client.complete,
+        llm_facts: list[MemoryFact] = _extractor.extract_structured_facts(
+            dialog_text,
+            complete=self.client.complete,
         )
         t_extract = time.perf_counter()
 
@@ -115,7 +120,10 @@ class StructuredMemService:
         fallback_facts = _extractor.fallback_numeric_facts(dialog_text)
         conv_facts = _extractor.dedup_facts(llm_facts + fallback_facts)
         if len(fallback_facts):
-            _logger.info(f"  数字兜底补充: {len(fallback_facts)} 条（LLM {len(llm_facts)} → 合并 {len(conv_facts)}）")
+            _logger.info(
+                f'  数字兜底补充: {len(fallback_facts)} 条'
+                f'（LLM {len(llm_facts)} → 合并 {len(conv_facts)}）'
+            )
 
         # SQLite 双写：结构化事实同步落库（审计/回溯 + 向量库重建兜底）。
         # 本地落库先于向量写入，保证即便 Milvus 写入失败，记忆仍持久化在 SQLite。
@@ -123,11 +131,13 @@ class StructuredMemService:
             on_stage(STATUS_SAVING_SQLITE)
         sqlite_written = self.save_structured_memories_to_sqlite(
             user_id=conversation.user_id,
-            source_conversation_id=conversation.id or conversation.source_session_id or "",
+            source_conversation_id=conversation.id
+            or conversation.source_session_id
+            or '',
             facts=conv_facts,
         )
         t_sqlite = time.perf_counter()
-        _logger.info(f"  落库 SQLite struct_memories: {sqlite_written} 条")
+        _logger.info(f'  落库 SQLite struct_memories: {sqlite_written} 条')
 
         # 逐个 embed → 改为批量 embed（DashScope 单批上限 10，自动折半重试）
         if on_stage:
@@ -135,29 +145,35 @@ class StructuredMemService:
         records: list[dict] = []
         texts: list[str] = []
         for conv_fact in conv_facts:
-            records.append({
-                "id": uuid.uuid4().hex,
-                "fact": conv_fact.fact,
-                "category": conv_fact.category,
-                "key": conv_fact.key,
-                "value": conv_fact.value,
-                "user_id": conversation.user_id,
-                "updated_at": datetime.utcnow().isoformat(),
-            })
+            records.append(
+                {
+                    'id': uuid.uuid4().hex,
+                    'fact': conv_fact.fact,
+                    'category': conv_fact.category,
+                    'key': conv_fact.key,
+                    'value': conv_fact.value,
+                    'user_id': conversation.user_id,
+                    'updated_at': datetime.utcnow().isoformat(),
+                }
+            )
             texts.append(conv_fact.fact)
-        embeddings: list[list[float]] = self.vectorizer.embed_batch(texts) if texts else []
+        embeddings: list[list[float]] = (
+            self.vectorizer.embed_batch(texts) if texts else []
+        )
 
         if records:
             self.vector_store.add_structured_memories(records, embeddings)
         _logger.info(
-            f"struct 入库完成 user={conversation.user_id} session={session_id} "
-            f"facts={len(records)} 提取={(t_extract - t0) * 1000:.0f}ms "
-            f"落库={(t_sqlite - t_extract) * 1000:.0f}ms "
-            f"向量={(time.perf_counter() - t_sqlite) * 1000:.0f}ms "
-            f"总={(time.perf_counter() - t0) * 1000:.0f}ms"
+            f'struct 入库完成 user={conversation.user_id} session={session_id} '
+            f'facts={len(records)} 提取={(t_extract - t0) * 1000:.0f}ms '
+            f'落库={(t_sqlite - t_extract) * 1000:.0f}ms '
+            f'向量={(time.perf_counter() - t_sqlite) * 1000:.0f}ms '
+            f'总={(time.perf_counter() - t0) * 1000:.0f}ms'
         )
 
-    def get_structured_memories(self, user_id: str, query: str, top_k: int = 3) -> List[StructuredMemory]:
+    def get_structured_memories(
+        self, user_id: str, query: str, top_k: int = 3
+    ) -> list[StructuredMemory]:
         """根据 query 检索结构化记忆（混合检索 + 元数据过滤）"""
         from os_mem.infra.p2check import mask_pii
 
@@ -166,19 +182,27 @@ class StructuredMemService:
         try:
             query_embedding = self.vectorizer.embed(query)
         except Exception as e:
-            _logger.error(f"query 向量化失败 user={user_id} query={masked_query}: {e}")
+            _logger.error(f'query 向量化失败 user={user_id} query={masked_query}: {e}')
 
-        hits = self.vector_store.search(
-            query_embedding, query_text=query, top_k=top_k, user_id=user_id,
-        ) or []
+        hits = (
+            self.vector_store.search(
+                query_embedding,
+                query_text=query,
+                top_k=top_k,
+                user_id=user_id,
+            )
+            or []
+        )
         if not hits:
-            _logger.warning(f"struct 检索无命中 user={user_id} query={masked_query}")
+            _logger.warning(f'struct 检索无命中 user={user_id} query={masked_query}')
 
-        _logger.info(f"  获取结构化记忆: {len(hits)} 条")
-        memories: List[StructuredMemory] = []
-        allowed = {"id", "fact", "category", "key", "value", "user_id", "updated_at"}
+        _logger.info(f'  获取结构化记忆: {len(hits)} 条')
+        memories: list[StructuredMemory] = []
+        allowed = {'id', 'fact', 'category', 'key', 'value', 'user_id', 'updated_at'}
         for hit in hits:
-            memories.append(StructuredMemory(**{k: hit[k] for k in allowed if k in hit}))
+            memories.append(
+                StructuredMemory(**{k: hit[k] for k in allowed if k in hit})
+            )
         return memories
 
 
@@ -191,5 +215,7 @@ _structured_mem_service = None
 def get_structured_mem_service() -> StructuredMemService:
     global _structured_mem_service
     if _structured_mem_service is None:
-        _structured_mem_service = StructuredMemService(get_llm_client(), _vectorizer, _vector_store)
+        _structured_mem_service = StructuredMemService(
+            get_llm_client(), _vectorizer, _vector_store
+        )
     return _structured_mem_service

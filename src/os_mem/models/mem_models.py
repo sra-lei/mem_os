@@ -1,10 +1,10 @@
 from datetime import datetime
 
 from pydantic.dataclasses import dataclass
-from typing import List
+
 
 @dataclass
-class Conversation():
+class Conversation:
     id: str
     user_id: str
     messages: list[str]
@@ -12,8 +12,9 @@ class Conversation():
     started_at: datetime
     ended_at: datetime
 
+
 @dataclass
-class Memory():
+class Memory:
     user_id: str
     fact: str
     contains_pii: bool
@@ -21,14 +22,16 @@ class Memory():
     source_session_id: str
     created_at: datetime
 
+
 @dataclass
-class MemoryFact():
+class MemoryFact:
     fact: str
     category: str
     key: str
     value: str
     confidence: float = 0.8
 
+
 @dataclass
-class MemoryFacts():
-    facts: List[MemoryFact]
+class MemoryFacts:
+    facts: list[MemoryFact]

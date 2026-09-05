@@ -1,25 +1,24 @@
 import json
 from datetime import datetime
-from typing import List, Optional
 
 from sqlmodel import Session, select
 
-from os_mem.models.mem_models import Memory
 from os_mem.entries.mem_models import Message
 from os_mem.infra.logger.logger import LoggerHelper, get_logger
-from os_mem.infra.retriever import SimpleBM25, RankBM25
-from os_mem.infra.storage import get_session
 from os_mem.infra.p2check import has_pii, mask_pii
+from os_mem.infra.retriever import RankBM25
+from os_mem.infra.storage import get_session
+from os_mem.models.mem_models import Memory
 
-_logger: LoggerHelper = get_logger("os_mem.note_mem")
+_logger: LoggerHelper = get_logger('os_mem.note_mem')
 
 
 def upsert_conversation_messages(
     session: Session,
     user_id: str,
     source_session_id: str,
-    messages: List[str],
-    started_at: Optional[datetime] = None,
+    messages: list[str],
+    started_at: datetime | None = None,
 ) -> int:
     """逐条把会话原文写入 conv_messages（value 冲突 upsert，双 provider 共用）。
 
@@ -36,9 +35,12 @@ def upsert_conversation_messages(
     for seq, m in enumerate(messages):
         try:
             msg = json.loads(m) if isinstance(m, str) else m
-            if not isinstance(msg, dict) or msg.get("role") not in ("user", "assistant"):
+            if not isinstance(msg, dict) or msg.get('role') not in (
+                'user',
+                'assistant',
+            ):
                 continue
-            msg_content = msg.get("content") or ""
+            msg_content = msg.get('content') or ''
             has_pii_flag = has_pii(msg_content)
             masked = mask_pii(msg_content) if has_pii_flag else None
 
@@ -50,15 +52,17 @@ def upsert_conversation_messages(
                 )
             ).first()
             if existing is None:
-                session.add(Message(
-                    user_id=user_id,
-                    source_session_id=source_session_id,
-                    seq=seq,
-                    content=msg_content,
-                    contains_pii=has_pii_flag,
-                    masked_text=masked,
-                    create_at=started_at or datetime.utcnow(),
-                ))
+                session.add(
+                    Message(
+                        user_id=user_id,
+                        source_session_id=source_session_id,
+                        seq=seq,
+                        content=msg_content,
+                        contains_pii=has_pii_flag,
+                        masked_text=masked,
+                        create_at=started_at or datetime.utcnow(),
+                    )
+                )
                 written += 1
             elif existing.content != msg_content:
                 # 后入的走记忆更新逻辑：新值覆盖，旧值归档（镜像 previous_fact）
@@ -71,12 +75,12 @@ def upsert_conversation_messages(
             else:
                 identical += 1  # 数据一致 → 无影响（跳过）
         except Exception as e:
-            _logger.error(f"存储消息失败: {e} - {m}")
+            _logger.error(f'存储消息失败: {e} - {m}')
             continue
     if written or identical:
         _logger.info(
-            f"消息 upsert user={user_id} session={source_session_id} "
-            f"总={len(messages)} 写入={written} 一致跳过={identical}"
+            f'消息 upsert user={user_id} session={source_session_id} '
+            f'总={len(messages)} 写入={written} 一致跳过={identical}'
         )
     return written
 
@@ -85,66 +89,77 @@ def has_conversation_messages(user_id: str, source_session_id: str) -> bool:
     """该会话是否已有原文落库（base 重复投递门禁用，消息存在 = 已处理过）。"""
     with get_session() as session:
         row = session.exec(
-            select(Message.id).where(
+            select(Message.id)
+            .where(
                 Message.user_id == user_id,
                 Message.source_session_id == source_session_id,
-            ).limit(1)
+            )
+            .limit(1)
         ).first()
         return row is not None
 
 
 class NoteMemService:
-     def _expand_turn_with_context(self,
-        messages: List[Message],
-        turn_index: int, 
-        expand_before: int = 3, 
-        expand_after: int = 3
+    def _expand_turn_with_context(
+        self,
+        messages: list[Message],
+        turn_index: int,
+        expand_before: int = 3,
+        expand_after: int = 3,
     ) -> str:
         """取某个回合前后各 N 个回合，组成一个上下文块"""
         start = max(0, turn_index - expand_before)
         end = min(len(messages), turn_index + expand_after + 1)
-        return "\n".join([messages[i].content for i in range(start, end)])
+        return '\n'.join([messages[i].content for i in range(start, end)])
 
-     def search_user_memories(self, user_id: str, query: str, top_k: int = 3) -> List[Memory]:
-            """检索用户相关对话"""
-            from os_mem.infra.p2check import mask_pii
+    def search_user_memories(
+        self, user_id: str, query: str, top_k: int = 3
+    ) -> list[Memory]:
+        """检索用户相关对话"""
+        from os_mem.infra.p2check import mask_pii
 
-            _logger.info(
-                f"note 检索 user={user_id} query={mask_pii(query)} top_k={top_k}"
+        _logger.info(f'note 检索 user={user_id} query={mask_pii(query)} top_k={top_k}')
+        with get_session() as session:
+            messages = session.exec(
+                select(Message).where(Message.user_id == user_id)
+            ).all()
+
+        if not messages:
+            _logger.info(f'note 检索 user={user_id}: 无消息记录，返回空')
+            return []
+        # 构建文档（对话摘要）
+        user_contents = []
+        for msg in messages:
+            user_contents.append(msg.content)
+        # BM25 检索
+        bm25 = RankBM25(user_contents)
+        results = bm25.retrieve(query, top_k)
+
+        memories: list[Memory] = []
+        for doc_idx, doc_text, score in results:
+            _logger.debug(
+                f'note 检索命中: doc={doc_idx} '
+                f'masked={messages[doc_idx].masked_text} score={score}'
             )
-            with get_session() as session:
-                messages = session.exec(
-                    select(Message).where(Message.user_id == user_id)
-                ).all()
+            fact = self._expand_turn_with_context(
+                messages, doc_idx, expand_before=1, expand_after=1
+            )
+            memory = Memory(
+                user_id=user_id,
+                fact=fact,
+                contains_pii=messages[doc_idx].contains_pii,
+                masked_text=messages[doc_idx].masked_text,
+                source_session_id=messages[doc_idx].source_session_id,
+                created_at=messages[doc_idx].create_at,
+            )
+            memories.append(memory)
 
-            if not messages:
-                _logger.info(f"note 检索 user={user_id}: 无消息记录，返回空")
-                return []
-            # 构建文档（对话摘要）
-            user_contents = []
-            for msg in messages:
-                user_contents.append(msg.content)
-            # BM25 检索
-            bm25 = RankBM25(user_contents)
-            results = bm25.retrieve(query, top_k)
+        return memories
 
-            memories:List[Memory] = []
-            for doc_idx, doc_text, score in results:
-                _logger.debug(f"note 检索命中: doc={doc_idx} masked={messages[doc_idx].masked_text} score={score}")
-                fact = self._expand_turn_with_context(messages, doc_idx, expand_before=1, expand_after=1)
-                memory = Memory(
-                    user_id=user_id,
-                    fact=fact,
-                    contains_pii=messages[doc_idx].contains_pii,
-                    masked_text=messages[doc_idx].masked_text,
-                    source_session_id=messages[doc_idx].source_session_id,
-                    created_at=messages[doc_idx].create_at,
-                )
-                memories.append(memory)
-
-            return memories
 
 _note_mem_service = None
+
+
 def get_note_mem_service() -> NoteMemService:
     global _note_mem_service
     if _note_mem_service is None:

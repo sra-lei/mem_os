@@ -6,16 +6,15 @@ conversation history (user + agent turns). v0.1 plan: sync LLM extraction
 failure log the error and skip silently; retry writes 3x. All logs go through
 sanitizer.sanitize_log.
 """
-from __future__ import annotations
 
-from typing import List
+from __future__ import annotations
 
 from ..infra.logger import get_logger
 
-_logger = get_logger("os_mem.generator")
+_logger = get_logger('os_mem.generator')
 
 
-def extract_facts(conversation: dict) -> List[str]:
+def extract_facts(conversation: dict) -> list[str]:
     """Return the list of durable fact strings extracted from one conversation.
 
     TODO(user): implement LLM extraction per 需求文档 v0.1 module 1.3.
@@ -24,6 +23,7 @@ def extract_facts(conversation: dict) -> List[str]:
                       messages[{role, content}]
     """
     _logger.warning(
-        f"extract_facts 未实现（占位）：会话 {conversation.get('conversation_id')} 跳过提取"
+        f'extract_facts 未实现（占位）：会话 '
+        f'{conversation.get("conversation_id")} 跳过提取'
     )
     return []

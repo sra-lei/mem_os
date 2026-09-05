@@ -13,21 +13,23 @@ tests/test_struct_mem_*.py 单测。
     pytest tests/test_memory_eval.py --memory-provider struct --top-k 15
     pytest tests/test_memory_eval.py --judge moonshot --record-db # LLM 判分 + 落库看板
     pytest tests/test_memory_eval.py -k bank_account              # 按名称过滤单条
-    pytest tests/test_memory_eval.py --limit 1                    # 过滤后只跑 1 条（快速验证）
+    pytest tests/test_memory_eval.py --limit 1  # 过滤后只跑 1 条（快速验证）
 """
 
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING, Any, Callable
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
 import pytest
-from eval.cases import expected_text_for_case, phase_version_for_case
-from eval.harness import run_case_pipeline
+
+from .eval.cases import expected_text_for_case, phase_version_for_case
+from .eval.harness import run_case_pipeline
 
 if TYPE_CHECKING:
-    from eval.judge import JudgeResult
-    from eval.llm import AnswerGenerator
+    from .eval.judge import JudgeResult
+    from .eval.llm import AnswerGenerator
 
 
 def test_eval_case(
