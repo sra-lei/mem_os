@@ -24,12 +24,12 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from .eval.cases import expected_text_for_case, phase_version_for_case
-from .eval.harness import run_case_pipeline
+from eval.cases import expected_text_for_case, phase_version_for_case
+from eval.harness import run_case_pipeline
 
 if TYPE_CHECKING:
-    from .eval.judge import JudgeResult
-    from .eval.llm import AnswerGenerator
+    from eval.judge import JudgeResult
+    from eval.llm import AnswerGenerator
 
 
 def test_eval_case(
