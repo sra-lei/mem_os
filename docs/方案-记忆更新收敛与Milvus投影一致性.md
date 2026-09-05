@@ -187,9 +187,11 @@ ingest 同一用户）。据此：
 
 ## 9. 风险与开放问题
 
-1. **delete 粒度（已定）**：按 **key 集合批量删**（每 category 一次 `category=="x" and key in (...)` filter），
-   不做逐 key N 次调用（避免 RTT 放大）；**批量删必须记录完整日志**（user_id、category、key 集合、
-   实际 delete_count、耗时），出问题可逐批排查。若实测批量 filter 有误删/语法风险，回退逐 key（见 §4.2）。
+1. **delete 粒度（已定）**：按 **key 集合批量删**（每 category 一次
+   `category=="x" and key in ["k1","k2",...]` filter——**注意 Milvus 布尔表达式 in 用方括号
+   列表，圆括号会解析失败**，曾致 168 次删旧全部失败）；不做逐 key N 次调用（避免 RTT 放大）；
+   **批量删必须记录完整日志**（user_id、category、key 集合、实际 delete_count、耗时），
+   出问题可逐批排查。若实测批量 filter 有误删/语法风险，回退逐 key（见 §4.2）。
 2. **pymilvus delete 的 filter 语法**：需实现时验证 `category == "x" and key in ("k1","k2",...)`
    组合过滤在目标 Milvus 版本可用（对标现有 search 的 filter 用法；注意 key 值含引号等特殊
    字符时的转义，LLM 生成的 key 格式不可控——批量 filter 拼接处必须做转义）。

@@ -98,17 +98,65 @@ def build_extract_messages(dialog_text: str) -> list[dict[str, str]]:
     ]
 
 
+REPAIR_PROMPT = """你是 JSON 修复助手。以下是事实提取任务产生的一段
+**不完整/截断的 JSON**（可能因输出长度限制被切断，或包含少量格式错误）。
+
+任务：修复并补全它，输出**完整合法**的 JSON 对象（保持 {"facts": [...]} 结构）：
+1. 保留所有已完整出现的 facts 条目，不要丢失、改写其中任何字段；
+2. 若末尾条目被截断（缺闭合括号/引号/字段），按上下文补全其内容，
+   或如果无法合理推断，删除该不完整条目；
+3. 若内容完全不完整无法修复，则输出 {"facts": []}（不要输出空串或非 JSON 文本）。
+
+只输出 JSON，不要任何解释文字。
+"""
+
+
+def build_repair_messages(
+    partial_json: str, max_facts: int | None = None
+) -> list[dict[str, str]]:
+    """拼装「修复截断 JSON」的 messages。"""
+    cap = max_facts or memory_settings.DEEPSEEK_EXTRACT_MAX_FACTS
+    system = (
+        REPAIR_PROMPT
+        + f'\n\n（注意：完整输出仍受 {cap} 条事实上限约束，若原输出已接近上限，'
+        + '优先保留前面更重要的条目。）'
+    )
+    return [
+        {'role': 'system', 'content': system},
+        {'role': 'user', 'content': f'待修复的 JSON：\n\n{partial_json}'},
+    ]
+
+
+class _ExtractComplete:
+    """把 ChatClient 适配成 FactExtractor 的 complete 回调，并附带 repair 能力。
+
+    - ``__call__(dialog_text)``：正常提取（兼容原 ``Callable[[str], str]`` 用法）；
+    - ``repair(partial_json)``：修复截断/损坏的 JSON（方案 3：失败续写而非整段重提取）。
+    FactExtractor 用鸭子类型探测 ``hasattr(callable, 'repair')`` 决定是否可用续写。
+    """
+
+    def __init__(self, client: ChatClient) -> None:
+        self._client = client
+        self._response_format = {'type': 'json_object'}
+
+    def __call__(self, dialog_text: str) -> str:
+        return self._client.chat(
+            build_extract_messages(dialog_text),
+            response_format=self._response_format,
+        )
+
+    def repair(self, partial_json: str) -> str:
+        return self._client.chat(
+            build_repair_messages(partial_json),
+            response_format=self._response_format,
+        )
+
+
 def build_extract_complete(client: ChatClient) -> Callable[[str], str]:
     """把通用 LLM client 适配为 ``FactExtractor`` 期望的提取回调。
 
     返回 ``(dialog_text) -> raw_json``：内部按事实提取任务要求拼装
     system/user 消息并以 json_object 响应格式调用 ``client.chat``。
+    返回对象同时具备 ``.repair(partial_json)`` 续写能力（见 ``_ExtractComplete``）。
     """
-    response_format = {'type': 'json_object'}
-
-    def complete(dialog_text: str) -> str:
-        return client.chat(
-            build_extract_messages(dialog_text), response_format=response_format
-        )
-
-    return complete
+    return _ExtractComplete(client)

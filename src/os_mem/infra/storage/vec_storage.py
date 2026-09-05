@@ -200,11 +200,12 @@ class MemoryVectorStore:
         if category:
             parts.append(f'category == "{category}"')
         if keys is not None:
-            # 批量 filter：key in (...) —— key 由 LLM 生成，可能含引号等特殊字符，
-            # 拼接处统一转义（把单引号替换为反斜杠转义形式，pymilvus 按 SQL-like 解析）
+            # 批量 filter：key in [...]（Milvus 布尔表达式用方括号列表，
+            # 圆括号会解析失败）
+            # key 由 LLM 生成，可能含引号等特殊字符，拼接处统一转义
             escaped = [k.replace('"', '\\"').replace("'", "\\'") for k in keys]
             keys_expr = ",".join(f'"{k}"' for k in escaped)
-            parts.append(f"key in ({keys_expr})")
+            parts.append(f"key in [{keys_expr}]")
         expr = " and ".join(parts)
         t0 = time.monotonic()
         try:

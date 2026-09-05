@@ -22,6 +22,9 @@ from openai import OpenAI
 
 from os_mem.configs.mem_settings import memory_settings
 from os_mem.infra.llm.base_client import Message
+from os_mem.infra.logger import get_logger
+
+_logger = get_logger('os_mem.infra.llm.deepseek')
 
 
 class DeepSeekClient:
@@ -78,9 +81,20 @@ class DeepSeekClient:
             content = resp.choices[0].message.content
             if content:
                 return content
-            # 模型/API 偶发返回空 content（限流或模型不稳定），
-            # 拉长退避时间等待恢复：3s / 6s / 9s
+            # 模型/API 偶发返回空 content（限流或模型不稳定，
+            # 常见于长文本 + json 输出）。
+            # 记录 finish_reason 便于区分「length 截断（max_tokens 不够，输出被切断）」
+            # 与「空回复」：finish_reason=length 时应调大 max_tokens 而非盲目重试。
+            finish_reason = getattr(resp.choices[0], 'finish_reason', None)
+            usage = getattr(resp, 'usage', None)
+            prompt_tokens = getattr(usage, 'prompt_tokens', None)
+            completion_tokens = getattr(usage, 'completion_tokens', None)
+            _logger.warning(
+                f'LLM 返回空 content（attempt={attempt + 1}/{retries} '
+                f'finish_reason={finish_reason} prompt_tokens={prompt_tokens} '
+                f'completion_tokens={completion_tokens} max_tokens={max_tokens}）'
+            )
             if attempt < retries - 1:
                 wait = 3.0 * (attempt + 1)
                 time.sleep(wait)
-        return ""
+        return ''

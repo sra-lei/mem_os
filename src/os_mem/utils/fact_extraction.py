@@ -158,15 +158,42 @@ class FactExtractor:
         retries: int = 3,
         complete: Callable[[str], str] | None = None,
     ) -> list[MemoryFact]:
-        """对单个分段提取结构化事实（校验失败/异常按 retries 重试）。"""
+        """对单个分段提取结构化事实（校验失败/异常按 retries 重试）。
+
+        失败续写（方案 3）：若 LLM 返回了非空但解析失败的 JSON（典型为 max_tokens
+        截断导致的 ``Unterminated string``），且回调具备 ``repair(partial_json)``
+        能力，则先尝试让模型**修复/续写**该 JSON（秒级），修复仍失败才整段重提取。
+        避免每次截断都触发 1-3 分钟的整段重新提取。
+        """
         fn = self._resolve_complete(complete)
+        repair_fn = getattr(fn, 'repair', None)
         for attempt in range(retries):
             try:
                 raw_json = fn(text)
                 facts = self.validate_response(raw_json)
                 if facts:
                     return facts
-                _logger.warning(f'第 {attempt + 1} 次提取验证失败，重试中...')
+                # 非空但解析失败：尝试 repair 续写（若回调支持）
+                if raw_json and raw_json.strip() and repair_fn is not None:
+                    try:
+                        _logger.warning(
+                            f'第 {attempt + 1} 次输出解析失败，尝试 repair 续写 '
+                            f'（len={len(raw_json)}）...'
+                        )
+                        repaired = repair_fn(raw_json)
+                        repaired_facts = self.validate_response(repaired)
+                        if repaired_facts:
+                            _logger.info(
+                                f'repair 成功: {len(repaired_facts)} 条'
+                                f'（原始 len={len(raw_json)}'
+                                f' → 修复 len={len(repaired)}）'
+                            )
+                            return repaired_facts
+                        _logger.warning('repair 输出仍解析失败，回退整段重试')
+                    except Exception as e:
+                        _logger.error(f'repair 调用失败，回退整段重试: {e}')
+                else:
+                    _logger.warning(f'第 {attempt + 1} 次提取验证失败，整段重试中...')
             except Exception as e:
                 _logger.error(f'Attempt {attempt + 1} failed: {e}')
         return []

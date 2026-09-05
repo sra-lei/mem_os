@@ -178,8 +178,8 @@ def test_delete_memories_filter_scoped_to_user_category_keys() -> None:
     # user 过滤必须存在（防误删其他用户）
     assert 'user_id == "layer1_02_insurance_claim"' in expr
     assert 'category == "other"' in expr
-    # key in (...) 批量
-    assert 'key in (' in expr
+    # key in [...] 批量（Milvus 布尔表达式用方括号列表）
+    assert 'key in [' in expr
     assert 'claims_adjuster' in expr
     assert 'adjuster_contact_schedule' in expr
 
@@ -192,7 +192,7 @@ def test_delete_memories_keys_escaped() -> None:
     store.delete_memories(user_id='u1', category='c', keys=tricky)
     expr = fake.calls[0]['filter']
     # 转义后仍是一个合法 in 列表（粗查：包含 key 片段即可，重点是不抛异常）
-    assert 'key in (' in expr
+    assert 'key in [' in expr
     assert 'odd' in expr
     assert 'it' in expr
 

@@ -4,7 +4,8 @@
   - ``validate_response``     ：LLM 返回清洗（markdown / 包装格式）与校验
     （分类白名单、confidence 边界、非法 JSON → []）
   - ``chunk_dialog``          ：长对话分段 + 段间冗余重叠，边界信息不切丢
-  - ``extract_structured_facts``：单段提取 / 长对话并行 / 全失败降级（注入 fake complete）
+  - ``extract_structured_facts``：单段提取 / 长对话并行 / 全失败降级
+    （注入 fake complete）
   - ``dedup_facts``           ：按 (category, key, value) 跨段去重
   - ``fallback_numeric_facts``：含金额/编号/日期/电话的原文句子 verbatim 兜底
 
@@ -229,3 +230,77 @@ class TestExtractStructuredFacts:
         fx = FactExtractor()  # 未注入 complete
         with pytest.raises(ValueError, match="complete"):
             fx.extract_structured_facts("hi")
+
+
+# ------------------------------------------------------------------ #
+#  repair 续写（方案 3）：截断 JSON 优先修复而非整段重提取
+# ------------------------------------------------------------------ #
+class RepairComplete:
+    """模拟带 repair 能力的回调：首次返回截断 JSON，repair 返回合法 JSON。"""
+
+    def __init__(self) -> None:
+        self.extract_calls = 0
+        self.repair_calls = 0
+
+    def __call__(self, text: str) -> str:
+        self.extract_calls += 1
+        # 第一次提取即"截断"：JSON 中途断掉
+        return ('{"facts": [{"fact":"用户账户 4429853327","category":"finance",'
+                '"key":"account","value":"4429853327","confidence":0.95},')
+
+    def repair(self, partial_json: str) -> str:
+        self.repair_calls += 1
+        return ('{"facts": [{"fact":"用户账户 4429853327","category":"finance",'
+                '"key":"account","value":"4429853327","confidence":0.95},'
+                '{"fact":"用户邮箱 a@b.com","category":"contact","key":"email",'
+                '"value":"a@b.com","confidence":0.9}]}')
+
+
+class TestRepairFlow:
+    def test_truncated_output_repaired_without_full_reextract(self) -> None:
+        """截断 JSON → 走 repair 续写成功，不触发整段重提取。"""
+        fx = FactExtractor()
+        fake = RepairComplete()
+        out = fx.extract_chunk("长对话内容", retries=3, complete=fake)
+        assert len(out) == 2  # repair 补全后含 2 条 fact
+        keys = {f.key for f in out}
+        assert keys == {"account", "email"}
+        assert fake.extract_calls == 1  # 只提取 1 次，未整段重试
+        assert fake.repair_calls == 1
+
+    def test_repair_fails_then_full_retry(self) -> None:
+        """repair 也失败 → 回退整段重试（第 2 次提取成功）。"""
+        good = ('[{"fact":"用户邮箱 a@b.com","category":"contact",'
+                '"key":"email","value":"a@b.com","confidence":0.9}]')
+
+        class FlakyRepair:
+            def __init__(self) -> None:
+                self.extract_calls = 0
+                self.repair_calls = 0
+
+            def __call__(self, text: str) -> str:
+                self.extract_calls += 1
+                return "{truncated" if self.extract_calls == 1 else good
+
+            def repair(self, partial_json: str) -> str:
+                self.repair_calls += 1
+                return "{bad json again"
+
+        fake = FlakyRepair()
+        fx = FactExtractor()
+        out = fx.extract_chunk("对话", retries=3, complete=fake)
+        assert len(out) == 1
+        assert out[0].key == "email"
+        assert fake.repair_calls == 1  # repair 尝试过
+        assert fake.extract_calls == 2  # 回退整段重试一次
+
+    def test_plain_complete_without_repair_still_works(self) -> None:
+        """无 repair 能力的普通回调 → 走原整段重试路径（兼容旧用法）。"""
+        good = ('[{"fact":"用户邮箱 a@b.com","category":"contact",'
+                '"key":"email","value":"a@b.com","confidence":0.9}]')
+        fake = FakeComplete(payload_by_call={1: "{bad", 2: good})
+        fx = FactExtractor()
+        out = fx.extract_chunk("对话", retries=3, complete=fake)
+        assert len(out) == 1
+        assert out[0].key == "email"
+        assert len(fake.calls) == 2  # 两次整段调用
