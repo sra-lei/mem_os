@@ -96,6 +96,24 @@ class StructuredMemService:
             session.commit()
         return written
 
+    @staticmethod
+    def _converge_by_key(facts: list[MemoryFact]) -> list[MemoryFact]:
+        """投影收敛：同 (category, key) 多条只保留一条（confidence 高者优先）。
+
+        同批同刻无法用 updated_at 区分，confidence 由提取 LLM 给出（0-1）：
+        - confidence 高者胜出；
+        - confidence 相同 → 保留原序最后一条（稳定排序 confidence desc 后取每组末尾）。
+        返回收敛后的事实列表（顺序按原列表首次出现排序，保持稳定可测）。
+        """
+        best: dict[tuple[str, str], MemoryFact] = {}
+        for f in facts:
+            sig = (f.category, f.key)
+            prev = best.get(sig)
+            # confidence 高者胜出；相等时后者覆盖前者（保留原序最后一条）
+            if prev is None or f.confidence >= prev.confidence:
+                best[sig] = f
+        return list(best.values())
+
     def add_structured_memory(
         self,
         conversation: Conversation,
@@ -107,6 +125,11 @@ class StructuredMemService:
         （EXTRACTING / SAVING_SQLITE / SAVING_VECTOR），由调用方（StructProvider）
         接入会话处理状态机；为 None 时保持旧行为（不追踪）。
         事实抽取逻辑见 ``os_mem.utils.fact_extraction.FactExtractor``。
+
+        投影收敛（A 批，见 docs/方案-记忆更新收敛与Milvus投影一致性.md）：
+        Milvus 是投影（SQLite 为权威源）；写入前先把本批 facts 按 (category, key)
+        收敛为每键一条（confidence 高者优先），再按 category 批量删旧、插入新值——
+        保证 mem_os 恒为"每 (user, key) 一条最新"的干净投影。
         """
         t0 = time.perf_counter()
         session_id = conversation.source_session_id or conversation.id or ''
@@ -145,9 +168,32 @@ class StructuredMemService:
         t_sqlite = time.perf_counter()
         _logger.info(f'  落库 SQLite struct_memories: {sqlite_written} 条')
 
-        # 逐个 embed → 改为批量 embed（DashScope 单批上限 10，自动折半重试）
+        # ---- 投影期收敛：本批 facts 按 (category, key) 收敛为每键一条
+        #      （confidence 高者优先，见方案文档 §9-3） ----
+        conv_facts = self._converge_by_key(conv_facts)
+
+        # ---- 删旧插新：按 category 分组批量删旧向量，再 embed + INSERT 新值 ----
         if on_stage:
             on_stage(STATUS_SAVING_VECTOR)
+        user_id = conversation.user_id
+        # 收集本批涉及的全部 key（收敛后每键一条），按 category 分组
+        by_category: dict[str, list[MemoryFact]] = {}
+        for conv_fact in conv_facts:
+            by_category.setdefault(conv_fact.category, []).append(conv_fact)
+        for cat, cat_facts in by_category.items():
+            keys = [f.key for f in cat_facts]
+            try:
+                self.vector_store.delete_memories(
+                    user_id=user_id, category=cat, keys=keys
+                )
+            except Exception as e:
+                # 删除失败不阻断入库（SQLite 权威仍在，可重建）；
+                # 记日志便于排查，后续重跑会再次删旧。
+                _logger.error(
+                    f'  投影删旧失败 user={user_id} category={cat} '
+                    f'keys_n={len(keys)}: {e}'
+                )
+
         records: list[dict] = []
         texts: list[str] = []
         for conv_fact in conv_facts:
@@ -158,7 +204,7 @@ class StructuredMemService:
                     'category': conv_fact.category,
                     'key': conv_fact.key,
                     'value': conv_fact.value,
-                    'user_id': conversation.user_id,
+                    'user_id': user_id,
                     'updated_at': datetime.utcnow().isoformat(),
                 }
             )
@@ -170,7 +216,7 @@ class StructuredMemService:
         if records:
             self.vector_store.add_structured_memories(records, embeddings)
         _logger.info(
-            f'struct 入库完成 user={conversation.user_id} session={session_id} '
+            f'struct 入库完成 user={user_id} session={session_id} '
             f'facts={len(records)} 提取={(t_extract - t0) * 1000:.0f}ms '
             f'落库={(t_sqlite - t_extract) * 1000:.0f}ms '
             f'向量={(time.perf_counter() - t_sqlite) * 1000:.0f}ms '

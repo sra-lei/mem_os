@@ -5,6 +5,9 @@ doc-kit - 向量库存储能力：把 (文本, 向量, 元数据) 写入 Milvus 
 MemOS 扩展：MemoryVectorStore —— mem_os collection 存储 StructuredMemory，
 fact 向量化，category/key/value/user_id/updated_at 作为元数据。
 """
+from __future__ import annotations
+
+import time
 from typing import Any
 
 from pymilvus import (
@@ -41,7 +44,10 @@ class MemoryVectorStore:
             uri=memory_settings.MILVUS_URI,
             token=memory_settings.MILVUS_API_KEY,
         )
-        _logger.info(f"MemoryVectorStore 初始化完成 | collection={self.collection_name} dim={self.dim}")
+        _logger.info(
+            f"MemoryVectorStore 初始化完成 | "
+            f"collection={self.collection_name} dim={self.dim}"
+        )
 
     # ------------------------------------------------------------------ #
     #  建集合：id + vector(fact embedding) + sparse(BM25) + 元数据显式字段
@@ -58,7 +64,8 @@ class MemoryVectorStore:
                     has_sparse = True  # 无法探测时按新结构对待
                 if not has_sparse:
                     raise RuntimeError(
-                        f"collection {self.collection_name} 是旧结构（无 BM25 sparse 字段），"
+                        f"collection {self.collection_name} 是旧结构"
+                        "（无 BM25 sparse 字段），"
                         "混合检索需要重建：请先 drop 该 collection 再运行"
                     )
                 return
@@ -117,7 +124,9 @@ class MemoryVectorStore:
             self.client.load_collection(self.collection_name)
         except MilvusException as e:
             _logger.error(f"[Milvus] 创建 mem_os 集合失败: {e}")
-            raise RuntimeError(f"创建 Milvus collection {self.collection_name} 失败: {e}") from e
+            raise RuntimeError(
+                f"创建 Milvus collection {self.collection_name} 失败: {e}"
+            ) from e
 
         _logger.info(
             f"[Milvus] mem_os collection 创建完成"
@@ -165,6 +174,60 @@ class MemoryVectorStore:
 
         _logger.info(f"写入 {len(records)} 条 StructuredMemory → mem_os")
         return len(records)
+
+    # ------------------------------------------------------------------ #
+    #  删除：投影期收敛（删旧插新）——按 (user_id, category, key) 删旧向量
+    # ------------------------------------------------------------------ #
+    def delete_memories(
+        self,
+        user_id: str,
+        category: str | None = None,
+        keys: list[str] | None = None,
+    ) -> int:
+        """删除指定用户/类别/键集合的旧向量（批量 filter）。
+
+        filter 语义：
+        - user_id 必填（防误删其他用户）；
+        - category 提供时限定类别；keys 提供时用 ``key in (...)`` 一次删多键；
+        - 全部省略时删除该 user 全部向量（调用方需谨慎，仅显式场景使用）。
+        删除记录完整日志（user_id/category/keys/delete_count/耗时），出问题可逐批排查。
+        返回实际删除条数；删除不存在的键返回 0（幂等）。
+        """
+        if not user_id:
+            raise ValueError('delete_memories 必须指定 user_id（防误删其他用户）')
+        self._ensure_collection()
+        parts = [f'user_id == "{user_id}"']
+        if category:
+            parts.append(f'category == "{category}"')
+        if keys is not None:
+            # 批量 filter：key in (...) —— key 由 LLM 生成，可能含引号等特殊字符，
+            # 拼接处统一转义（把单引号替换为反斜杠转义形式，pymilvus 按 SQL-like 解析）
+            escaped = [k.replace('"', '\\"').replace("'", "\\'") for k in keys]
+            keys_expr = ",".join(f'"{k}"' for k in escaped)
+            parts.append(f"key in ({keys_expr})")
+        expr = " and ".join(parts)
+        t0 = time.monotonic()
+        try:
+            res = self.client.delete(
+                collection_name=self.collection_name,
+                filter=expr,
+            )
+            if isinstance(res, dict):
+                count = int(res.get("delete_count", 0) or 0)
+            else:
+                count = int(res or 0)
+        except MilvusException as e:
+            _logger.error(
+                f"[Milvus] delete 失败 user={user_id} category={category} "
+                f"keys={keys}: {e}"
+            )
+            raise
+        _logger.info(
+            f"[Milvus] delete user={user_id} category={category} "
+            f"keys_n={len(keys) if keys else 0} deleted={count} "
+            f"耗时={(time.monotonic() - t0) * 1000:.0f}ms filter={expr}"
+        )
+        return count
 
     # ------------------------------------------------------------------ #
     #  检索：混合检索（稠密向量 COSINE + BM25 全文）→ RRF 融合
