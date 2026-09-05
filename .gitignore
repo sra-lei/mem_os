@@ -24,6 +24,9 @@ ENV/
 *.db-wal
 *.db-shm
 
+# memories.db 需跨机同步（git），显式放行
+!src/os_mem/data/memories.db
+
 # ---- Node / Vite / TS (frontend) ----
 **/node_modules/
 **/.npm-cache/
