@@ -45,7 +45,7 @@ packages = ["src/os_mem", "src/testing"]
 
 [tool.ruff]
 line-length = 88
-target-version = "py38"
+target-version = "py312"
 
 [tool.ruff.format]
 quote-style = "single"
@@ -58,4 +58,4 @@ select = ["E", "F", "I", "N", "W", "UP"]
 ignore = []
 
 [tool.ruff.lint.isort]
-known-first-party = ["你的项目包名"]
+known-first-party = ["os_mem", "testing", "eval"]
