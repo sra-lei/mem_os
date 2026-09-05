@@ -9,7 +9,8 @@
   ``complete(dialog_text) -> raw_json`` 回调（见 ``FactExtractor``）。
 
 因此修改提取 prompt（含 {max_facts} 占位等）只需改本文件；
-接入 LLM 网关时替换 ``deepseek_client`` 底层实现即可，本文件与提取链路无需改动。
+接入新的 LLM provider 时在 ``os_mem.infra.llm.factory`` 注册即可，
+本文件与提取链路无需改动。
 """
 
 from __future__ import annotations

@@ -5,6 +5,8 @@
   DeepSeek（OpenAI 兼容）实现；
 - 未来接入 LLM 网关时提供另一个满足该契约的实现即可，
   业务侧（``utils/extract_prompt``、``core/services/struc_mem_service``）无需改动。
+- 实例化与多实现降级（``LLM_PROVIDERS`` 配置、failover）入口见
+  ``os_mem.infra.llm.factory``。
 
 契约层刻意不 import 任何具体 client / 网关 SDK，仅依赖标准库类型。
 """

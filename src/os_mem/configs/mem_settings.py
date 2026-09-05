@@ -13,7 +13,9 @@ class MemorySetting(BaseSettings):
     case-sensitively to the uppercase field names below.
     """
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env", env_file_encoding="utf-8", extra="ignore"
+    )
 
     # ------------------------------------------------------------------
     # DeepSeek — used by eval.llm.DeepSeekLLM as the answer generator
@@ -25,10 +27,20 @@ class MemorySetting(BaseSettings):
     DEEPSEEK_TIMEOUT: int = Field(default=60, ge=1)
     DEEPSEEK_MAX_TOKENS: int = Field(default=8192, ge=1)
     # 长对话分段提取参数（按当前模型上下文限制调整；换模型需复核）
-    DEEPSEEK_EXTRACT_MAX_CHARS: int = Field(default=8000, ge=256)   # 每段最大字符数
-    DEEPSEEK_EXTRACT_OVERLAP: int = Field(default=5, ge=0)          # 段间重叠消息条数（冗余）
+    DEEPSEEK_EXTRACT_MAX_CHARS: int = Field(default=8000, ge=256)  # 每段最大字符数
+    DEEPSEEK_EXTRACT_OVERLAP: int = Field(default=5, ge=0)  # 段间重叠消息条数（冗余）
     # 单次提取事实数量上限（防失控保险；正常提取靠 prompt 质量标准引导，碰不到）
     DEEPSEEK_EXTRACT_MAX_FACTS: int = Field(default=100, ge=1)
+
+    # ------------------------------------------------------------------
+    # LLM client 编排（os_mem.infra.llm 工厂，见 infra/llm/factory.py）
+    # ------------------------------------------------------------------
+    # 有序 provider 列表（逗号分隔，顺序即优先级）。第一个为主路，其余为降级备胎；
+    # 仅保留 "deepseek" 即维持单 client 的既有行为（向后兼容）。
+    LLM_PROVIDERS: str = "deepseek"
+    # 主路故障降级到备胎后，距上次主路失败超过该秒数才再次探测主路是否恢复；
+    # 冷却期内请求直接走备胎，避免每次请求都先承担一次主路失败开销。
+    LLM_FAILOVER_PROBE_INTERVAL: int = Field(default=300, ge=1)
 
     # ------------------------------------------------------------------
     #
@@ -46,8 +58,12 @@ class MemorySetting(BaseSettings):
 
     # Memory — used by os_mem.storage.StorageProvider as the SQLite database path
     # ------------------------------------------------------------------
-    MEMORY_DB_PATH:str = Field(default="data/memories.db", description="Path to the SQLite database file for storing memories.")
+    MEMORY_DB_PATH:str = Field(
+        default="data/memories.db",
+        description="Path to the SQLite database file for storing memories.",
+    )
 
 
-# Singleton — load once and reuse everywhere via `from os_mem.configs.mem_settings import memory_settings`
+# Singleton — load once and reuse everywhere via
+# `from os_mem.configs.mem_settings import memory_settings`
 memory_settings = MemorySetting()

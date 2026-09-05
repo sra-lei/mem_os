@@ -9,8 +9,9 @@
   ``os_mem.utils.extract_prompt``（把任意满足 ``ChatClient`` 的实例适配成
   提取链路需要的 ``complete(dialog_text)`` 回调）。
 
-后续接入 LLM 网关时，只需替换本模块的底层实现并保持
-``ChatClient``/``get_llm_client`` 契约，业务侧（提取 prompt、service）无需改动。
+实例化入口在 ``os_mem.infra.llm.factory``：本实现注册为 ``deepseek``，
+由 ``LLM_PROVIDERS`` 配置选用；接入其他 provider 时按工厂注册即可，
+业务侧（提取 prompt、service）无需改动。
 """
 
 from __future__ import annotations
@@ -83,13 +84,3 @@ class DeepSeekClient:
                 wait = 3.0 * (attempt + 1)
                 time.sleep(wait)
         return ""
-
-
-_llm_client: DeepSeekClient | None = None
-
-
-def get_llm_client() -> DeepSeekClient:
-    global _llm_client
-    if _llm_client is None:
-        _llm_client = DeepSeekClient()
-    return _llm_client

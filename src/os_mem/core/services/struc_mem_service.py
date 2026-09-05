@@ -11,8 +11,7 @@ from os_mem.core.services.conv_meta_service import (
     STATUS_SAVING_VECTOR,
 )
 from os_mem.entries.mem_models import StructuredMemory
-from os_mem.infra.llm.base_client import ChatClient
-from os_mem.infra.llm.deepseek_client import get_llm_client
+from os_mem.infra.llm import ChatClient, get_llm_client
 from os_mem.infra.logger import get_logger
 from os_mem.infra.storage import (
     MemoryVectorStore,
