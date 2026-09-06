@@ -41,11 +41,9 @@ def build_judge(name: str = "moonshot", threshold: float = 0.7) -> JudgeProvider
     """
     if name == "assert":
         from .impl.assert_judger import AssertJudger
-
         return AssertJudger(threshold=threshold)
     if name == "moonshot":
         from .impl.moonshot_judger import MoonshotJudgeProvider
-
         return MoonshotJudgeProvider(threshold=threshold)
     raise ValueError(f"unknown judge: {name!r} (available: assert|moonshot)")
 

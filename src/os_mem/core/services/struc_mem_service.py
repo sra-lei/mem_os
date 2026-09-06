@@ -229,23 +229,21 @@ class StructuredMemService:
         """根据 query 检索结构化记忆（混合检索 + 元数据过滤）。
 
         检索策略层（可插拔，见 os_mem.core.retrieval_strategies）：
-        - 开关在 retrieval_strategies.py 顶部布尔变量（ENABLE_DIVERSITY /
-          ENABLE_VERBATIM_GATE），评测手动改 True/False 即可回退基线；
-        - diversity 开启时需放大取回候选（top_k × 倍数）再收敛；
+        - 固定顺序的单一职责策略链（噪声剔除/结构化去重/verbatim 冗余剔除/
+          双配额），全部默认加载，无 Enable 开关；
+        - 策略层需要放大取回候选（top_k × RETRIEVAL_FETCH_MULTIPLIER）再收敛，
+          保证去重/配额后有足够不同 key 填满 top_k；
         - 策略只作用于候选列表 → 注入列表，不改搜索本身 → §10 来源锚定落地后可
           原样复用并复测收益。
         """
         from os_mem.core.retrieval_strategies import (
-            DIVERSITY_FETCH_MULTIPLIER,
-            ENABLE_DIVERSITY,
+            RETRIEVAL_FETCH_MULTIPLIER,
             apply_retrieval_strategies,
         )
         from os_mem.infra.p2check import mask_pii
 
-        # diversity 需放大取回（去重收敛后才有足够不同 key 填满 top_k）
-        fetch_k = (
-            top_k * DIVERSITY_FETCH_MULTIPLIER if ENABLE_DIVERSITY else top_k
-        )
+        # 放大取回：去重/配额收敛后仍需足够不同 key 填满 top_k（无条件生效）
+        fetch_k = top_k * RETRIEVAL_FETCH_MULTIPLIER
         masked_query = mask_pii(query)
         query_embedding: list[float] = []
         try:
@@ -297,11 +295,11 @@ def get_structured_mem_service() -> StructuredMemService:
 
 
 # ========================================================================= #
-#  检索策略开关（评测用）—— 唯一控制点在 os_mem/core/retrieval_strategies.py 顶部：
-#  ENABLE_DIVERSITY = False   # 按 (category, key) 去重保各类代表
-#                            #   （治 13/14/15/18/19 覆盖不足）
-#  ENABLE_VERBATIM_GATE = False  # 过滤低信息 verbatim 句
-#                               #   （治 02 新旧混入 / 碎片噪音）
-#  评测对比基线：两个都设 False（默认）即为无策略直出。
-#  §10 来源锚定落地后：用同样开关复测，验证本策略收益是否仍独立存在。
+#  检索策略链（固定加载，无开关）—— 实现唯一控制点在
+#  os_mem/core/retrieval_strategies.py 的 STRATEGY_CHAIN：
+#  VerbatimNoiseFilter → StructuredKeyDedup → RedundantVerbatimFilter
+#  → VerbatimQuota → StructuredQuota → 终装配（结构化在前、verbatim 补位）。
+#  验证（2026-09-07，layer1 struct/assert/top_k=15）：
+#  v1 区分准入 11/20 → 14/20（run_c887cb12 → run_c087f9ee），覆盖漏 30→18。
+#  基线对比不再靠运行时开关：用旧版本代码跑同 run，或对 run 落库结果对照。
 # ========================================================================= #
