@@ -71,6 +71,43 @@ class TestDiversity:
         assert ('education', 'course') in cats
         assert ('contact', 'phone') in cats
 
+    def test_structured_facts_beat_verbatim_before_fill(self) -> None:
+        """回归（run_835b24aeb5 教训）：verbatim 英文句不得霸榜——
+        结构化 fact 优先入选，verbatim 仅补位且受 1/3 上限约束。"""
+        # 检索候选里 verbatim 句排最前（BM25 英文强），结构化 fact 靠后
+        hits = (
+            [
+                _hit(f'English verbatim {i}', 'finance', f'verbatim_{i:012x}')
+                for i in range(6)
+            ]
+            + [_hit('用户返程座位 14C', 'travel', 'return_seat')]
+            + [_hit('用户去程座位 12C', 'travel', 'outbound_seat')]
+            + [_hit('确认号 PAC-778K4M', 'travel', 'confirmation')]
+        )
+        out = DiversityStrategy().apply('q', hits, top_k=5)
+        structured = [h for h in out if not h['key'].startswith('verbatim_')]
+        verbatim = [h for h in out if h['key'].startswith('verbatim_')]
+        # 结构化 fact 全入选（3 条 ≤ top_k）
+        assert len(structured) == 3
+        assert any('14C' in h['fact'] for h in structured)
+        # verbatim 补位 ≤ top_k 的 1/3（15 条时 ≤5；此处 top_k=5 → ≤1 条）
+        assert len(verbatim) <= 1
+
+    def test_verbatim_capped_at_third_when_structured_scarce(self) -> None:
+        """结构化很少时 verbatim 补位不超过 top_k 的 1/3。"""
+        hits = (
+            [_hit('唯一结构化事实', 'finance', 'balance')]
+            + [
+                _hit(f'verbatim filler {i}', 'finance', f'verbatim_{i:012x}')
+                for i in range(20)
+            ]
+        )
+        out = DiversityStrategy().apply('q', hits, top_k=15)
+        structured = [h for h in out if not h['key'].startswith('verbatim_')]
+        verbatim = [h for h in out if h['key'].startswith('verbatim_')]
+        assert len(structured) == 1
+        assert len(verbatim) <= 5  # 15 * 1/3 = 5
+
 
 # ------------------------------------------------------------------ #
 #  VerbatimGateStrategy

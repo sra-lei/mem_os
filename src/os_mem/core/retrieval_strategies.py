@@ -54,16 +54,27 @@ class RetrievalStrategy(Protocol):
 
 
 class DiversityStrategy:
-    """多样性覆盖：按 (category, key) 去重，保证同主题不扎堆、各类事实都有代表。
+    """多样性覆盖 + verbatim 降级：结构化 fact 优先，verbatim 句补位。
 
     调用方需以 top_k * DIVERSITY_FETCH_MULTIPLIER 取回候选
     （见 get_structured_memories）。
-    实现：候选已按检索相关性排序（distance 升序 = 越相关越前），
-    遍历候选，优先保留每 (category, key) 首次出现的命中（相关性最高的那个），
-    直到填满 top_k；同一 key 的后续版本（重复/变体）被丢弃，避免挤占名额。
-    注：此处按候选顺序取首见（= 检索最相关版），不是按置信度——同 key 多版本
-    的"谁是最新"属于 §10 来源锚定范畴，不在本策略解决。
+
+    两段式：
+    1. **结构化 fact 优先**：候选已按检索相关性排序（distance 升序），遍历取
+       非 verbatim 的命中，按 (category, key) 去重（同 key 保留首见 = 最相关版），
+       直到填满 top_k 或候选耗尽；
+    2. **verbatim 补位**：结构化不足 top_k 时，把剩余 verbatim 句按相关性补入
+       （仍按 (category, key) 去重——verbatim 每句唯一 key，故此处主要靠相关性
+       顺序截断），但 verbatim 总量不超过 top_k 的 1/3（防英文兜底句霸榜挤掉
+       结构化事实）。
+
+    背景（2026-09-05 教训）：verbatim 指纹 key（B 批）使每条兜底句独立 key，
+    naive 的"同 key 去重"对 verbatim 完全失效——英文 verbatim 句凭 BM25 命中
+    霸榜前 15，中文结构化 fact（含关键编号/课表）被挤出（run_835b24aeb5 55%）。
     """
+
+    # verbatim 补位上限占比（结构化 fact 不足时 verbatim 最多占这么多）
+    VERBATIM_CAP_RATIO = 1 / 3
 
     def apply(
         self,
@@ -71,19 +82,32 @@ class DiversityStrategy:
         hits: list[dict[str, Any]],
         top_k: int,
     ) -> list[dict[str, Any]]:
-        seen: set[tuple[str, str]] = set()
-        result: list[dict[str, Any]] = []
+        structured: list[dict[str, Any]] = []
+        verbatim_candidates: list[dict[str, Any]] = []
+        seen_structured: set[tuple[str, str]] = set()
+        seen_verbatim: set[tuple[str, str]] = set()
         for hit in hits:
             cat = hit.get('category') or ''
             key = hit.get('key') or ''
-            sig = (cat, key)
-            if sig in seen:
+            is_verbatim = key.startswith('verbatim_')
+            if is_verbatim:
+                sig = (cat, key)
+                if sig not in seen_verbatim:
+                    seen_verbatim.add(sig)
+                    verbatim_candidates.append(hit)
                 continue
-            seen.add(sig)
-            result.append(hit)
-            if len(result) >= top_k:
-                break
-        return result
+            sig = (cat, key)
+            if sig in seen_structured:
+                continue
+            seen_structured.add(sig)
+            structured.append(hit)
+            if len(structured) >= top_k:
+                return structured
+
+        # 结构化不足 top_k：verbatim 补位（最多占 top_k 的 1/3）
+        budget = int(top_k * self.VERBATIM_CAP_RATIO)
+        verbatim_budget = max(0, min(len(verbatim_candidates), budget))
+        return structured + verbatim_candidates[:verbatim_budget]
 
 
 class VerbatimGateStrategy:
