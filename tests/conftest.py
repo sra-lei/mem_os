@@ -15,7 +15,8 @@ from __future__ import annotations
 
 import json
 import time
-from typing import TYPE_CHECKING, Any, Callable
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -37,6 +38,25 @@ _RUN: dict[str, Any] = {
     'passed': 0,
     'recorded': 0,
 }
+
+
+def _prompt_fingerprints() -> dict[str, str]:
+    """当前评测涉及的 4 个 prompt 模板内容指纹（跑分与 prompt 版本对照）。
+
+    延迟 import：仅在 --record-db 首次落 run 时触发，避免离线单测 / 非落库
+    评测引入 openai 等模块加载开销。prompt 内容一变指纹即变（SHA-1 前 12 位，
+    见 os_mem.utils.prompt_fp），历史跑分可通过 config_snapshot 回溯当时 prompt。
+    """
+    import eval.judge as judge_mod
+    import eval.llm as llm_mod
+    import os_mem.utils.extract_prompt as extract_mod
+
+    return {
+        'extract.system': extract_mod.SYSTEM_PROMPT_FINGERPRINT,
+        'extract.repair': extract_mod.REPAIR_PROMPT_FINGERPRINT,
+        'answer.system': llm_mod.SYSTEM_PROMPT_FINGERPRINT,
+        'judge.system': judge_mod.SYSTEM_PROMPT_FINGERPRINT,
+    }
 
 
 # ------------------------------------------------------------------ #
@@ -279,6 +299,7 @@ def _flush_eval_case(holder: dict[str, Any]) -> None:
                 'judge': cfg.getoption('--judge'),
                 'top_k': cfg.getoption('--top-k'),
                 'threshold': cfg.getoption('--threshold'),
+                'prompt_fingerprints': _prompt_fingerprints(),
             },
             ensure_ascii=False,
         )

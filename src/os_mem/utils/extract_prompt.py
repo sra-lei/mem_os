@@ -19,6 +19,7 @@ from collections.abc import Callable
 
 from os_mem.configs.mem_settings import memory_settings
 from os_mem.infra.llm.base_client import ChatClient
+from os_mem.utils.prompt_fp import fingerprint
 
 # 提取任务系统提示：{max_facts} 为单次提取事实数量上限占位，调用时由
 # ``build_extract_messages`` 用 memory_settings.DEEPSEEK_EXTRACT_MAX_FACTS 替换。
@@ -160,3 +161,11 @@ def build_extract_complete(client: ChatClient) -> Callable[[str], str]:
     返回对象同时具备 ``.repair(partial_json)`` 续写能力（见 ``_ExtractComplete``）。
     """
     return _ExtractComplete(client)
+
+
+# ------------------------------------------------------------------ #
+#  内容指纹（prompt 迭代版本标识）—— 随评测 config_snapshot 落库，
+#  使「某次跑分」与「当时提取 prompt 的内容」可对照（见 utils.prompt_fp）。
+# ------------------------------------------------------------------ #
+SYSTEM_PROMPT_FINGERPRINT = fingerprint(SYSTEM_PROMPT)
+REPAIR_PROMPT_FINGERPRINT = fingerprint(REPAIR_PROMPT)

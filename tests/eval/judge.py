@@ -18,6 +18,11 @@ from typing import Protocol
 from openai import OpenAI
 
 from eval.config import settings
+from os_mem.infra.logger import get_logger
+from os_mem.infra.p2check import mask_pii
+from os_mem.utils.prompt_fp import fingerprint
+
+_logger = get_logger('eval.judge')
 
 
 @dataclass
@@ -53,6 +58,9 @@ Moonshot AI 为专有名词，不可翻译成其他语言。
 评分理由和错误信息用中文输出。
 '''
 
+# 判分 prompt 内容指纹（版本标识，见 os_mem.utils.prompt_fp）
+SYSTEM_PROMPT_FINGERPRINT: str = fingerprint(SYSTEM_PROMPT)
+
 # JSON Schema for structured output (score/passed/reasoning/error)
 _JUDGE_SCHEMA = {
     "type": "object",
@@ -86,12 +94,17 @@ class MoonshotJudgeProvider(Protocol):
         return getattr(settings, "MOONSHOT_MIN_INTERVAL", 1.0)
 
     @classmethod
-    def _throttle(cls) -> None:
-        """请求节流：保证调用间隔 >= 配置的最小间隔（防 429）。"""
+    def _throttle(cls) -> float:
+        """请求节流：保证调用间隔 >= 配置的最小间隔（防 429）。
+
+        返回本次实际等待秒数（>=0），供调用观测日志记录节流开销。
+        """
         wait = cls._min_interval() - (time.monotonic() - cls._last_call)
+        wait = max(0.0, wait)
         if wait > 0:
             time.sleep(wait)
         cls._last_call = time.monotonic()
+        return wait
 
     def evaluate(
         self,
@@ -99,8 +112,11 @@ class MoonshotJudgeProvider(Protocol):
         criteria: str | None,
         actual: str,
     ) -> JudgeResult:
+        wait_ms = 0
+        t0 = time.monotonic()
         try:
-            self._throttle()
+            wait_ms = int(self._throttle() * 1000)
+            t0 = time.monotonic()  # 节流等待不计入请求耗时，单独观测
             prompt = SYSTEM_PROMPT.format(criteria=criteria, query=query, actual=actual)
             completion = self.client.chat.completions.create(
                 model=settings.MOONSHOT_MODEL,
@@ -115,14 +131,33 @@ class MoonshotJudgeProvider(Protocol):
                 }
             )
         except Exception as exc:  # noqa: BLE001 — 重试耗尽（含 429 持续超限）时兜底，不让 runner 崩
+            _logger.error(
+                '[llm] chat failed role=judge provider=moonshot model=%s '
+                'ms=%d throttle_ms=%d: %s',
+                settings.MOONSHOT_MODEL,
+                int((time.monotonic() - t0) * 1000),
+                wait_ms,
+                type(exc).__name__,
+            )
             return JudgeResult(
                 score=0.0,
                 passed=False,
                 reasoning="moonshot judge 调用失败",
                 error=f"{type(exc).__name__}: {exc}",
             )
+        usage = getattr(completion, 'usage', None)
+        _logger.info(
+            '[llm] chat ok role=judge provider=moonshot model=%s ms=%d '
+            'throttle_ms=%d in_tok=%s out_tok=%s',
+            settings.MOONSHOT_MODEL,
+            int((time.monotonic() - t0) * 1000),
+            wait_ms,
+            getattr(usage, 'prompt_tokens', None),
+            getattr(usage, 'completion_tokens', None),
+        )
         content = completion.choices[0].message.content
-        print(f"[judge] {content}")
+        # 判分原始输出进日志（脱敏后；原 print 直接暴露 reasoning，可能含用户号码）
+        _logger.info('[judge] 输出: %s', mask_pii(content or ''))
         try:
             obj = json.loads(content or "")
         except (json.JSONDecodeError, TypeError) as e:

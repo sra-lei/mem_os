@@ -59,3 +59,8 @@ ignore = []
 
 [tool.ruff.lint.isort]
 known-first-party = ["os_mem", "testing", "eval"]
+
+# tests/eval/llm.py：SYSTEM_PROMPT 内超长中文行为回答 prompt 内容，
+# 物理断行会插入换行改变模型行为，故豁免 E501（指纹随内容联动，仍可观测变化）。
+[tool.ruff.lint.per-file-ignores]
+"tests/eval/llm.py" = ["E501"]

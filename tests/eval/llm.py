@@ -11,12 +11,17 @@ OpenAI-compatible API) can be dropped in later without changing the caller.
 """
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from typing import Protocol
 
 from openai import OpenAI
 
 from eval.config import settings
+from os_mem.infra.logger import get_logger
+from os_mem.utils.prompt_fp import fingerprint
+
+_logger = get_logger('eval.llm')
 
 
 @dataclass
@@ -57,6 +62,9 @@ SYSTEM_PROMPT = '''
 5. 用中文回答，礼貌、专业、简洁直接。
 '''
 
+# 回答 prompt 内容指纹（版本标识，见 os_mem.utils.prompt_fp）
+SYSTEM_PROMPT_FINGERPRINT: str = fingerprint(SYSTEM_PROMPT)
+
 class DeepSeekLLM:
     name = "deepseek"
 
@@ -70,6 +78,7 @@ class DeepSeekLLM:
         # 记忆档案放进 system（作为权威背景资料），不要放 assistant 消息——
         # 否则模型会当成"自己说过的话"而非"用户的记忆"，容易忽视/否认
         system = SYSTEM_PROMPT + f"\n\n{memories}"
+        t0 = time.monotonic()
         resp = self.client.chat.completions.create(
             model=settings.DEEPSEEK_MODEL,
             messages=[
@@ -78,6 +87,14 @@ class DeepSeekLLM:
             ],
         )
         usage = resp.usage
+        _logger.info(
+            '[llm] chat ok role=answer provider=deepseek model=%s ms=%d '
+            'in_tok=%s out_tok=%s',
+            settings.DEEPSEEK_MODEL,
+            int((time.monotonic() - t0) * 1000),
+            getattr(usage, 'prompt_tokens', 0) or 0,
+            getattr(usage, 'completion_tokens', 0) or 0,
+        )
         return Completion(
             text=resp.choices[0].message.content or "",
             prompt_tokens=getattr(usage, "prompt_tokens", 0) or 0,

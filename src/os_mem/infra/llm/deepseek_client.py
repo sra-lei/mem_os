@@ -67,6 +67,7 @@ class DeepSeekClient:
             max_tokens = memory_settings.DEEPSEEK_MAX_TOKENS
         if timeout is None:
             timeout = memory_settings.DEEPSEEK_TIMEOUT
+        t0 = time.monotonic()
         for attempt in range(retries):
             kwargs: dict[str, Any] = dict(
                 model=model,
@@ -77,16 +78,40 @@ class DeepSeekClient:
             )
             if response_format is not None:
                 kwargs['response_format'] = response_format
-            resp = self.client.chat.completions.create(**kwargs)
+            try:
+                resp = self.client.chat.completions.create(**kwargs)
+            except Exception as exc:  # noqa: BLE001 —— 观测耗时后原样上抛
+                _logger.error(
+                    '[llm] chat failed provider=deepseek model=%s attempt=%d/%d '
+                    'ms=%d: %s',
+                    model,
+                    attempt + 1,
+                    retries,
+                    int((time.monotonic() - t0) * 1000),
+                    type(exc).__name__,
+                )
+                raise
             content = resp.choices[0].message.content
+            # finish_reason/usage 提前读取：成功与空返回两条观测日志共用
+            finish_reason = getattr(resp.choices[0], 'finish_reason', None)
+            usage = getattr(resp, 'usage', None)
             if content:
+                _logger.info(
+                    '[llm] chat ok provider=deepseek model=%s attempt=%d/%d '
+                    'ms=%d in_tok=%s out_tok=%s finish=%s',
+                    model,
+                    attempt + 1,
+                    retries,
+                    int((time.monotonic() - t0) * 1000),
+                    getattr(usage, 'prompt_tokens', None),
+                    getattr(usage, 'completion_tokens', None),
+                    finish_reason,
+                )
                 return content
             # 模型/API 偶发返回空 content（限流或模型不稳定，
             # 常见于长文本 + json 输出）。
             # 记录 finish_reason 便于区分「length 截断（max_tokens 不够，输出被切断）」
             # 与「空回复」：finish_reason=length 时应调大 max_tokens 而非盲目重试。
-            finish_reason = getattr(resp.choices[0], 'finish_reason', None)
-            usage = getattr(resp, 'usage', None)
             prompt_tokens = getattr(usage, 'prompt_tokens', None)
             completion_tokens = getattr(usage, 'completion_tokens', None)
             _logger.warning(
