@@ -28,7 +28,7 @@ from eval.cases import expected_text_for_case, phase_version_for_case
 from eval.harness import run_case_pipeline
 
 if TYPE_CHECKING:
-    from eval.judge import JudgeResult
+    from eval.judge.models import JudgeResult
     from eval.llm import AnswerGenerator
 
 
