@@ -19,13 +19,11 @@ ENV/
 .mypy_cache/
 
 # ---- SQLite / runtime data ----
+# 记忆库 memories.db 与评测库 memos.db 均为运行产物，一律不纳入 git 追踪
 *.db
 *.db-journal
 *.db-wal
 *.db-shm
-
-# memories.db 需跨机同步（git），显式放行
-!src/os_mem/data/memories.db
 
 # ---- Node / Vite / TS (frontend) ----
 **/node_modules/
