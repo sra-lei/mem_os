@@ -92,6 +92,15 @@ uv run python tests/audit_run_attribution.py --run run_xxx [--case <id>] [--all]
     # 离线三层归因审计（只读 memos.db）：提取漏 / 检索覆盖漏 / 回答漏，无需重跑与 LLM
 ```
 
+**跨机评测记录同步**（memos.db 纯本地、不入 git，见 [docs/方案-评测记录跨机同步.md](docs/方案-评测记录跨机同步.md)）：
+
+```bash
+bash scripts/run_eval_record.sh -m layer1 --memory-provider struct --top-k 15
+    # 跑评测的默认入口：pytest(--record-db) → 导出 run JSON → git commit → push
+uv run python tests/import_run.py evals/runs/      # 把对侧 pull 下来的 run 镜像并入本地 memos.db（幂等）
+uv run python tests/compare_runs.py <runA> <runB>  # 对照两 run 失败集（run id 前缀或 json 路径）
+```
+
 ### 提示词指纹与版本回溯
 
 评测 4 处人工 prompt（事实提取 system/repair、回答 system、Moonshot 判分 system）由 `src/os_mem/utils/prompt_fp.py`
