@@ -10,6 +10,18 @@ MemOS 是一个从零构建的 Agent 用户记忆系统：**跨会话记住用�
 **当前进度（2026-09）**：v0.1 base 已完成；**v0.2 struct 为主线上**（struct+layer1 基线 14/20，与开发机跨机复现失败集完全一致）；
 v0.3 双轨 full 编排 A 批已落地（conv_meta 状态机 + 会话原文必落库），B 批（异步 worker）待实现。
 
+## 系列文章（公众号「一文·AI账」）
+
+项目演进过程以《MemOS》系列同步记录在公众号「一文·AI账」，用真实评测数据复盘每一轮"改了什么、为什么、代价是什么"。
+合集入口：[MemOS 系列合集](https://mp.weixin.qq.com/mp/appmsgalbum?__biz=Mzg3MzE4MjMxNw==&action=getalbum&album_id=4659590571668488194)（共 6 篇，建议按序阅读）：
+
+1. [MemOS01-纯净版](https://mp.weixin.qq.com/s?__biz=Mzg3MzE4MjMxNw==&mid=2247483697&idx=1&sn=5053f0db7219a63e3469b1ae400ea1d3&chksm=cee2a433f9952d25081e50d07a8688b8cd3c2d09a732288205bcd694ae19b66abb3cc408f29f)
+2. [MemOS 02，我换了混合检索，反而比 BM25 低 10 个点](https://mp.weixin.qq.com/s?__biz=Mzg3MzE4MjMxNw==&mid=2247483711&idx=1&sn=89e9a3021a7003c69d122d13abedd172&chksm=cee2a43df9952d2b31e6d2d8de741db847b74404142db7d83d50bdd17149e0db8eb61eaafbd6)
+3. [评测跑一轮要 50 分钟，让评测记住哪些已经入库，存过就跳过，变 12 分钟了](https://mp.weixin.qq.com/s?__biz=Mzg3MzE4MjMxNw==&mid=2247483721&idx=1&sn=fce09c97098ca768ef2a04f0610894bf&chksm=cee2a44bf9952d5d7022e2651d8c677ba2ab10636329ceae55346cc1a43c8466e0e0a71a00e7)
+4. [MemOS 04，新旧信息傻傻分不清，因为存的是流水账不是档案卡](https://mp.weixin.qq.com/s?__biz=Mzg3MzE4MjMxNw==&mid=2247483735&idx=1&sn=3185444643a0ec873b39aac09cb01334&chksm=cee2a455f9952d434802dbe61cfe7f1e1b84b3f8cf0ca33a9e97d6f6727b652c5b7cb02e595d)
+5. [MemOS 05，记忆更新终于做成，分数却没涨反降](https://mp.weixin.qq.com/s?__biz=Mzg3MzE4MjMxNw==&mid=2247483747&idx=1&sn=230a3397cda3135d6fa2b886193c9e05&chksm=cee2a461f9952d77b3cf68ec3a933564b7b5333824e7765475920c074367892c79224fbc643e)
+6. [MemOS 06，检索不是捞得越多越好——窗开大了一倍，答全率反而掉了](https://mp.weixin.qq.com/s/KJ6qSR9n92VvBYa_SBpHdw)
+
 ## 特性
 
 - **记忆实现三 provider（`src/os_mem/core/mem_provider/`）**
