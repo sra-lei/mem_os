@@ -1,0 +1,39 @@
+{
+ "schema_version": 1,
+ "exported_at": "2026-09-07T18:24:09+00:00",
+ "run": {
+  "id": "run_ec37ac7f1f",
+  "version": "v0.1",
+  "phase": "base",
+  "run_at": "2026-09-05 19:07:56.854567",
+  "total_cases": 60,
+  "passed_count": 0,
+  "pass_rate": 0.0,
+  "duration_seconds": 44.865,
+  "config_snapshot": "{\"memory_provider\": \"struct\", \"llm\": \"deepseek\", \"judge\": \"moonshot\", \"top_k\": 15, \"threshold\": 0.7}",
+  "notes": null,
+  "triggered_by": "manual",
+  "status": "completed",
+  "progress": 0.0167
+ },
+ "cases": [
+  {
+   "id": "res_55e89a34fd",
+   "run_id": "run_ec37ac7f1f",
+   "case_id": "layer1_01_bank_account",
+   "case_name": "Bank Account Setup - Personal Details Retrieval",
+   "category": "base",
+   "version": "v0.1",
+   "passed": 0,
+   "score": 0.0,
+   "expected_answer": "The agent should directly retrieve and provide the checking account number 4429853327, possibly also mentioning the routing number 123006800 since the user is asking for direct deposit setup purposes",
+   "actual_answer": "您好！很抱歉，我当前没有查询到您的支票账户（Checking Account）号码信息。为了确保账户安全，我也无法凭空提供或补全这类敏感的财务信息。\n\n建议您通过以下安全渠道获取您的支票账户号码：\n\n- 查看纸质支票的底部（通常印有路由号、账户号和支票号）\n- 登录您的网上银行或手机银行App，在账户详情中查看\n- 拨打银行客服热线，通过身份验证后获取\n\n如有其他我能帮助的问题，请随时告诉我！",
+   "retrieved_memories": "## 关于用户的长久记忆\n（当前没有可用记忆）",
+   "error_message": "回答缺失关键信息：未提供支票账户号码4429853327，也未提供路由号码123006800。agent错误地拒绝了本可直接回答的查询请求。",
+   "latency_ms": 10554,
+   "tokens_input": 331,
+   "tokens_output": 230,
+   "created_at": "2026-09-05 19:07:56.962296"
+  }
+ ]
+}
