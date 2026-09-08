@@ -28,11 +28,14 @@ from os_mem.utils.prompt_fp import fingerprint
 # ``build_extract_messages`` 用 memory_settings.DEEPSEEK_EXTRACT_MAX_FACTS 替换。
 SYSTEM_PROMPT = """
 你是一个信息提取助手。从以下对话中提取值得长期记忆的事实。
+**事实句使用与对话相同的语言书写**（本项目用例对话为英文，因此事实句一律输出英文
+"User ..." 句式；只有对话本身是中文时才用中文）。这保证检索时词面命中与回答一致。
 
 ## 提取标准（什么值得提取）
 只提取**用户明确陈述的、持久的、对未来交互有价值**的信息，例如：
 - 身份与联系方式：姓名、生日、地址、电话、邮箱
-- 账户/财务：账号、卡号、路由号、余额、转账设置（如"用户支票账户号码是 4429853327"）
+  （如 "User's checking account number is 4429853327"）
+- 账户/财务：账号、卡号、路由号、余额、转账设置
 - 偏好：座位、饮食、沟通方式、旅行习惯
 - 健康、工作、家庭、教育等长期事实
 
@@ -42,7 +45,9 @@ SYSTEM_PROMPT = """
 - 与用户无关的信息
 
 ## 提取规则
-1. 每条事实独立成句，格式为 "用户 ..."
+1. 每条事实独立成句，**句子语言与对话一致**：英文对话写成英文 "User ..." 句式
+   （如 "User's checking account number is 4429853327"）；
+   中文对话才用中文 "用户 ..." 句式。
 2. category 必须从以下列表选取：{categories_section}
 3. key 是字段名（如 'email', 'seat_preference', 'checking_account_number'）。
    **key 必须稳定且可复用**：同一概念只允许一个 key，全程复用，不得为同一件事的
@@ -68,17 +73,17 @@ SYSTEM_PROMPT = """
    对话中**新产生/变更的精确信息**（如刚分配的理赔编号、刚确认的预约时间、
    刚计算的退款金额、刚报价的总价与分期金额、刚告知的学费单价）与既有资料同等重要，
    必须逐条提取，例如：
-   - "用户本次理赔编号是 CLM-2024-894327"
-   - "理赔专员 Patricia Wong 将在 24-48 小时内来电"
-   - "原始 24 次课程套餐价格为 $2,400"
-   - "退款金额 $1,600，扣除 20% 行政费 $320，净退款 $1,280"
-   - "每周学费 $617.50（Emma $325 + Olivia $292.50）"
+   - "User's claim number is CLM-2024-894327"
+   - "Claims specialist Patricia Wong will call within 24-48 hours"
+   - "The original 24-session package was priced at $2,400"
+   - "Refund of $1,600, minus 20% admin fee of $320, net refund $1,280"
+   - "Weekly tuition is $617.50 (Emma $325 + Olivia $292.50)"
 
 ## 输出格式（必须输出 JSON 对象，facts 为数组）
 {
     "facts": [
         {
-            "fact": "用户支票账户号码是 4429853327",
+            "fact": "User's checking account number is 4429853327",
             "category": "finance",
             "key": "checking_account_number",
             "value": "4429853327",

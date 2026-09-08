@@ -369,3 +369,24 @@ class TestPruneRedundantVerbatim:
         ]
         out = FactExtractor.prune_redundant_verbatim(fallback, llm)
         assert len(out) == 2
+
+
+# ------------------------------------------------------------------ #
+#  兜底正则盲区：裸年份/产品代号（Freedom 2045）补抓
+# ------------------------------------------------------------------ #
+class TestFallbackBlindSpots:
+    def test_captures_product_year_code(self) -> None:
+        """大写词 + 4 位代号（基金名 Freedom 2045）应被兜底捕获（case 18 真漏修复）。"""
+        dialog = (
+            '{"role":"assistant","content":"Your rollover IRA has $248,500. '
+            'Currently invested in the Freedom 2045 target-date fund."}'
+        )
+        facts = FactExtractor.fallback_numeric_facts(dialog)
+        texts = [f.fact for f in facts]
+        assert any("Freedom 2045" in text for text in texts)
+
+    def test_bare_year_alone_not_captured(self) -> None:
+        """裸 4 位年份（前词非大写词）不误收——避免把普通年份/计数当 verbatim 噪音。"""
+        dialog = '{"role":"user","content":"We plan to retire sometime in 2045."}'
+        facts = FactExtractor.fallback_numeric_facts(dialog)
+        assert facts == []
