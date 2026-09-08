@@ -139,6 +139,27 @@ FastAPI 层薄（组装参数 → 调服务），以单测覆盖服务为主；�
 | 2 | 前端：NAV + 用户列表页 + 事实管理页（CRUD/原文/危险操作）+ api client | ✅ `npm run build` 0 error；uvicorn 冒烟：读接口 200 / 写链路 create·update·rebuild·delete 均 projection=synced（真实 Milvus）/ 残留 0 / SPA 直链 fallback 200 |
 | 3（可选） | case 页 ↔ 记忆页互链；conv_meta 状态展示（**已在用户页概览条实现**）；顺手修正过时的 EvalView需求文档.md（单页 HTML/同库说法） | 未做（conv_meta 状态展示除外） |
 
+### 8.1 分层重构：os_mem 对外管理窗口（2026-09-08，追加）
+
+**问题**：初版 mem_admin_service 放在 `src/testing/services/`，直接 import os_mem ORM、
+复用 MemoryDatabase engine 并对 struct_memories 表做 SELECT/UPDATE —— 管理面对记忆库
+的权限过宽（越权绕过领域层，schema/约束一变就漏）。
+
+**改动**：管理能力收进 **`src/os_mem/admin/`（MemAdminService + get_mem_admin_service）**
+作为 os_mem 对外唯一管理窗口；`testing/api/routes/memories.py` 瘦身为纯 HTTP 适配
+（参数校验 → 调窗口 → 组响应），testing 侧直连实现（mem_admin_service /
+mem_projection.py）删除。
+
+| 边界 | 说明 |
+|---|---|
+| 对外契约 | 窗口返回 **纯 dict**（不泄露 ORM/engine）；异常只抛 LookupError（外部转 404） |
+| 投影封装 | 尽力同步 + 失败警示 + 按用户重建兜底全部在窗口内部；`MemAdminService(projection=fake)` 注入测试，`allow_live=False` 离线纯 SQLite |
+| import 无副作用 | 窗口放 `os_mem.admin` 顶层包（**不放 core/services**：`os_mem.core/__init__` 会级联 import struct_provider，模块 import 即构造 LLM/Milvus client，破坏 EvalView 启动轻量） |
+| 会话细节 | `expire_on_commit=False`：commit 后属性保留，写方法在会话外读行字段做投影同步不抛 DetachedInstanceError |
+
+验证：`tests/unit/test_mem_admin_service.py` 重写为窗口视角 14 passed；全量 unit 122 passed；
+uvicorn 冒烟 create/update/delete 投影均 synced、零残留。
+
 ## 9. 风险与开放问题
 
 1. **Milvus 可达性/凭证**：EvalView 进程跑在哪台机器，就用那台机器的 `.env`（MILVUS_URI/KEY、DASHSCOPE）。
