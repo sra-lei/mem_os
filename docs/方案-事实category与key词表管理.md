@@ -1,6 +1,7 @@
-# 方案：事实 category 受控词表（定稿，category 期）→ key 词表下一期
+# 方案：事实 category 受控词表（已实施）→ key 词表下一期
 
-日期：2026-09-08 · 状态：**定稿（category 期，2026-09-08 用户拍板）** ·
+日期：2026-09-08 · 状态：**已实施（category 期，2026-09-08）**：批1-3 完成（表/seed/vocab/
+prompt 渲染/校验读表/admin 窗口），单测 133 passed 全绿，真实 memories.db 已幂等建表+seed；
 key 词表（`fact_key_catalog`）**缓行待用户再想**，本期不建表
 关联：`os_mem/utils/extract_prompt.py`、`os_mem/utils/fact_extraction.py`、提取链路、`os_mem/admin`
 上游：方案-记忆更新收敛 §4.5（key 规范化）、§11（串键覆盖）；评测数据 93% key 单次出现（发散）
