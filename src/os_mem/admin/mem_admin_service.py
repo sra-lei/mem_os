@@ -582,7 +582,7 @@ class MemAdminService:
         return {"category": category, "created": created, "active": row.active}
 
     def set_category_active(self, category: str, active: bool) -> dict[str, Any]:
-        """启用/停用 category：停用后不进 prompt、提取输出该类即校验拒绝。"""
+        """启用/停用 category：停用后不进 prompt、提取该类即校验拒绝。"""
         with _session() as session:
             row = session.get(FactCategory, category)
             if row is None:
@@ -592,6 +592,217 @@ class MemAdminService:
             session.add(row)
             session.commit()
         return {"category": category, "active": row.active}
+
+    # ------------------------------------------------------------------ #
+    #  跨机记忆镜像（export/import）：SQLite 权威本体按评测批次随 git 流动
+    #  语义：镜像 = 评测方（源端）权威，whole-row LWW 合并（幂等）——
+    #    conv_meta：本地 COMPLETED 不覆盖；镜像 COMPLETED 覆盖本地非完成态（dev 免重提取）
+    #    struct_memories：(user, category, key) 冲突 → 覆盖业务字段（previous_fact 用镜像
+    #                     归档链），本地行 id 保留；无 → INSERT（沿用镜像 id，跨机一致）
+    #    conv_messages：(user, session, seq) 冲突 → 异值覆盖 + previous_content 归档
+    #    import 只写 SQLite（权威源），不触发投影（检索走各自已共享的云端 mem_os）
+    # ------------------------------------------------------------------ #
+
+    def export_user_data(
+        self, user_ids: list[str], *, with_messages: bool = False
+    ) -> dict[str, list[dict[str, Any]]]:
+        """导出指定用户的记忆本体（JSON-safe：时间已转 ISO 字符串，无 ORM 泄露）。"""
+        with _session() as session:
+            conv_meta_rows = session.exec(
+                select(ConversationMeta).where(ConversationMeta.user_id.in_(user_ids))
+            ).all()
+            struct_rows = session.exec(
+                select(StructuredMemory).where(StructuredMemory.user_id.in_(user_ids))
+            ).all()
+            msg_rows: list[Message] = []
+            if with_messages:
+                msg_rows = list(
+                    session.exec(
+                        select(Message).where(Message.user_id.in_(user_ids))
+                    ).all()
+                )
+
+        def dt(v: datetime | None) -> str | None:
+            return v.isoformat() if isinstance(v, datetime) else None
+
+        conv_meta = [
+            {
+                "id": r.id,
+                "user_id": r.user_id,
+                "source_session_id": r.source_session_id,
+                "message_count": r.message_count,
+                "started_at": dt(r.started_at),
+                "ended_at": dt(r.ended_at),
+                "status": r.status,
+                "attempts": r.attempts,
+                "last_error": r.last_error,
+                "created_at": dt(r.created_at),
+                "updated_at": dt(r.updated_at),
+            }
+            for r in conv_meta_rows
+        ]
+        struct = [
+            {
+                "id": r.id,
+                "user_id": r.user_id,
+                "fact": r.fact,
+                "previous_fact": r.previous_fact,
+                "category": r.category,
+                "key": r.key,
+                "value": r.value,
+                "confidence": r.confidence,
+                "source_conversation_id": r.source_conversation_id,
+                "source_chunk_id": r.source_chunk_id,
+                "created_at": dt(r.created_at),
+                "updated_at": dt(r.updated_at),
+            }
+            for r in struct_rows
+        ]
+        messages = [
+            {
+                "id": r.id,
+                "user_id": r.user_id,
+                "source_session_id": r.source_session_id,
+                "content": r.content,
+                "contains_pii": r.contains_pii,
+                "masked_text": r.masked_text,
+                "seq": r.seq,
+                "previous_content": r.previous_content,
+                "create_at": dt(r.create_at),
+            }
+            for r in msg_rows
+        ]
+        return {
+            "conv_meta": conv_meta,
+            "struct_memories": struct,
+            "conv_messages": messages,
+        }
+
+    def import_memory_batch(
+        self, batch: dict[str, list[dict[str, Any]]]
+    ) -> dict[str, int]:
+        """把导出的记忆镜像合并进本地库（幂等；镜像优先，见方法块注释）。
+
+        batch 结构 = export_user_data 返回形态。返回 {struct_ins, struct_upd,
+        conv_meta_ins, conv_meta_upd, msg_ins, msg_upd}。
+        """
+        out = {"struct_ins": 0, "struct_upd": 0, "conv_meta_ins": 0,
+               "conv_meta_upd": 0, "msg_ins": 0, "msg_upd": 0}
+
+        def parse(v: str | None) -> datetime | None:
+            return datetime.fromisoformat(v) if v else None
+
+        with _session() as session:
+            # --- conv_meta：(user, session) 冲突键；本地 COMPLETED 不覆盖 ---
+            for row in batch.get("conv_meta", []):
+                existing = session.exec(
+                    select(ConversationMeta).where(
+                        ConversationMeta.user_id == row["user_id"],
+                        ConversationMeta.source_session_id == row["source_session_id"],
+                    )
+                ).first()
+                if existing is not None:
+                    if existing.status == "COMPLETED":
+                        continue  # 双端都完成：不反复洗
+                    existing.message_count = row["message_count"]
+                    existing.started_at = parse(row.get("started_at"))
+                    existing.ended_at = parse(row.get("ended_at"))
+                    existing.status = row["status"]
+                    existing.last_error = row.get("last_error", "")
+                    existing.updated_at = parse(row.get("updated_at")) or _utcnow()
+                    session.add(existing)
+                    out["conv_meta_upd"] += 1
+                else:
+                    session.add(
+                        ConversationMeta(
+                            id=row["id"],
+                            user_id=row["user_id"],
+                            source_session_id=row["source_session_id"],
+                            message_count=row["message_count"],
+                            started_at=parse(row.get("started_at")),
+                            ended_at=parse(row.get("ended_at")),
+                            status=row["status"],
+                            attempts=row.get("attempts", 0),
+                            last_error=row.get("last_error", ""),
+                            created_at=parse(row.get("created_at")) or _utcnow(),
+                            updated_at=parse(row.get("updated_at")) or _utcnow(),
+                        )
+                    )
+                    out["conv_meta_ins"] += 1
+
+            # --- struct_memories：(user, category, key) 冲突 → whole-row 覆盖 ---
+            for row in batch.get("struct_memories", []):
+                existing = session.exec(
+                    select(StructuredMemory).where(
+                        StructuredMemory.user_id == row["user_id"],
+                        StructuredMemory.category == row["category"],
+                        StructuredMemory.key == row["key"],
+                    )
+                ).first()
+                if existing is not None:
+                    existing.fact = row["fact"]
+                    existing.previous_fact = row.get("previous_fact", "")
+                    existing.value = row["value"]
+                    existing.confidence = row["confidence"]
+                    existing.source_conversation_id = row.get("source_conversation_id", "")
+                    existing.source_chunk_id = row.get("source_chunk_id", "")
+                    existing.updated_at = parse(row.get("updated_at")) or _utcnow()
+                    session.add(existing)
+                    out["struct_upd"] += 1
+                else:
+                    session.add(
+                        StructuredMemory(
+                            id=row["id"],
+                            user_id=row["user_id"],
+                            fact=row["fact"],
+                            previous_fact=row.get("previous_fact", ""),
+                            category=row["category"],
+                            key=row["key"],
+                            value=row["value"],
+                            confidence=row["confidence"],
+                            source_conversation_id=row.get("source_conversation_id", ""),
+                            source_chunk_id=row.get("source_chunk_id", ""),
+                            created_at=parse(row.get("created_at")) or _utcnow(),
+                            updated_at=parse(row.get("updated_at")) or _utcnow(),
+                        )
+                    )
+                    out["struct_ins"] += 1
+
+            # --- conv_messages：(user, session, seq) 冲突 → 异值覆盖 + 归档 ---
+            for row in batch.get("conv_messages", []):
+                existing = session.exec(
+                    select(Message).where(
+                        Message.user_id == row["user_id"],
+                        Message.source_session_id == row["source_session_id"],
+                        Message.seq == row["seq"],
+                    )
+                ).first()
+                if existing is not None:
+                    if existing.content != row["content"]:
+                        existing.previous_content = existing.content
+                        existing.content = row["content"]
+                        existing.contains_pii = row.get("contains_pii", False)
+                        existing.masked_text = row.get("masked_text", "")
+                        session.add(existing)
+                        out["msg_upd"] += 1
+                else:
+                    session.add(
+                        Message(
+                            id=row["id"],
+                            user_id=row["user_id"],
+                            source_session_id=row["source_session_id"],
+                            content=row["content"],
+                            contains_pii=row.get("contains_pii", False),
+                            masked_text=row.get("masked_text", ""),
+                            seq=row["seq"],
+                            previous_content=row.get("previous_content", ""),
+                            create_at=parse(row.get("create_at")) or _utcnow(),
+                        )
+                    )
+                    out["msg_ins"] += 1
+
+            session.commit()
+        return out
 
 
 # ========================================================================== #
