@@ -1,6 +1,9 @@
-# 方案：EvalView 记忆管理能力（草案，待评审）
+# 方案：EvalView 记忆管理能力（已实施）
 
-日期：2026-09-08 · 状态：**草案（待用户评审收敛）** · 关联：EvalView（`src/testing/api` + `frontend/`）
+日期：2026-09-08 · 状态：**已实施 —— 批1（后端服务+API+14 单测）与批2（前端页面+联调冒烟）完成，
+2026-09-08 冒烟全绿（含真实 Milvus 投影同步 create/update/rebuild/delete 均 synced、SPA 直链 fallback 修复）**；
+批3（case 页↔记忆页互链 / 需求文档修正）未做，需要时另起。
+关联：EvalView（`src/testing/api` + `frontend/`）
 上游原则：`docs/方案-记忆更新收敛与Milvus投影一致性.md`（SQLite 权威源 / Milvus 投影、A 批收敛）、
 双库格局（`memos.db` 评测记录 / `memories.db` 业务权威，相互独立）
 
@@ -132,9 +135,9 @@ FastAPI 层薄（组装参数 → 调服务），以单测覆盖服务为主；�
 
 | 批 | 内容 | 验证 |
 |---|---|---|
-| 1 | `mem_admin_service` + `routes/memories.py` + schemas + 单测 | `.venv/bin/pytest tests/unit/test_mem_admin_service.py` |
-| 2 | 前端：NAV + 用户列表页 + 事实管理页（CRUD/原文/危险操作）+ api client | uvicorn + `npm run dev`/build 本机 smoke，curl + 浏览器手测 |
-| 3（可选） | case 页 ↔ 记忆页互链；conv_meta 状态展示；顺手修正过时的 EvalView需求文档.md（单页 HTML/同库说法） | 手工冒烟 |
+| 1 | `mem_admin_service` + `routes/memories.py` + schemas + 单测 | ✅ `.venv/bin/pytest tests/unit/test_mem_admin_service.py`（14 passed；全量 unit 122 passed） |
+| 2 | 前端：NAV + 用户列表页 + 事实管理页（CRUD/原文/危险操作）+ api client | ✅ `npm run build` 0 error；uvicorn 冒烟：读接口 200 / 写链路 create·update·rebuild·delete 均 projection=synced（真实 Milvus）/ 残留 0 / SPA 直链 fallback 200 |
+| 3（可选） | case 页 ↔ 记忆页互链；conv_meta 状态展示（**已在用户页概览条实现**）；顺手修正过时的 EvalView需求文档.md（单页 HTML/同库说法） | 未做（conv_meta 状态展示除外） |
 
 ## 9. 风险与开放问题
 
