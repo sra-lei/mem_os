@@ -1,0 +1,39 @@
+{
+ "schema_version": 1,
+ "exported_at": "2026-09-08T19:02:45+00:00",
+ "run": {
+  "id": "run_1bc77c544b",
+  "version": "v0.2",
+  "phase": "multi_session",
+  "run_at": "2026-09-08 19:02:44.444169",
+  "total_cases": 60,
+  "passed_count": 1,
+  "pass_rate": 1.0,
+  "duration_seconds": 317.088,
+  "config_snapshot": "{\"memory_provider\": \"struct\", \"llm\": \"deepseek\", \"judge\": \"assert\", \"top_k\": 20, \"threshold\": 0.7, \"prompt_fingerprints\": {\"extract.system\": \"c8edb6a95351\", \"extract.repair\": \"7c24219f5ad7\", \"answer.system\": \"7251aaf2ed08\", \"judge.system\": \"51209cb1811f\"}}",
+  "notes": null,
+  "triggered_by": "manual",
+  "status": "completed",
+  "progress": 0.0167
+ },
+ "cases": [
+  {
+   "id": "res_3458f21152",
+   "run_id": "run_1bc77c544b",
+   "case_id": "layer2_01_multiple_vehicles",
+   "case_name": "Multiple Vehicle Services - Disambiguation Required",
+   "category": "multi_session",
+   "version": "v0.2",
+   "passed": 1,
+   "score": 1.0,
+   "expected_answer": "The agent should recognize the ambiguity, mention user has both a Honda Accord with scheduled service on Nov 24 and a Tesla Model 3 without scheduled service, then ask which vehicle needs service",
+   "actual_answer": "您好，根据记录，您已为您的 **Honda Accord** 安排了以下服务：\n\n- **服务项目：** 30,000 英里定期保养及机油更换\n- **预约日期：** 11月24日（黑色星期五）\n- **预约时间：** 上午 8:00\n- **服务地点：** Firestone Auto Care  \n  Austin, 4455 North Lamar Boulevard\n\n另外，您预约时车辆的里程约为 **31,500 英里**。该 30K 保养套餐价格为 **$389.99**，使用 $20 邮件订阅折扣后，应付金额为 **$369.99**。\n\n如需调整或补充其他服务，请告诉我，我可以继续协助您。",
+   "retrieved_memories": "## 关于用户的长久记忆\n- User scheduled a 30,000-mile service and oil change for the Honda Accord at Firestone Auto Care, 4455 North Lamar Boulevard, Austin, on Friday, November 24 at 8:00 AM.\n- User's Honda Accord had 31,500 miles at the time of booking the service.\n- User reports that the brakes on his Honda Accord have been squeaking.\n- User's 30K service package is priced at $389.99, reduced to $369.99 after a $20 email sign-up discount.\n- User chose $1,000 comprehensive and collision deductibles for the Tesla.\n- User's daily commute to work is about 15 miles each way, 30 miles round trip, using the Tesla.\n- User has an 8 AM appointment on Black Friday.\n- User's Tesla is Pearl White with a black interior.\n- User's insurance policy number is SF-789234501.\n- User's phone number is 512-555-8823.\n- User parks the Honda in the driveway.\n- User parks the Tesla in the garage at home.\n- User's Tesla VIN is 5YJ3E7EB8PF445892.\n- You have rental reimbursement at $40 per day, maximum $1,200 per claim on both vehicles.\n- If rotors need replacing, add another $250.\n- Oil change alone would be $44.99 if you wanted to do that separately.\n- Adding the Tesla brings your total to $2,605 per year.\n- Tire rotation for a Tesla is $29.99.\n- Batteries for your Accord run $159-189 depending on the brand, includes installation.\n- For a 16-year-old male with two cars, expect an increase of about $2,200-2,800 per year.",
+   "error_message": null,
+   "latency_ms": 311904,
+   "tokens_input": 692,
+   "tokens_output": 1167,
+   "created_at": "2026-09-08 19:02:44.454376"
+  }
+ ]
+}
