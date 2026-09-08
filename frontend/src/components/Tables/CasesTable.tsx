@@ -14,6 +14,7 @@ export interface CasesTableProps {
 }
 
 const COLS: Array<SortableColumn & { key: ValidSortKey }> = [
+  { key: "case_id", label: "用例 ID", width: "230px", sortable: false },
   { key: "name", label: "用例名称 / 用户输入", sortable: true },
   {
     key: "updated_at",
@@ -26,6 +27,7 @@ const COLS: Array<SortableColumn & { key: ValidSortKey }> = [
 ];
 
 type ValidSortKey =
+  | "case_id"
   | "name"
   | "updated_at"
   | "__actions";
@@ -40,11 +42,19 @@ function buildRows(items: CaseDefinition[]): RowShape[] {
   return items.map((c) => ({
     c,
     sortVals: {
+      case_id: c.case_id,
       name: c.case_name,
       updated_at: c.updated_at ?? "",
       __actions: "",
     },
   }));
+}
+
+/** 用例 ID 按第二个 "_" 拆成两行（如 layer1_02_insurance_claim → layer1_02 / insurance_claim） */
+function splitCaseId(id: string): [string, string] {
+  const parts = id.split("_");
+  if (parts.length < 3) return [id, ""];
+  return [`${parts[0]}_${parts[1]}`, parts.slice(2).join("_")];
 }
 
 export function CasesTable({
@@ -100,8 +110,24 @@ export function CasesTable({
               </td>
             </tr>
           ) : (
-            rows.map(({ c }) => (
-              <tr key={c.case_id} className="table__row">
+            rows.map(({ c }) => {
+              const [caseIdHead, caseIdTail] = splitCaseId(c.case_id);
+              return (
+                <tr key={c.case_id} className="table__row">
+                  <td>
+                    <Link
+                      className="table__primary-name"
+                      to={`/cases/${c.case_id}`}
+                      title={c.case_id}
+                    >
+                      <span className="case-id__row mono">{caseIdHead}</span>
+                      {caseIdTail ? (
+                        <span className="case-id__row case-id__row--sub mono">
+                          {caseIdTail}
+                        </span>
+                      ) : null}
+                    </Link>
+                  </td>
                 <td>
                   <div className="table__primary">
                     <Link
@@ -135,7 +161,8 @@ export function CasesTable({
                   </div>
                 </td>
               </tr>
-            ))
+              );
+            })
           )}
         </tbody>
       </table>

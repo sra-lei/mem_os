@@ -7,7 +7,7 @@
  * 一致性语义：写操作 SQLite（权威）先提交 → 投影尽力同步；若响应 projection=failed，
  * 提示「已保存本地库，投影待修复」，可点「重建投影」兜底。
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { memoriesApi } from '@/api/memories';
 import type {
@@ -40,6 +40,20 @@ type ConfirmTarget =
   | { kind: 'clear-reextract' }
   | { kind: 'rebuild' }
   | null;
+
+/** 更新时间两行显示（日期 / 时间），以缩小列宽 */
+function UpdatedCell({ value }: { value: string }) {
+  const [datePart, ...timeParts] = (value ? fmtDate(value) : '—').split(' ');
+  const timePart = timeParts.join(' ');
+  return (
+    <>
+      <span className="cell-u2l mono">{datePart}</span>
+      {timePart ? (
+        <span className="cell-u2l cell-u2l--sub mono">{timePart}</span>
+      ) : null}
+    </>
+  );
+}
 
 export function MemoryUserPage() {
   const { userId = '' } = useParams();
@@ -76,8 +90,55 @@ export function MemoryUserPage() {
   // ---- 表单弹窗状态 ----
   const [editing, setEditing] = useState<{ mode: 'create' } | { mode: 'edit'; fact: MemoryFact } | null>(null);
   const [confirmTarget, setConfirmTarget] = useState<ConfirmTarget>(null);
-  const [msgView, setMsgView] = useState<{ conversationId: string; msgs: MemoryMessage[]; loading: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // ---- 左侧原文面板：选中行 → 其来源会话原文 ----
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [srcConv, setSrcConv] = useState<{
+    conversationId: string;
+    msgs: MemoryMessage[];
+    loading: boolean;
+    error: string | null;
+  } | null>(null);
+
+  const selectedFact = useMemo(
+    () => facts.find((f) => f.id === selectedId) ?? null,
+    [facts, selectedId],
+  );
+
+  // facts（翻页/筛选/删除后）变化时校正选中行
+  useEffect(() => {
+    if (!selectedId || !facts.some((f) => f.id === selectedId)) {
+      setSelectedId(facts[0]?.id ?? null);
+    }
+  }, [facts, selectedId]);
+
+  // 选中行来源会话原文（左 40% 面板）
+  useEffect(() => {
+    const convId = selectedFact?.source_conversation_id;
+    if (!convId) {
+      setSrcConv(null);
+      return;
+    }
+    let cancelled = false;
+    setSrcConv({ conversationId: convId, msgs: [], loading: true, error: null });
+    memoriesApi
+      .messages(userId, convId)
+      .then((msgs) => {
+        if (!cancelled) {
+          setSrcConv({ conversationId: convId, msgs, loading: false, error: null });
+        }
+      })
+      .catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (!cancelled) {
+          setSrcConv({ conversationId: convId, msgs: [], loading: false, error: msg });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, selectedFact?.source_conversation_id]);
 
   // 已加载事实里提炼「category → 既有 key」提示（防止同义新键）
   const keyHints = useMemo(() => {
@@ -128,29 +189,43 @@ export function MemoryUserPage() {
     }
   };
 
-  const openMessages = async (conversationId: string) => {
-    setMsgView({ conversationId, msgs: [], loading: true });
-    try {
-      const msgs = await memoriesApi.messages(userId, conversationId);
-      setMsgView({ conversationId, msgs, loading: false });
-    } catch (err) {
-      setMsgView(null);
-      toast.error(err, '加载原文失败');
-    }
-  };
-
   const summary = summaryAsync.data;
 
   return (
     <div className="page">
       <PageHeader
         eyebrow="Memory Admin"
-        title={<span className="mono">{userId}</span>}
+        title={
+          <div className="mono">
+            <Link className="link-muted" to="/memories">← 返回用户列表</Link>
+            {userId}
+          </div>
+        }
         desc={
           <>
             该用户的记忆事实（SQLite 权威 + 向量投影尽力同步）。修改后重跑评测即可验证检索注入效果。
             <br />
-            <Link className="link-muted" to="/memories">← 返回用户列表</Link>
+            <div className="mem-overview-strip">
+              <span>
+                事实 <strong className="num num--success">{summary?.fact_count ?? '…'}</strong>
+              </span>
+              <span>
+                原文消息 <strong>{summary?.message_count ?? '…'}</strong>
+              </span>
+              <span>
+                会话 <strong>{summary?.session_count ?? '…'}</strong>
+              </span>
+              <span>
+                最近活动{' '}
+                <span className="mono">{summary?.latest_activity ? fmtDate(summary.latest_activity) : '—'}</span>
+              </span>
+              {Object.entries(summary?.conv_status ?? {}).map(([st, n]) => (
+                <span key={st} className="badge badge--muted">
+                  {st}×{n}
+                </span>
+              ))}
+          </div>
+            
           </>
         }
         right={
@@ -160,155 +235,186 @@ export function MemoryUserPage() {
         }
       />
 
-      {/* 概览条 */}
+      {/* 事实表：左原文 / 右（筛选条 + 表格 + 分页） */}
       <section className="card">
-        <div className="mem-overview-strip">
-          <span>
-            事实 <strong className="num num--success">{summary?.fact_count ?? '…'}</strong>
-          </span>
-          <span>
-            原文消息 <strong>{summary?.message_count ?? '…'}</strong>
-          </span>
-          <span>
-            会话 <strong>{summary?.session_count ?? '…'}</strong>
-          </span>
-          <span>
-            最近活动{' '}
-            <span className="mono">{summary?.latest_activity ? fmtDate(summary.latest_activity) : '—'}</span>
-          </span>
-          {Object.entries(summary?.conv_status ?? {}).map(([st, n]) => (
-            <span key={st} className="badge badge--muted">
-              {st}×{n}
-            </span>
-          ))}
-        </div>
-      </section>
-
-      {/* 事实表 */}
-      <section className="card">
-        <div className="filter-bar filter-bar--wrap">
-          <select
-            className="select"
-            value={category}
-            onChange={(e) => setParam('category', e.target.value)}
-            title="按类别过滤"
-          >
-            <option value="">全部类别</option>
-            {Object.keys(summary?.categories ?? {})
-              .sort()
-              .map((c) => (
-                <option key={c} value={c}>
-                  {c}（{summary?.categories[c]}）
-                </option>
-              ))}
-          </select>
-          <input
-            type="search"
-            className="input input--search input--grow"
-            placeholder="搜索 fact / key / value 内容…（回车生效）"
-            defaultValue={q}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') setParam('q', (e.target as HTMLInputElement).value.trim());
-            }}
-            onBlur={(e) => {
-              if ((e.target as HTMLInputElement).value.trim() !== q) {
-                setParam('q', (e.target as HTMLInputElement).value.trim());
-              }
-            }}
-          />
-          <div className="muted filter-summary">
-            共 <strong>{total}</strong> 条
-            {category ? ` · 类别：${category}` : ''}
-            {q ? ` · 搜索：${q}` : ''}
-          </div>
-        </div>
-
-        {factsAsync.loading ? (
-          <TableSkeleton cols={6} rows={12} />
-        ) : (
-          <div className="table-wrap">
-            <table className="table">
-              <colgroup>
-                <col style={{ width: '34%' }} />
-                <col style={{ width: '120px' }} />
-                <col style={{ width: '18%' }} />
-                <col style={{ width: '90px' }} />
-                <col style={{ width: '150px' }} />
-                <col style={{ width: '150px' }} />
-              </colgroup>
-              <thead>
-                <tr>
-                  <th style={{ textAlign: 'left' }}>记忆事实（fact）</th>
-                  <th>category / key</th>
-                  <th style={{ textAlign: 'left' }}>value</th>
-                  <th>置信</th>
-                  <th>更新时间</th>
-                  <th>操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                {facts.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="table__empty">
-                      {total === 0 ? '该用户暂无记忆事实。' : '没有匹配当前筛选的事实。'}
-                    </td>
-                  </tr>
+        <div className="mem-split">
+          {/* 左：来源会话原文（随选中行联动） */}
+          <aside className="mem-split__left">
+            <div className="mem-source">
+              <div className="mem-source__head">
+                会话原文
+                {selectedFact ? (
+                  <span className="tag tag--muted">
+                    {selectedFact.category} / {selectedFact.key}
+                  </span>
+                ) : null}
+              </div>
+              <div className="mem-source__body">
+                {!selectedFact ? (
+                  <div className="muted">点击右侧行，查看其来源会话原文。</div>
+                ) : !selectedFact.source_conversation_id ? (
+                  <div className="muted">该事实无来源会话（手动新增 / 重建投影）。</div>
+                ) : srcConv?.loading ? (
+                  <TableSkeleton cols={1} rows={8} />
+                ) : srcConv?.error ? (
+                  <div className="muted">加载原文失败：{srcConv.error}</div>
+                ) : (srcConv?.msgs.length ?? 0) === 0 ? (
+                  <div className="muted">该会话没有原文消息。</div>
                 ) : (
-                  facts.map((f) => (
-                    <tr key={f.id} className="table__row">
-                      <td>
-                        <div className="table__primary">
-                          <span className="mem-fact__text">{f.fact}</span>
-                          {f.previous_fact ? (
-                            <span className="mem-fact__prev">
-                              上次：{f.previous_fact}
-                            </span>
-                          ) : null}
-                          {f.source_conversation_id ? (
-                            <span className="mem-fact__src mono">
-                              src: {f.source_conversation_id}
-                              {f.source_chunk_id ? ` / ${f.source_chunk_id}` : ''}
-                            </span>
-                          ) : null}
-                        </div>
-                      </td>
-                      <td>
-                        <span className="tag tag--muted">{f.category}</span>{' '}
-                        <span className="mono muted">{f.key}</span>
-                      </td>
-                      <td>
-                        <span className="mono" title={f.value}>
-                          {(f.value ?? '').slice(0, 60) || '—'}
-                        </span>
-                      </td>
-                      <td style={{ textAlign: 'center' }}>
-                        <span className="mono">{Math.round(f.confidence * 100)}%</span>
-                      </td>
-                      <td className="mono" style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
-                        {fmtDate(f.updated_at)}
-                      </td>
-                      <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
-                        {f.source_conversation_id ? (
-                          <Button variant="ghost" size="sm" onClick={() => openMessages(f.source_conversation_id)}>
-                            原文
-                          </Button>
-                        ) : null}
-                        <Button variant="ghost" size="sm" onClick={() => setEditing({ mode: 'edit', fact: f })}>
-                          编辑
-                        </Button>
-                        <Button variant="ghost" size="sm" onClick={() => setConfirmTarget({ kind: 'delete', fact: f })}>
-                          删除
-                        </Button>
-                      </td>
-                    </tr>
-                  ))
+                  <div className="pre pre--neutral mem-msg-list">
+                    {(srcConv?.msgs ?? []).map((m) => (
+                      <div key={m.seq} className="mem-msg-line">
+                        <span className="mem-msg-seq mono">{m.seq}</span>
+                        <span className="mem-msg-body">{m.content}</span>
+                      </div>
+                    ))}
+                  </div>
                 )}
-              </tbody>
-            </table>
-          </div>
-        )}
+              </div>
+            </div>
+          </aside>
 
-        <Pager page={Math.min(page, pages)} pages={pages} total={total} limit={LIMIT} onChange={(p) => setParam('page', String(p))} />
+          {/* 右：筛选条 + 表格 + 分页 */}
+          <div className="mem-split__right">
+            <div className="filter-bar filter-bar--wrap">
+              <select
+                className="select"
+                value={category}
+                onChange={(e) => setParam('category', e.target.value)}
+                title="按类别过滤"
+              >
+                <option value="">全部类别</option>
+                {Object.keys(summary?.categories ?? {})
+                  .sort()
+                  .map((c) => (
+                    <option key={c} value={c}>
+                      {c}（{summary?.categories[c]}）
+                    </option>
+                  ))}
+              </select>
+              <input
+                type="search"
+                className="input input--search input--grow"
+                placeholder="搜索 fact / key / value 内容…（回车生效）"
+                defaultValue={q}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') setParam('q', (e.target as HTMLInputElement).value.trim());
+                }}
+                onBlur={(e) => {
+                  if ((e.target as HTMLInputElement).value.trim() !== q) {
+                    setParam('q', (e.target as HTMLInputElement).value.trim());
+                  }
+                }}
+              />
+              <div className="muted filter-summary">
+                共 <strong>{total}</strong> 条
+                {category ? ` · 类别：${category}` : ''}
+                {q ? ` · 搜索：${q}` : ''}
+              </div>
+            </div>
+
+            {factsAsync.loading ? (
+              <TableSkeleton cols={6} rows={12} />
+            ) : (
+              <div className="table-wrap">
+                <table className="table">
+                  <colgroup>
+                    <col style={{ width: '110px' }} />
+                    <col style={{ width: '200px' }} />
+                    <col />
+                    <col style={{ width: '90px' }} />
+                    <col style={{ width: '72px' }} />
+                    <col style={{ width: '130px' }} />
+                  </colgroup>
+                  <thead>
+                    <tr>
+                      <th style={{ textAlign: 'left' }}>category</th>
+                      <th style={{ textAlign: 'left' }}>key</th>
+                      <th style={{ textAlign: 'left' }}>value</th>
+                      <th>置信</th>
+                      <th>更新时间</th>
+                      <th>操作</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {facts.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="table__empty">
+                          {total === 0 ? '该用户暂无记忆事实。' : '没有匹配当前筛选的事实。'}
+                        </td>
+                      </tr>
+                    ) : (
+                      facts.map((f) => (
+                        <tr
+                          key={f.id}
+                          className={selectedFact?.id === f.id ? 'table__row is-selected' : 'table__row'}
+                          style={{ cursor: 'pointer' }}
+                          onClick={() => setSelectedId(f.id)}
+                          title="点击查看来源会话原文"
+                        >
+                          <td>
+                            <span className="tag tag--muted">{f.category}</span>
+                          </td>
+                          <td>
+                            <div
+                              className="mono"
+                              title={f.key}
+                              style={{
+                                whiteSpace: 'nowrap',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                maxWidth: 190,
+                              }}
+                            >
+                              {f.key}
+                            </div>
+                          </td>
+                          <td>
+                            <span className="mono" title={f.value}>
+                              {(f.value ?? '').slice(0, 60) || '—'}
+                            </span>
+                          </td>
+                          <td style={{ textAlign: 'center' }}>
+                            <span className="mono">{Math.round(f.confidence * 100)}%</span>
+                          </td>
+                          <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
+                            <UpdatedCell value={f.updated_at} />
+                          </td>
+                          <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
+                            <div className="mem-row-actions">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setEditing({ mode: 'edit', fact: f });
+                                }}
+                              >
+                                编辑
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setConfirmTarget({ kind: 'delete', fact: f });
+                                }}
+                              >
+                                删除
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <Pager page={Math.min(page, pages)} pages={pages} total={total} limit={LIMIT} onChange={(p) => setParam('page', String(p))} />
+          </div>
+        </div>
       </section>
 
       {/* 危险操作区 */}
@@ -377,34 +483,6 @@ export function MemoryUserPage() {
             )
           }
         />
-      ) : null}
-
-      {/* 原文查看 */}
-      {msgView ? (
-        <Modal
-          open
-          size="lg"
-          title={`会话原文 · ${msgView.conversationId}`}
-          subtitle={<span className="mono muted">{userId}（只读）</span>}
-          onClose={() => setMsgView(null)}
-        >
-          {msgView.loading ? (
-            <TableSkeleton cols={1} rows={10} />
-          ) : (
-            <div className="pre pre--neutral mem-msg-list">
-              {msgView.msgs.length === 0 ? (
-                <div className="muted">该会话没有原文消息</div>
-              ) : (
-                msgView.msgs.map((m) => (
-                  <div key={m.seq} className="mem-msg-line">
-                    <span className="mem-msg-seq mono">{m.seq}</span>
-                    <span className="mem-msg-body">{m.content}</span>
-                  </div>
-                ))
-              )}
-            </div>
-          )}
-        </Modal>
       ) : null}
 
       {/* 二次确认 */}

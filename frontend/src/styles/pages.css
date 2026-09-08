@@ -620,3 +620,83 @@
 .mem-overview-strip .num {
   margin-left: 2px;
 }
+
+/* ---- 记忆管理 · 事实区左右分栏（左原文 / 右筛选+表格） ---- */
+.mem-split {
+  display: flex;
+  gap: var(--s-4);
+  align-items: stretch;
+  min-width: 0;
+  /* 定高：两侧各自的垂直滚动条独立控制 */
+  height: clamp(440px, calc(100vh - 380px), 900px);
+}
+.mem-split__left {
+  width: 42%;
+  min-width: 0;
+}
+.mem-split__right {
+  width: 58%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  min-height: 0;
+}
+.mem-split__right .filter-bar {
+  flex: none;
+}
+.mem-split__right .table-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+.mem-split__right .pager {
+  flex: none;
+}
+.mem-split__right .table {
+  min-width: 560px;
+}
+.cell-u2l {
+  display: block;
+  white-space: nowrap;
+}
+.cell-u2l--sub {
+  opacity: 0.62;
+  font-size: 0.88em;
+}
+.mem-row-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.mem-source {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--r-md);
+  background: var(--color-bg-elevated);
+  overflow: hidden;
+}
+.mem-source__head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-3) var(--s-4);
+  border-bottom: 1px solid var(--color-border);
+  font-weight: 600;
+  font-size: var(--fs-sm);
+}
+.mem-source__body {
+  flex: 1;
+  overflow: auto;
+  padding: var(--s-3) var(--s-4);
+  min-height: 0;
+}
+.mem-source .mem-msg-list {
+  max-height: none;
+}
+.table__row.is-selected > td {
+  background: rgba(74, 108, 247, 0.08);
+}
