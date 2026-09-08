@@ -383,3 +383,50 @@ def test_upsert_fact_offline_no_projection(tmp_memory_db: Path) -> None:
     assert res["projection"] == "failed"
     assert "重建投影" in (res["warning"] or "")
     assert len(_facts()) == 4  # SQLite 侧照常生效
+
+
+# ---------------------------------------------------------------------------
+# fact_category 受控词表（窗口管理 → 词表读取联动）
+# ---------------------------------------------------------------------------
+
+
+def test_admin_list_categories_seeded(tmp_memory_db: Path) -> None:
+    admin = MemAdminService(allow_live=False)
+    cats = admin.list_categories()
+    assert len(cats) == 10
+    assert cats[0]["category"] == "personal" and cats[0]["name_zh"] == "个人"
+    active = admin.list_categories(active_only=True)
+    assert [c["category"] for c in active] == [c["category"] for c in cats]
+
+
+def test_admin_upsert_category_reflects_in_vocab(tmp_memory_db: Path) -> None:
+    from os_mem.vocab import list_active_categories, render_categories_section
+
+    admin = MemAdminService(allow_live=False)
+    res = admin.upsert_category("pet", name_zh="宠物", name_en="Pets", sort=11)
+    assert res["created"] is True
+    # 更新同名词条（覆盖而非新增）
+    res2 = admin.upsert_category("pet", name_zh="宠物护理", name_en="Pets", sort=11)
+    assert res2["created"] is False
+    cats = admin.list_categories(active_only=False)
+    assert len(cats) == 11
+    # 词表读取（prompt 渲染/校验白名单）立即联动
+    assert "pet" in list_active_categories()
+    assert "pet（宠物护理）" in render_categories_section()
+
+
+def test_admin_deactivate_category(tmp_memory_db: Path) -> None:
+    from os_mem.vocab import list_active_categories, render_categories_section
+
+    admin = MemAdminService(allow_live=False)
+    res = admin.set_category_active("finance", False)
+    assert res["active"] == 0
+    assert "finance" not in list_active_categories()
+    assert "finance" not in render_categories_section()
+    assert len(admin.list_categories()) == 9
+    # 不存在词条 → LookupError
+    with pytest.raises(LookupError):
+        admin.set_category_active("no_such_cat", False)
+    # 重新启用
+    admin.set_category_active("finance", True)
+    assert "finance" in list_active_categories()

@@ -27,7 +27,12 @@ from sqlalchemy import delete as sa_delete
 from sqlalchemy import update as sa_update
 from sqlmodel import Session, func, or_, select
 
-from os_mem.entries.mem_models import ConversationMeta, Message, StructuredMemory
+from os_mem.entries.mem_models import (
+    ConversationMeta,
+    FactCategory,
+    Message,
+    StructuredMemory,
+)
 
 # ========================================================================== #
 #  DB 会话（引擎复用 MemoryDatabase：相对路径恒锚定 src/os_mem/data/）
@@ -515,6 +520,78 @@ class MemAdminService:
                 "projection": "failed",
                 "warning": f"重建投影失败（{type(e).__name__}: {e}）；SQLite 权威数据完好，可重试",
             }
+
+    # ------------------------------------------------------------------ #
+    #  fact_category 受控词表（见 docs/方案-事实category与key词表管理.md）
+    #  改词表即时影响提取 prompt 渲染与 validate 白名单（os_mem.vocab 每次读表）
+    # ------------------------------------------------------------------ #
+
+    def list_categories(self, *, active_only: bool = True) -> list[dict[str, Any]]:
+        """词表列表（按 sort）；active_only=True 只返回启用项。"""
+        with _session() as session:
+            stmt = select(FactCategory).order_by(
+                FactCategory.sort, FactCategory.category
+            )
+            if active_only:
+                stmt = stmt.where(FactCategory.active == 1)
+            rows = session.exec(stmt).all()
+        return [
+            {
+                "category": r.category,
+                "name_zh": r.name_zh,
+                "name_en": r.name_en,
+                "sort": r.sort,
+                "active": r.active,
+            }
+            for r in rows
+        ]
+
+    def upsert_category(
+        self,
+        category: str,
+        *,
+        name_zh: str = "",
+        name_en: str = "",
+        sort: int = 0,
+        active: int = 1,
+    ) -> dict[str, Any]:
+        """新增/更新一个 category 词条（英文 id 为身份；同 id 覆盖双语名/sort/启停）。"""
+        with _session() as session:
+            row = session.get(FactCategory, category)
+            if row is None:
+                row = FactCategory(
+                    category=category,
+                    name_zh=name_zh,
+                    name_en=name_en,
+                    sort=sort,
+                    active=active,
+                    created_at=_utcnow(),
+                    updated_at=_utcnow(),
+                )
+                session.add(row)
+                created = True
+            else:
+                row.name_zh = name_zh
+                row.name_en = name_en
+                row.sort = sort
+                row.active = active
+                row.updated_at = _utcnow()
+                session.add(row)
+                created = False
+            session.commit()
+        return {"category": category, "created": created, "active": row.active}
+
+    def set_category_active(self, category: str, active: bool) -> dict[str, Any]:
+        """启用/停用 category：停用后不进 prompt、提取输出该类即校验拒绝。"""
+        with _session() as session:
+            row = session.get(FactCategory, category)
+            if row is None:
+                raise LookupError(f"category not in catalog: {category}")
+            row.active = 1 if active else 0
+            row.updated_at = _utcnow()
+            session.add(row)
+            session.commit()
+        return {"category": category, "active": row.active}
 
 
 # ========================================================================== #
