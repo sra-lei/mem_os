@@ -33,18 +33,17 @@ from os_mem.models.mem_models import MemoryFact, MemoryFacts
 
 _logger = get_logger('os_mem.utils.fact_extraction')
 
-ALLOWED_CATEGORIES = [
-    'personal',
-    'contact',
-    'preference',
-    'health',
-    'travel',
-    'work',
-    'finance',
-    'family',
-    'education',
-    'other',
-]
+
+def _active_categories() -> frozenset[str]:
+    """校验白名单：读 fact_category 词表 active 集（词表故障回退内置 10 类）。
+
+    替代原硬编码 ALLOWED_CATEGORIES 常量 —— 词表化后停用/增补 category 即时生效，
+    见 docs/方案-事实category与key词表管理.md。每次调用读表（本地 SQLite，廉价），
+    不做缓存：管理窗口改词表后校验行为立即一致。
+    """
+    from os_mem.vocab import list_active_categories
+
+    return frozenset(list_active_categories())
 
 # 精确信息兜底：即便 LLM 提取遗漏，也要把含金额/编号/日期/百分比的原文句子捞进库。
 # 这些 token 正是 layer1 精确回忆类问题的答案核心（金额、编号、时间等）。
@@ -93,8 +92,9 @@ class FactExtractor:
             else:
                 validated = MemoryFacts(**data)
             # 3. 业务规则：分类白名单 + confidence ∈ [0,1]
+            allowed = _active_categories()
             for fact in validated.facts:
-                if fact.category not in ALLOWED_CATEGORIES:
+                if fact.category not in allowed:
                     raise ValueError(f'Unknown category: {fact.category}')
                 if not 0 <= fact.confidence <= 1:
                     raise ValueError(f'Confidence out of range: {fact.confidence}')

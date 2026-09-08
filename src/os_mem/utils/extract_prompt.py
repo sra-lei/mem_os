@@ -40,9 +40,7 @@ SYSTEM_PROMPT = """
 
 ## 提取规则
 1. 每条事实独立成句，格式为 "用户 ..."
-2. category 必须从以下列表中选取：
-   personal, contact, preference, health, travel,
-   work, finance, family, education, other
+2. category 必须从以下列表选取：{categories_section}
 3. key 是字段名（如 'email', 'seat_preference', 'checking_account_number'）。
    **key 必须稳定且可复用**：同一概念只允许一个 key，全程复用，不得为同一件事的
    不同说法发明新 key（如"48 小时内联系"与"24-48 小时内联系"都用同一个 key）。
@@ -89,9 +87,21 @@ SYSTEM_PROMPT = """
 
 
 def build_extract_messages(dialog_text: str) -> list[dict[str, str]]:
-    """拼装事实提取的完整 messages（system 提示 + 待提取对话）。"""
-    system = SYSTEM_PROMPT.replace(
-        '{max_facts}', str(memory_settings.DEEPSEEK_EXTRACT_MAX_FACTS)
+    """拼装事实提取的完整 messages（system 提示 + 待提取对话）。
+
+    system 由静态模板渲染而成：
+    - ``{max_facts}``    → 单次提取事实上限（settings）；
+    - ``{categories_section}`` → active category 双语列表（fact_category 词表，
+      见 os_mem.vocab）——改词表（停用/增补）即改提示，不动代码。
+    """
+    from os_mem.vocab import render_categories_section
+
+    system = (
+        SYSTEM_PROMPT.replace(
+            '{max_facts}', str(memory_settings.DEEPSEEK_EXTRACT_MAX_FACTS)
+        ).replace(
+            '{categories_section}', render_categories_section()
+        )
     )
     return [
         {'role': 'system', 'content': system},

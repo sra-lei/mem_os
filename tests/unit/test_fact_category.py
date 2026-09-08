@@ -12,6 +12,8 @@ from sqlmodel import Session, func, select
 
 from os_mem.entries.mem_models import FactCategory
 from os_mem.infra.storage.mem_storage import MemoryDatabase
+from os_mem.utils.extract_prompt import SYSTEM_PROMPT, build_extract_messages
+from os_mem.utils.fact_extraction import FactExtractor
 from os_mem.vocab import CATEGORY_SEED, list_active_categories, render_categories_section
 
 
@@ -108,3 +110,45 @@ def test_fallback_when_table_empty(tmp_path: Path, monkeypatch: pytest.MonkeyPat
         conn.execute(text("CREATE TABLE fact_category (category TEXT PRIMARY KEY, name_zh TEXT, name_en TEXT, sort INTEGER, active INTEGER, created_at DATETIME, updated_at DATETIME)"))
     assert _count() == 0
     assert list_active_categories() == [c["category"] for c in CATEGORY_SEED]
+
+
+# ---------------------------------------------------------------------------
+# 提取链路联动（批2）：prompt 渲染 / 校验读表
+# ---------------------------------------------------------------------------
+
+
+def _fact_json(category: str) -> str:
+    return (
+        '[{"fact":"用户邮箱是 a@b.com","category":"'
+        + category
+        + '","key":"email","value":"a@b.com","confidence":0.9}]'
+    )
+
+
+def test_validate_category_out_of_range(tmp_db: Path) -> None:
+    # 合法 category：通过（返回 facts）
+    facts = FactExtractor.validate_response(_fact_json("contact"))
+    assert facts and facts[0].category == "contact"
+    # 非法 category：整批拒绝（validate 返回 []，语义与旧 ALLOWED_CATEGORIES 一致）
+    assert FactExtractor.validate_response(_fact_json("bogus")) == []
+
+
+def test_deactivate_category_affects_validation_and_prompt(tmp_db: Path) -> None:
+    _set_active("finance", 0)
+    # 校验：finance 出界 → 整批拒绝
+    assert FactExtractor.validate_response(_fact_json("finance")) == []
+    assert FactExtractor.validate_response(_fact_json("contact"))  # 其余不受影响
+    # prompt：渲染段不再含 finance
+    assert "finance" not in render_categories_section()
+
+
+def test_build_extract_messages_renders_categories_section(tmp_db: Path) -> None:
+    # 模板保留占位（test_prompt_fp 依赖 {max_facts} 仍在模板）
+    assert "{categories_section}" in SYSTEM_PROMPT
+    msgs = build_extract_messages("你好")
+    system = msgs[0]["content"]
+    # 渲染完成：无占位残留，双语列表出现
+    assert "{categories_section}" not in system
+    assert "{max_facts}" not in system
+    assert "category 必须从以下列表选取：personal（个人）, contact（联系方式）" in system
+    assert msgs[1]["content"].startswith("请从以下对话中提取结构化事实")
