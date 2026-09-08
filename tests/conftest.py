@@ -49,7 +49,7 @@ def _prompt_fingerprints() -> dict[str, str]:
     """
     import eval.judge as judge_mod
     import eval.llm as llm_mod
-    import os_mem.utils.extract_prompt as extract_mod
+    import os_mem.extraction.prompt as extract_mod
 
     return {
         'extract.system': extract_mod.SYSTEM_PROMPT_FINGERPRINT,

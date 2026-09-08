@@ -2,8 +2,8 @@
 (the evaluation framework, your own agent, etc.).
 
 The evaluation framework (src/testing) depends ONLY on this contract.
-Implementations live in os_mem (generator.py + retriever.py + storage.py are
-YOUR work — reference 需求文档 v0.1 modules 1.2~1.4).
+Implementations: base/struct/full providers under os_mem.core.mem_provider
+（struct 走 extraction 提取域 + 双写 + 混合检索，见 AGENTS.md §3/§4）。
 """
 from __future__ import annotations
 
@@ -43,7 +43,11 @@ class MemoryProvider(Protocol):
         """Return the top-k most relevant memories for the user's query."""
         ...
 
-from os_mem.core.mem_provider import BaseProvider,FullTextProvider, StructProvider  # noqa: E402
+from os_mem.core.mem_provider import (  # noqa: E402
+    BaseProvider,
+    FullTextProvider,
+    StructProvider,
+)
 
 # Registered provider names -> factory.
 _PROVIDER_REGISTRY: dict[str, type] = {

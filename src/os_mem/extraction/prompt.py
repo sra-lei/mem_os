@@ -1,5 +1,8 @@
 """事实提取任务 prompt 与 LLM 适配 —— 与通用客户端解耦。
 
+归属：``os_mem.extraction`` 记忆提取域（2026-09-08 由 os_mem.utils 迁入），
+与 extractor.py / tokens.py 同域内聚；通用指纹工具仍留 ``os_mem.utils.prompt_fp``。
+
 职责划分（2026-09 重构，为接入 LLM 网关铺路）：
 - ``os_mem.infra.llm.deepseek_client.DeepSeekClient`` 是
   ``os_mem.infra.llm.base_client.ChatClient`` 契约的实现，只负责
@@ -126,10 +129,10 @@ def build_repair_messages(
     partial_json: str, max_facts: int | None = None
 ) -> list[dict[str, str]]:
     """拼装「修复截断 JSON」的 messages。"""
-    cap = max_facts or memory_settings.DEEPSEEK_EXTRACT_MAX_FACTS
+    fact_limit = max_facts or memory_settings.DEEPSEEK_EXTRACT_MAX_FACTS
     system = (
         REPAIR_PROMPT
-        + f'\n\n（注意：完整输出仍受 {cap} 条事实上限约束，若原输出已接近上限，'
+        + f'\n\n（注意：完整输出仍受 {fact_limit} 条事实上限约束，若原输出已接近上限，'
         + '优先保留前面更重要的条目。）'
     )
     return [

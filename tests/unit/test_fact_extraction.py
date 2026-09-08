@@ -1,4 +1,4 @@
-"""FactExtractor（os_mem/utils/fact_extraction.py）单元测试。
+"""FactExtractor（os_mem/extraction/extractor.py）单元测试。
 
 覆盖事实抽取工具类的全部确定性逻辑（不依赖真实 LLM / Milvus）：
   - ``validate_response``     ：LLM 返回清洗（markdown / 包装格式）与校验
@@ -10,7 +10,7 @@
   - ``fallback_numeric_facts``：含金额/编号/日期/电话的原文句子 verbatim 兜底
 
 用法:
-    pytest tests/test_fact_extraction.py
+    pytest tests/unit/test_fact_extraction.py
 """
 from __future__ import annotations
 
@@ -18,8 +18,8 @@ import json
 
 import pytest
 
+from os_mem.extraction.extractor import FactExtractor
 from os_mem.models.mem_models import MemoryFact
-from os_mem.utils.fact_extraction import FactExtractor
 
 
 def _fact(

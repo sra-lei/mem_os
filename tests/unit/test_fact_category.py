@@ -4,17 +4,21 @@
 """
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Iterator
 
 import pytest
 from sqlmodel import Session, func, select
 
 from os_mem.entries.mem_models import FactCategory
+from os_mem.extraction.extractor import FactExtractor
+from os_mem.extraction.prompt import SYSTEM_PROMPT, build_extract_messages
 from os_mem.infra.storage.mem_storage import MemoryDatabase
-from os_mem.utils.extract_prompt import SYSTEM_PROMPT, build_extract_messages
-from os_mem.utils.fact_extraction import FactExtractor
-from os_mem.vocab import CATEGORY_SEED, list_active_categories, render_categories_section
+from os_mem.vocab import (
+    CATEGORY_SEED,
+    list_active_categories,
+    render_categories_section,
+)
 
 
 @pytest.fixture()

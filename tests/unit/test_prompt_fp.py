@@ -27,7 +27,7 @@ def _all_fingerprints() -> dict[str, str]:
     """评测 4 处 prompt 的指纹常量（模块引用，避免常量改名冲突）。"""
     import eval.judge as judge_mod
     import eval.llm as llm_mod
-    import os_mem.utils.extract_prompt as extract_mod
+    import os_mem.extraction.prompt as extract_mod
 
     return {
         'extract.system': extract_mod.SYSTEM_PROMPT_FINGERPRINT,
@@ -51,7 +51,7 @@ def test_all_prompts_are_distinct() -> None:
 
 def test_extract_prompt_template_fingerprint_independent_of_max_facts() -> None:
     """指纹作用于模板本身：{max_facts} 占位不参与指纹（配置值变化不误判为迭代）。"""
-    from os_mem.utils import extract_prompt
+    from os_mem.extraction import prompt as extract_prompt
 
     assert '{max_facts}' in extract_prompt.SYSTEM_PROMPT
     # 直接计算原文模板指纹应与模块常量一致

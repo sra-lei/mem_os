@@ -11,6 +11,7 @@ from os_mem.core.services.conv_meta_service import (
     STATUS_SAVING_VECTOR,
 )
 from os_mem.entries.mem_models import StructuredMemory
+from os_mem.extraction import FactExtractor, build_extract_complete
 from os_mem.infra.llm import ChatClient, get_llm_client
 from os_mem.infra.logger import get_logger
 from os_mem.infra.storage import (
@@ -22,12 +23,10 @@ from os_mem.infra.storage import (
 )
 from os_mem.models import Conversation
 from os_mem.models.mem_models import MemoryFact
-from os_mem.utils.extract_prompt import build_extract_complete
-from os_mem.utils.fact_extraction import FactExtractor
 
 _logger = get_logger('os_mem.struc_mem')
 
-# 事实抽取工具类（校验/分段/去重/数字兜底/编排）—— 从本服务内聚抽出，见 os_mem/utils/
+# 事实提取执行器（校验/分段/去重/数字兜底/R1 剪枝/编排）—— 提取域见 os_mem/extraction/
 _extractor = FactExtractor()
 
 
@@ -39,7 +38,7 @@ class StructuredMemService:
         vector_store: MemoryVectorStore,
     ) -> None:
         self.client = client
-        # 通用 client 适配为事实提取 complete 回调（prompt 见 utils/extract_prompt）
+        # 通用 client 适配为事实提取 complete 回调（prompt 见 os_mem/extraction/prompt）
         self._extract_complete = build_extract_complete(client)
         self.vectorizer = vectorizer
         self.vector_store = vector_store
@@ -124,7 +123,7 @@ class StructuredMemService:
         on_stage：可选阶段回调 —— 每个处理阶段「开始前」调用一次，参数为目标状态名
         （EXTRACTING / SAVING_SQLITE / SAVING_VECTOR），由调用方（StructProvider）
         接入会话处理状态机；为 None 时保持旧行为（不追踪）。
-        事实抽取逻辑见 ``os_mem.utils.fact_extraction.FactExtractor``。
+        事实抽取逻辑见 ``os_mem.extraction.extractor.FactExtractor``。
 
         投影收敛（A 批，见 docs/方案-记忆更新收敛与Milvus投影一致性.md）：
         Milvus 是投影（SQLite 为权威源）；写入前先把本批 facts 按 (category, key)

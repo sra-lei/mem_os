@@ -25,7 +25,7 @@ from __future__ import annotations
 import re
 from typing import Any, Protocol
 
-from os_mem.utils.fact_tokens import fact_tokens
+from os_mem.extraction.tokens import fact_tokens
 
 # fetch 放大取回系数：候选 = top_k * N，再经策略链收敛回 top_k（无条件生效）
 RETRIEVAL_FETCH_MULTIPLIER = 3
@@ -35,7 +35,7 @@ VERBATIM_MIN_RATIO = 1 / 3
 
 # ---------------------------------------------------------------------- #
 #  噪声判定（verbatim 专属，留本文件）；数值 token 口径见
-#  os_mem.utils.fact_tokens（共享，与提取侧 R1 覆盖去重同源）
+#  os_mem.extraction.tokens（共享，与提取侧 R1 覆盖去重同源）
 # ---------------------------------------------------------------------- #
 # 疑问句/口语碎片（如 "So it would be $30 instead of $35?" / "okay" 等）
 _VERBATIM_NOISE = re.compile(

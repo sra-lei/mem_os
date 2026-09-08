@@ -89,7 +89,7 @@ LLM 提取 + 数字兜底（FactExtractor）
 
 ### 4.4 verbatim 句 key 唯一化
 
-`fact_extraction.fallback_numeric_facts` 中 `key='verbatim_record'` →
+`extraction/extractor.py` 的 `fallback_numeric_facts` 中 `key='verbatim_record'` →
 改为**内容指纹**：`verbatim_<sha1(value)[:12]>`（value = 原文句）。
 效果：
 - 同一原文句重跑 → 同 key → 投影期删旧插新，幂等不重复；

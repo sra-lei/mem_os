@@ -3,7 +3,7 @@
 日期：2026-09-08 · 状态：**已实施（category 期，2026-09-08）**：批1-3 完成（表/seed/vocab/
 prompt 渲染/校验读表/admin 窗口），单测 133 passed 全绿，真实 memories.db 已幂等建表+seed；
 key 词表（`fact_key_catalog`）**缓行待用户再想**，本期不建表
-关联：`os_mem/utils/extract_prompt.py`、`os_mem/utils/fact_extraction.py`、提取链路、`os_mem/admin`
+关联：`os_mem/extraction/prompt.py`、`os_mem/extraction/extractor.py`、提取链路、`os_mem/admin`
 上游：方案-记忆更新收敛 §4.5（key 规范化）、§11（串键覆盖）；评测数据 93% key 单次出现（发散）
 
 ## 1. 目标与范围（本次改动）
@@ -14,8 +14,8 @@ key 词表（`fact_key_catalog`）**缓行待用户再想**，本期不建表
 
 | 现状 hardcode（category 相关） | 位置 | 处理后 |
 |---|---|---|
-| allowed category 枚举（prompt 提示） | `extract_prompt.py` SYSTEM_PROMPT L43-45 | `{categories_section}` 占位 → 读表渲染（双语） |
-| `ALLOWED_CATEGORIES` 硬白名单（校验） | `fact_extraction.py` L36-47（validate_response L97） | 常量删除 → 读 `fact_category` active 集（出界 ValueError 语义不变） |
+| allowed category 枚举（prompt 提示） | `extraction/prompt.py` SYSTEM_PROMPT 规则 2 | `{categories_section}` 占位 → 读表渲染（双语） |
+| `ALLOWED_CATEGORIES` 硬白名单（校验） | `extraction/extractor.py` validate_response | 常量删除 → 读 `fact_category` active 集（出界 ValueError 语义不变） |
 
 **范围外（本期不动，保持现状）**：
 - 提取规则 3 的 **key 部分全部保留**：候选 key 参考列表、inline 示例
@@ -55,14 +55,14 @@ fact_category            -- allowed category 词表
   函数内 lazy 建 MemoryDatabase 会话）：
   - `list_active_categories() -> list[dict{category,name_zh,name_en}]`（按 sort）；
   - `render_categories_section() -> str`：渲染 `name_en（name_zh）` 逗号分隔列表。
-- `extract_prompt.py`：SYSTEM_PROMPT 规则 2 段改为 `{categories_section}` 占位；
+- `extraction/prompt.py`：SYSTEM_PROMPT 规则 2 段改为 `{categories_section}` 占位；
   `build_extract_messages()` 调 `vocab.render_categories_section()` 替换（每会话一次 SQLite
   读，廉价；不做缓存——评测进程词表只增不减，避免缓存失效问题）。
 - 规则 3 及之后文本原样保留（key 期前不动），`{max_facts}` 占位保留。
 
 ### 2.3 校验去硬编码（ALLOWED_CATEGORIES）
 
-`fact_extraction.py`：
+`extraction/extractor.py`：
 - `ALLOWED_CATEGORIES` 常量删除；`validate_response` 改为取
   `vocab.list_active_categories()` 的 category 集合校验（每次调用读表）。
 - **校验语义不变**：category 不在 active 集 → ValueError → 整批返回 [] → 上层重试/降级

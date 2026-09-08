@@ -1,20 +1,24 @@
-"""事实抽取工具类（FactExtractor）—— 结构化记忆提取链路的确定性内聚封装。
+"""事实提取执行器（FactExtractor）—— 结构化记忆提取链路的确定性内聚封装。
 
-从 StrucMemService 中抽出的全部"事实抽取"逻辑，职责单一、无存储/网络副作用
-（LLM 通过注入的 ``complete(text) -> raw_json`` 回调使用，便于单测与替换）：
+归属：``os_mem.extraction`` 记忆提取域（2026-09-08 由 os_mem.utils 迁入，
+见 AGENTS.md 目录地图）。定位：被编排的**领域执行器**——不属 utils 小工具
+（它是提取链路核心），也不属 core 业务编排（编排在 core/services/struc_mem_service，
+存储/网络副作用为零，LLM 通过注入的 ``complete(text) -> raw_json`` 回调使用，
+便于单测与替换）：
 
 - ``validate_response``   ：LLM 原始输出清洗（markdown 围栏/包装格式）与校验
   （分类白名单、confidence 边界、非法 JSON → 空列表触发重试）
 - ``chunk_dialog``        ：长对话按消息分段 + 段间冗余重叠（边界信息不切丢）
-- ``extract_chunk``       ：单段提取（重试 + 校验）
+- ``extract_chunk``       ：单段提取（重试 + 修复续写）
 - ``extract_structured_facts``：分段编排（短对话单次 / 长对话并行）+ 全失败降级
 - ``dedup_facts``         ：按 (category, key, value) 跨段去重
 - ``fallback_numeric_facts``：正则兜底 —— 含金额/编号/日期/百分比等精确 token 的
   原文句子原样入库（layer1 精确回忆防线：结构化提取改写会丢数字）
+- ``prune_redundant_verbatim``：R1 覆盖去重 —— token 全被结构化覆盖的兜底句不存
 
-设计说明：本类放 ``os_mem.utils``（非 core/infra）—— 它是纯数据变换工具，
-不编排业务流程（编排在 core/services/struc_mem_service），也不直接触碰
-存储/网络（LLM 回调注入）。常量与默认值来自 memory_settings 或显式参数。
+命名规范：本包遵守"变量不用纯缩写"硬规则（snake_case 全称，如 signature /
+tokens / kept_facts），新增代码保持同水准。常量与默认值来自 memory_settings 或
+显式参数。
 """
 
 from __future__ import annotations
@@ -28,11 +32,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pydantic import ValidationError
 
 from os_mem.configs.mem_settings import memory_settings
+from os_mem.extraction.tokens import fact_tokens
 from os_mem.infra.logger import get_logger
 from os_mem.models.mem_models import MemoryFact, MemoryFacts
-from os_mem.utils.fact_tokens import fact_tokens
 
-_logger = get_logger('os_mem.utils.fact_extraction')
+_logger = get_logger('os_mem.extraction.extractor')
 
 
 def _active_categories() -> frozenset[str]:
@@ -62,7 +66,7 @@ MAX_FALLBACK_FACTS = 60
 
 
 class FactExtractor:
-    """事实抽取链路的内聚工具类（线程安全：除 LLM 回调外无共享可变状态）。"""
+    """事实抽取链路的内聚执行器（线程安全：除 LLM 回调外无共享可变状态）。"""
 
     def __init__(self, complete: Callable[[str], str] | None = None) -> None:
         """complete：``(dialog_text) -> raw_json`` 的 LLM 回调；
@@ -78,20 +82,20 @@ class FactExtractor:
         """清洗并校验 LLM 返回；非法输入返回 []（触发上层重试/降级）。"""
         try:
             # 0. 清洗：去 markdown 代码块（```json ... ```）与首尾空白
-            raw = (raw_json or '').strip()
-            if raw.startswith('```'):
-                raw = raw.strip('`').strip()
-                if raw.lower().startswith('json'):
-                    raw = raw[4:].strip()
+            cleaned = (raw_json or '').strip()
+            if cleaned.startswith('```'):
+                cleaned = cleaned.strip('`').strip()
+                if cleaned.lower().startswith('json'):
+                    cleaned = cleaned[4:].strip()
             # 1. 解析 JSON
-            data = json.loads(raw)
-            _logger.debug(f'解析的 JSON 数据: {data}')
+            payload = json.loads(cleaned)
+            _logger.debug(f'解析的 JSON 数据: {payload}')
             # 2. Pydantic 校验结构：数组 [{fact,category,key,value,confidence},...]
             #    或 {"facts": [...]} dict 包装
-            if isinstance(data, list):
-                validated = MemoryFacts(facts=data)
+            if isinstance(payload, list):
+                validated = MemoryFacts(facts=payload)
             else:
-                validated = MemoryFacts(**data)
+                validated = MemoryFacts(**payload)
             # 3. 业务规则：分类白名单 + confidence ∈ [0,1]
             allowed = _active_categories()
             for fact in validated.facts:
@@ -100,8 +104,8 @@ class FactExtractor:
                 if not 0 <= fact.confidence <= 1:
                     raise ValueError(f'Confidence out of range: {fact.confidence}')
             return validated.facts
-        except (json.JSONDecodeError, ValidationError, ValueError) as e:
-            _logger.error(f'验证失败: {e}')
+        except (json.JSONDecodeError, ValidationError, ValueError) as error:
+            _logger.error(f'验证失败: {error}')
             _logger.debug(f'原始响应: {raw_json}')
             return []
 
@@ -124,21 +128,21 @@ class FactExtractor:
         )
         if len(dialog_text) <= max_chars:
             return [dialog_text]
-        msgs = dialog_text.split('\n')
+        messages = dialog_text.split('\n')
         chunks: list[str] = []
-        cur: list[str] = []
-        cur_len = 0
-        for m in msgs:
-            if cur and cur_len + len(m) > max_chars:
-                chunks.append('\n'.join(cur))
+        current_chunk: list[str] = []
+        current_length = 0
+        for message in messages:
+            if current_chunk and current_length + len(message) > max_chars:
+                chunks.append('\n'.join(current_chunk))
                 # 冗余：保留本段末尾 overlap 条消息作为下一段开头
-                keep = max(0, len(cur) - overlap)
-                cur = cur[keep:]
-                cur_len = sum(len(x) for x in cur)
-            cur.append(m)
-            cur_len += len(m)
-        if cur:
-            chunks.append('\n'.join(cur))
+                overlap_keep = max(0, len(current_chunk) - overlap)
+                current_chunk = current_chunk[overlap_keep:]
+                current_length = sum(len(line) for line in current_chunk)
+            current_chunk.append(message)
+            current_length += len(message)
+        if current_chunk:
+            chunks.append('\n'.join(current_chunk))
         return chunks
 
     # ------------------------------------------------------------------ #
@@ -148,10 +152,10 @@ class FactExtractor:
         self,
         complete: Callable[[str], str] | None = None,
     ) -> Callable[[str], str]:
-        fn = complete or self._complete
-        if fn is None:
+        complete_fn = complete or self._complete
+        if complete_fn is None:
             raise ValueError('FactExtractor 需要 LLM complete 回调（构造或调用时传入）')
-        return fn
+        return complete_fn
 
     def extract_chunk(
         self,
@@ -166,37 +170,37 @@ class FactExtractor:
         能力，则先尝试让模型**修复/续写**该 JSON（秒级），修复仍失败才整段重提取。
         避免每次截断都触发 1-3 分钟的整段重新提取。
         """
-        fn = self._resolve_complete(complete)
-        repair_fn = getattr(fn, 'repair', None)
+        complete_fn = self._resolve_complete(complete)
+        repair_callback = getattr(complete_fn, 'repair', None)
         for attempt in range(retries):
             try:
-                raw_json = fn(text)
+                raw_json = complete_fn(text)
                 facts = self.validate_response(raw_json)
                 if facts:
                     return facts
                 # 非空但解析失败：尝试 repair 续写（若回调支持）
-                if raw_json and raw_json.strip() and repair_fn is not None:
+                if raw_json and raw_json.strip() and repair_callback is not None:
                     try:
                         _logger.warning(
                             f'第 {attempt + 1} 次输出解析失败，尝试 repair 续写 '
                             f'（len={len(raw_json)}）...'
                         )
-                        repaired = repair_fn(raw_json)
-                        repaired_facts = self.validate_response(repaired)
+                        repaired_json = repair_callback(raw_json)
+                        repaired_facts = self.validate_response(repaired_json)
                         if repaired_facts:
                             _logger.info(
                                 f'repair 成功: {len(repaired_facts)} 条'
                                 f'（原始 len={len(raw_json)}'
-                                f' → 修复 len={len(repaired)}）'
+                                f' → 修复 len={len(repaired_json)}）'
                             )
                             return repaired_facts
                         _logger.warning('repair 输出仍解析失败，回退整段重试')
-                    except Exception as e:
-                        _logger.error(f'repair 调用失败，回退整段重试: {e}')
+                    except Exception as error:
+                        _logger.error(f'repair 调用失败，回退整段重试: {error}')
                 else:
                     _logger.warning(f'第 {attempt + 1} 次提取验证失败，整段重试中...')
-            except Exception as e:
-                _logger.error(f'Attempt {attempt + 1} failed: {e}')
+            except Exception as error:
+                _logger.error(f'Attempt {attempt + 1} failed: {error}')
         return []
 
     def extract_structured_facts(
@@ -222,15 +226,15 @@ class FactExtractor:
         # 长对话：分段提取，每段独立调用 LLM（并行），结果合并去重
         all_facts: list[MemoryFact] = []
         _logger.info(f'分段提取开始: {len(chunks)} 段（并行 {min(4, len(chunks))} 路）')
-        with ThreadPoolExecutor(max_workers=min(4, len(chunks))) as pool:
-            futures = {
-                pool.submit(self.extract_chunk, chunk, retries, complete): i
-                for i, chunk in enumerate(chunks, 1)
+        with ThreadPoolExecutor(max_workers=min(4, len(chunks))) as executor:
+            future_map = {
+                executor.submit(self.extract_chunk, chunk, retries, complete): index
+                for index, chunk in enumerate(chunks, 1)
             }
-            for fut in as_completed(futures):
-                i = futures[fut]
-                _logger.info(f'提取分段 {i}/{len(chunks)} 完成')
-                all_facts.extend(fut.result())
+            for future in as_completed(future_map):
+                chunk_index = future_map[future]
+                _logger.info(f'提取分段 {chunk_index}/{len(chunks)} 完成')
+                all_facts.extend(future.result())
         deduped = self.dedup_facts(all_facts)
         if not deduped:
             _logger.error('全部分段提取失败，降级存储原始对话')
@@ -256,14 +260,14 @@ class FactExtractor:
     @staticmethod
     def dedup_facts(facts: list[MemoryFact]) -> list[MemoryFact]:
         """按 (category, key, value) 去重（分段重叠会导致重复提取）。"""
-        seen = set()
+        seen_signatures: set[tuple[str, str, str]] = set()
         result: list[MemoryFact] = []
-        for f in facts:
-            sig = (f.category, f.key, f.value)
-            if sig in seen:
+        for fact in facts:
+            signature = (fact.category, fact.key, fact.value)
+            if signature in seen_signatures:
                 continue
-            seen.add(sig)
-            result.append(f)
+            seen_signatures.add(signature)
+            result.append(fact)
         return result
 
     # ------------------------------------------------------------------ #
@@ -281,50 +285,54 @@ class FactExtractor:
         捞出来作为 verbatim 事实，保证数字类信息不因提取遗漏而丢失。
         """
         facts: list[MemoryFact] = []
-        seen: set = set()
+        seen_prefixes: set[str] = set()
         for line in dialog_text.split('\n'):
             line = line.strip()
             if not line:
                 continue
-            content = line
+            message_content = line
             try:
-                obj = json.loads(line)
-                if isinstance(obj, dict) and obj.get('content'):
-                    content = obj['content']
-                elif isinstance(obj, list):
-                    content = ' '.join(
-                        str(x.get('content', '')) for x in obj if isinstance(x, dict)
+                message_obj = json.loads(line)
+                if isinstance(message_obj, dict) and message_obj.get('content'):
+                    message_content = message_obj['content']
+                elif isinstance(message_obj, list):
+                    message_content = ' '.join(
+                        str(item.get('content', ''))
+                        for item in message_obj
+                        if isinstance(item, dict)
                     )
             except Exception:
                 pass
             # 按句末标点拆句，逐句判断是否含关键数值 token
-            sentences = re.split(r'(?<=[.!?。！？])\s+', content)
-            for sent in sentences:
-                sent = sent.strip()
-                if len(sent) < 8 or len(sent) > 600:
+            sentences = re.split(r'(?<=[.!?。！？])\s+', message_content)
+            for sentence in sentences:
+                sentence = sentence.strip()
+                if len(sentence) < 8 or len(sentence) > 600:
                     continue
-                if not _NUMERIC_TOKENS.search(sent):
+                if not _NUMERIC_TOKENS.search(sentence):
                     continue
-                sig = sent[:120]
-                if sig in seen:
+                signature = sentence[:120]
+                if signature in seen_prefixes:
                     continue
-                seen.add(sig)
+                seen_prefixes.add(signature)
                 category = (
                     'finance'
-                    if re.search(r'\$\s?\d|%|\b\d{4}-\d{4}-\d{4}-\d{4}\b', sent)
+                    if re.search(
+                        r'\$\s?\d|%|\b\d{4}-\d{4}-\d{4}-\d{4}\b', sentence
+                    )
                     else 'other'
                 )
                 # key 用内容指纹而非聚合的 'verbatim_record'：多条兜底句共享一个
                 # key 会在 (user, key) 冲突 upsert 时互相覆盖（库里只留最后一条，
                 # 其余全部丢失——曾导致 13/17/20 的关键数字句在入库后被消灭）。
                 # 内容指纹：同句重跑同 key（幂等覆盖），异句不同 key（互不踩踏）。
-                digest = hashlib.sha1(sent.encode('utf-8')).hexdigest()[:12]
+                digest = hashlib.sha1(sentence.encode('utf-8')).hexdigest()[:12]
                 facts.append(
                     MemoryFact(
-                        fact=sent,
+                        fact=sentence,
                         category=category,
                         key=f'verbatim_{digest}',
-                        value=sent,
+                        value=sentence,
                         confidence=0.85,
                     )
                 )
@@ -348,15 +356,15 @@ class FactExtractor:
         """
         if not llm_facts:
             return fallback_facts
-        if any(f.key == 'raw_conversation' for f in llm_facts):
+        if any(fact.key == 'raw_conversation' for fact in llm_facts):
             return fallback_facts
         structured_tokens: set[str] = set()
-        for f in llm_facts:
-            structured_tokens |= fact_tokens(f'{f.fact} {f.value or ""}')
-        kept: list[MemoryFact] = []
-        for f in fallback_facts:
-            toks = fact_tokens(f'{f.fact} {f.value or ""}')
-            if toks and toks <= structured_tokens:
+        for fact in llm_facts:
+            structured_tokens |= fact_tokens(f'{fact.fact} {fact.value or ""}')
+        kept_facts: list[MemoryFact] = []
+        for fact in fallback_facts:
+            tokens = fact_tokens(f'{fact.fact} {fact.value or ""}')
+            if tokens and tokens <= structured_tokens:
                 continue
-            kept.append(f)
-        return kept
+            kept_facts.append(fact)
+        return kept_facts

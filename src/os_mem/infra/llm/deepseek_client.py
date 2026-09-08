@@ -6,7 +6,7 @@
   空 content 时按指数退避重试（与具体任务无关的基础可靠性）。
 - 任务侧内容（如事实提取的 ``SYSTEM_PROMPT``、消息拼装、业务级重试/解析）
   一律不在本模块内 —— 事实提取的 prompt 与适配见
-  ``os_mem.utils.extract_prompt``（把任意满足 ``ChatClient`` 的实例适配成
+  ``os_mem.extraction.prompt``（把任意满足 ``ChatClient`` 的实例适配成
   提取链路需要的 ``complete(dialog_text)`` 回调）。
 
 实例化入口在 ``os_mem.infra.llm.factory``：本实现注册为 ``deepseek``，

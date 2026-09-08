@@ -37,15 +37,19 @@ src/os_mem/         记忆系统核心（import 前缀 os_mem.）——不依赖
 │   ├── mem_provider/          Provider 实现：base_provider / struct_provider / full_provider
 │   ├── services/              业务服务：struc_mem_service / conv_meta_service / note_mem_service
 │   ├── state_machine.py       不可逆线性状态机（PENDING→…→COMPLETED / FAILED）
-│   ├── generator.py / guide/  抽取辅助 / 实现指南骨架
+│   ├── retrieval_strategies.py 检索注入策略链（单一职责策略、无 Enable 开关）
+│   ├── guide/                 实现指南骨架：sanitizer（日志脱敏）
 ├── entries/mem_models.py      SQLModel 表：Message(conv_messages) / StructuredMemory(struct_memories) / ConversationMeta(conv_meta)
+├── extraction/                记忆提取域（2026-09-08 迁自 utils）：
+│                              extractor(FactExtractor：校验/分段/去重/兜底/R1 剪枝)
+│                              / prompt(任务 prompt+LLM 适配) / tokens(数值口径)
 ├── infra/
 │   ├── storage/               mem_storage(SQLite 引擎) / vec_storage(Milvus mem_os) / vectorizer(DashScope embedding)
 │   ├── retriever/             SimpleBM25 / RankBM25
-│   ├── llm/llm_client.py      提取 LLM（SYSTEM_PROMPT 强约束 + 空返回重试）
+│   ├── llm/                   base_client(ChatClient 契约) / deepseek_client / factory / failover
 │   ├── logger/  p2check/      日志 / PII 脱敏（mask_pii / has_pii）
 ├── models/mem_models.py       Conversation / Memory / MemoryFact 等运行时模型
-├── utils/fact_extraction.py   FactExtractor：校验/分段/去重/数字兜底/编排（提取逻辑唯一入口）
+├── utils/prompt_fp.py         通用工具：prompt 指纹（提取域已迁至 extraction/）
 ├── provider.py                MemoryProvider 契约 + build_memory_provider 注册表(base|struct|full)
 src/testing/       评测管理侧（import 前缀 testing.）——纯管理：DB 模型 / 看板 API
 ├── db/
