@@ -18,9 +18,14 @@ from testing.db import init_db
 # Absolute imports keep `python -m testing.api.main` working; the
 # package-relative fallback keeps uvicorn testing.api.main:app working too.
 try:
-    from .routes import runs_router, cases_router, stats_router
+    from .routes import runs_router, cases_router, stats_router, memories_router
 except ImportError:
-    from testing.api.routes import runs_router, cases_router, stats_router  # type: ignore[no-redef]
+    from testing.api.routes import (  # type: ignore[no-redef]
+        runs_router,
+        cases_router,
+        stats_router,
+        memories_router,
+    )
 
 _ROOT = Path(__file__).resolve().parents[3]
 # 只使用 Vite 构建产物（frontend/dist），由 React+TS 前端输出
@@ -47,6 +52,7 @@ def on_startup() -> None:
 app.include_router(runs_router)
 app.include_router(cases_router)
 app.include_router(stats_router)
+app.include_router(memories_router)
 
 
 @app.get("/health")

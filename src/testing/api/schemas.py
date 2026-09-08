@@ -289,3 +289,90 @@ class DashboardStats(BaseModel):
     recent_runs: list[RunSummary]  # noqa: F821 - defined above, forward-ref string accepted by pydantic v2
     trend: list[TrendPoint]
     by_category: list[CategoryStat]
+
+
+# ---------- Memory admin schemas (memories.db 管理, 见 docs/方案-EvalView记忆管理.md) ----------
+class MemoryUserSummary(BaseModel):
+    """用户级记忆摘要（struct_memories / conv_messages / conv_meta 三表聚合）。"""
+
+    user_id: str
+    fact_count: int = 0
+    categories: dict[str, int] = {}  # category -> 事实数
+    message_count: int = 0  # conv_messages 原文条数
+    session_count: int = 0  # conv_meta 会话行数
+    conv_status: dict[str, int] = {}  # status -> 会话数（PENDING/COMPLETED/...）
+    latest_activity: UtcDateTime | None = None  # 最近一次事实写入
+
+
+class MemoryFactItem(BaseModel):
+    """一条结构化记忆（struct_memories 行；时间戳 naive UTC 输出带 +00:00）。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    user_id: str
+    fact: str
+    previous_fact: str = ""
+    category: str
+    key: str
+    value: str
+    confidence: float
+    source_conversation_id: str = ""
+    source_chunk_id: str = ""
+    created_at: UtcDateTime
+    updated_at: UtcDateTime
+
+
+class MemoryFactListResponse(BaseModel):
+    items: list[MemoryFactItem]
+    total: int
+
+
+class MemoryMessageItem(BaseModel):
+    """conv_messages 原文行（只读）。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    seq: int
+    content: str
+    contains_pii: bool = False
+    masked_text: str = ""
+    create_at: UtcDateTime
+
+
+class FactCreateRequest(BaseModel):
+    """手动新增/覆盖事实（(user, category, key) 同键即覆盖旧值 + previous_fact 归档）。"""
+
+    category: str
+    key: str
+    fact: str
+    value: str
+    confidence: float = 0.8
+    source_conversation_id: str = ""
+    source_chunk_id: str = ""
+
+
+class FactUpdateRequest(BaseModel):
+    """编辑事实：只允许 fact/value/confidence（身份字段 category/key 不可经此修改）。"""
+
+    fact: str | None = None
+    value: str | None = None
+    confidence: float | None = None
+
+
+class ClearUserRequest(BaseModel):
+    """清空用户记忆；reset_conv_meta=True 同时重置 ingest 门禁（下次可重提取）。"""
+
+    reset_conv_meta: bool = False
+
+
+class MemWriteResponse(BaseModel):
+    """写操作统一信封：sqlite 是否成功；projection = synced | failed | skipped。"""
+
+    operation: str
+    sqlite: bool = True
+    projection: str = "skipped"  # synced | failed | skipped
+    warning: str | None = None
+    user_id: str | None = None
+    fact_id: str | None = None
+    affected: int | None = None  # 删除/清空/重建的条数（按操作语义）
