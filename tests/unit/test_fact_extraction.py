@@ -304,3 +304,68 @@ class TestRepairFlow:
         assert len(out) == 1
         assert out[0].key == "email"
         assert len(fake.calls) == 2  # 两次整段调用
+
+
+# ------------------------------------------------------------------ #
+#  prune_redundant_verbatim（R1：兜底句与结构化事实做 token 覆盖去重）
+# ------------------------------------------------------------------ #
+class TestPruneRedundantVerbatim:
+    def test_fully_covered_fallback_dropped(self) -> None:
+        """数值全被结构化覆盖 → 兜底句不存（重复信息，无负收益）。"""
+        llm = [_fact("用户 IRA 余额为 $248,500", key="balance", value="$248,500")]
+        fallback = [
+            _fact("The rollover IRA has $248,500.", key="verbatim_abc", value="x")
+        ]
+        out = FactExtractor.prune_redundant_verbatim(fallback, llm)
+        assert out == []
+
+    def test_unique_carrier_kept(self) -> None:
+        """结构化未覆盖的唯一数值 → 兜底句保留（保险语义）。"""
+        llm = [_fact("用户 IRA 余额为 $248,500", key="balance", value="$248,500")]
+        fallback = [
+            _fact(
+                "Traditional IRA has $127,845 in Fidelity.",
+                key="verbatim_abc",
+                value="x",
+            )
+        ]
+        out = FactExtractor.prune_redundant_verbatim(fallback, llm)
+        assert len(out) == 1
+        assert out[0].fact == fallback[0].fact
+
+    def test_partially_covered_fallback_kept(self) -> None:
+        """句中含结构化未覆盖的数值 → 保留整句（打包句里常有独立信息）。"""
+        llm = [
+            _fact("User purchased a laptop for $1,899", key="laptop", value="$1,899")
+        ]
+        fallback = [
+            _fact(
+                "Laptop $1,899, supplies $340, and insurance $1,200.",
+                key="verbatim_abc",
+                value="x",
+            )
+        ]
+        out = FactExtractor.prune_redundant_verbatim(fallback, llm)
+        assert len(out) == 1  # 340/1200 未被结构化覆盖 → 整句保留
+
+    def test_empty_llm_facts_keeps_all(self) -> None:
+        fallback = [_fact("Balance is $127,845.", key="verbatim_abc", value="x")]
+        out = FactExtractor.prune_redundant_verbatim(fallback, [])
+        assert len(out) == 1
+
+    def test_degrade_raw_conversation_skips_prune(self) -> None:
+        """LLM 整体失败降级为 raw_conversation（value=整段原文）→ 不剪枝，兜底照存。"""
+        llm = [
+            _fact(
+                "原始对话: $248,500 and $127,845 ...",
+                category="other",
+                key="raw_conversation",
+                value="整段对话含 $248,500 与 $127,845 ...",
+            )
+        ]
+        fallback = [
+            _fact("Balance is $127,845.", key="verbatim_abc", value="x"),
+            _fact("IRA has $248,500.", key="verbatim_def", value="x"),
+        ]
+        out = FactExtractor.prune_redundant_verbatim(fallback, llm)
+        assert len(out) == 2

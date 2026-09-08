@@ -30,6 +30,7 @@ from pydantic import ValidationError
 from os_mem.configs.mem_settings import memory_settings
 from os_mem.infra.logger import get_logger
 from os_mem.models.mem_models import MemoryFact, MemoryFacts
+from os_mem.utils.fact_tokens import fact_tokens
 
 _logger = get_logger('os_mem.utils.fact_extraction')
 
@@ -330,3 +331,32 @@ class FactExtractor:
                 if len(facts) >= max_facts:
                     return facts
         return facts
+
+    @staticmethod
+    def prune_redundant_verbatim(
+        fallback_facts: list[MemoryFact],
+        llm_facts: list[MemoryFact],
+    ) -> list[MemoryFact]:
+        """R1 覆盖去重：verbatim 数值 token 全被 LLM 结构化事实覆盖 → 不存。
+
+        兜底是"结构化漏提数字"的保险——只应保结构化**没覆盖**的信息。若一句兜底
+        句里的数值全部已由结构化事实表达（同一 token 集合），该句不提供新信息，
+        丢弃（安全：删的只是重复信息，唯一载体不受影响，无负收益）。
+
+        降级保护：LLM 提取整体失败时 llm_facts 是 ``raw_conversation`` 原文降级
+        （value=整段对话，token 覆盖一切）——此时不做剪枝，兜底照存（保险语义）。
+        """
+        if not llm_facts:
+            return fallback_facts
+        if any(f.key == 'raw_conversation' for f in llm_facts):
+            return fallback_facts
+        structured_tokens: set[str] = set()
+        for f in llm_facts:
+            structured_tokens |= fact_tokens(f'{f.fact} {f.value or ""}')
+        kept: list[MemoryFact] = []
+        for f in fallback_facts:
+            toks = fact_tokens(f'{f.fact} {f.value or ""}')
+            if toks and toks <= structured_tokens:
+                continue
+            kept.append(f)
+        return kept

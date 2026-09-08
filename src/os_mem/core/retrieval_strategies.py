@@ -25,6 +25,8 @@ from __future__ import annotations
 import re
 from typing import Any, Protocol
 
+from os_mem.utils.fact_tokens import fact_tokens
+
 # fetch 放大取回系数：候选 = top_k * N，再经策略链收敛回 top_k（无条件生效）
 RETRIEVAL_FETCH_MULTIPLIER = 3
 
@@ -32,9 +34,8 @@ RETRIEVAL_FETCH_MULTIPLIER = 3
 VERBATIM_MIN_RATIO = 1 / 3
 
 # ---------------------------------------------------------------------- #
-#  噪声与数值 token 口径（与 tests/eval/judge/impl/assert_judger.py 期望信息点
-#  口径保持一致；os_mem 不得 import tests，故此处私有复制——改动判分 token 规则
-#  时须同步本文件与 tests/audit_run_attribution.py）
+#  噪声判定（verbatim 专属，留本文件）；数值 token 口径见
+#  os_mem.utils.fact_tokens（共享，与提取侧 R1 覆盖去重同源）
 # ---------------------------------------------------------------------- #
 # 疑问句/口语碎片（如 "So it would be $30 instead of $35?" / "okay" 等）
 _VERBATIM_NOISE = re.compile(
@@ -48,33 +49,6 @@ _VERBATIM_NOISE = re.compile(
 # 比较/调整句标记：句子在对比两个值（过程性中间值/纠错），非定论句
 # （例：case 20 "$308.75 instead of $617.50 for that week"）
 _VERBATIM_ADJUST = re.compile(r'\binstead of\b|\brather than\b', re.IGNORECASE)
-
-_AMOUNT_RE = re.compile(r'\$\s?\d{1,3}(?:,\d{3})+(?:\.\d+)?|\$\s?\d+(?:\.\d+)?')
-_CODE_RE = re.compile(r'\b[A-Z]{1,8}-?\d{2,}[A-Za-z0-9-]*\b', re.IGNORECASE)
-_CARD_RE = re.compile(r'\b\d{4,}(?:[-\s]\d{4,}){1,}\b')
-_NUM4_RE = re.compile(r'(?<!\d)\d{4,}(?!\d)')
-_TOKEN_NORM = re.compile(r'[\s,$%_\'"-]+')
-
-
-def _norm_token(s: str) -> str:
-    return _TOKEN_NORM.sub('', s).lower()
-
-
-def _fact_tokens(text: str) -> set[str]:
-    """从 fact 文本抽取可核验数值 token（金额/编号/卡片/≥4 位数字），归一化去重。"""
-    out: set[str] = set()
-    for m in _AMOUNT_RE.finditer(text):
-        out.add(_norm_token(m.group(0)))
-    t = _AMOUNT_RE.sub(' ', text)
-    for m in _CODE_RE.finditer(t):
-        out.add(_norm_token(m.group(0)))
-    t = _CODE_RE.sub(' ', t)
-    for m in _CARD_RE.finditer(t):
-        out.add(_norm_token(m.group(0)))
-    t = _CARD_RE.sub(' ', t)
-    for n in _NUM4_RE.findall(t):
-        out.add(_norm_token(n))
-    return out
 
 
 def _is_verbatim_noise(fact: str) -> bool:
@@ -90,7 +64,7 @@ def _is_verbatim(hit: dict[str, Any]) -> bool:
 
 def _hit_tokens(hit: dict[str, Any]) -> set[str]:
     fact = hit.get('fact') or ''
-    return _fact_tokens(f'{fact} {hit.get("value") or ""}')
+    return fact_tokens(f'{fact} {hit.get("value") or ""}')
 
 
 class RetrievalStrategy(Protocol):
