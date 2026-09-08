@@ -12,7 +12,9 @@
 | 现状 hardcode | 位置 | 行为 |
 |---|---|---|
 | allowed category 枚举（prompt 提示） | `extract_prompt.py` SYSTEM_PROMPT L43-45 | LLM 只从 10 类里选 |
-| 候选 key 参考（prompt 提示，按 category） | `extract_prompt.py` SYSTEM_PROMPT L49-63 | ~45 个参考 key，LLM 可自拟 |
+| 提取规则 3：key 定义 inline 示例 | `extract_prompt.py` SYSTEM_PROMPT L46 | `'email', 'seat_preference', 'checking_account_number'` 写死在规则文本里，与词表双份维护会漂移 |
+| 提取规则 3：候选 key 参考（按 category） | `extract_prompt.py` SYSTEM_PROMPT L49-63 | ~45 个参考 key，LLM 可自拟 |
+| 提取规则 3：key 行为约束（稳定可复用/禁近义）+ 自拟条款 | `extract_prompt.py` SYSTEM_PROMPT L47-48、L63 | 「同一概念只允许一个 key…禁止近义新 key」= 指令层；「列表之外可自拟」= 词表外的出口 |
 | `ALLOWED_CATEGORIES` 硬白名单（校验） | `fact_extraction.py` L36-47（validate_response L97） | **category 出界 → ValueError → 整批返回 [] → 丢事实** |
 
 **数据证据（2026-09-08 探针，memories.db 1130 行）**：非 verbatim 的 LLM key 608 行 =
@@ -65,17 +67,27 @@ fact_key_catalog         -- category 内候选 key 词表
 
 ### 3.2 提取 prompt 读表驱动（模板与数据分离）
 
-`extract_prompt.py` 的 SYSTEM_PROMPT 重构为**静态模板 + 两个占位段**：
+`extract_prompt.py` 的 SYSTEM_PROMPT 重构为**静态模板 + 数据段渲染**。其中提取规则 3
+拆成三层，各司其职：
 
 ```
-SYSTEM_PROMPT（模板）：
+SYSTEM_PROMPT（模板，指令层固定）：
   ...
-  ## 提取规则
   2. category 必须从以下列表选取：{categories_section}
-  3. key 是字段名... 候选 key 参考（按 category）：{keys_section}
-  列表之外... 不得为同一事实生成多个近义 key。
+  3. key 是字段名（示例见候选表）。
+     **key 必须稳定且可复用**：同一概念只允许一个 key，全程复用，不得为同一件事的
+     不同说法发明新 key。
+     候选 key 参考（按 category）：{keys_section}
+     列表之外的场景可自拟 key，但必须语义精确且同类复用；禁止为同一事实生成多个近义 key。
   ...
 ```
+
+| 规则 3 组成 | 归属 | 处理 |
+|---|---|---|
+| key 行为约束（稳定可复用/禁近义/自拟条款） | **指令层** | 保留在静态模板（行为规则与数据无关，不应随词表漂移）；词表=规则的数据支撑（推荐+校验），两者互补 |
+| inline 示例 key（'email'/'seat_preference'/…） | **词表层** | **删除硬编码示例**：key 语义已由词表 name_zh/aliases 承载，示例写死会与词表双份维护漂移 |
+| 候选 key 参考列表 | **词表层** | 由 `{keys_section}` 占位读表渲染（active 词条，双语提示） |
+| allowed category | **词表层** | 由 `{categories_section}` 占位读表渲染 |
 
 - `build_extract_messages(dialog_text)` 调用时读表渲染两段：
   - `categories_section` = active category 的 `name_en（name_zh）` 列表；
@@ -86,6 +98,8 @@ SYSTEM_PROMPT（模板）：
 - `{max_facts}` 占位保留（test_prompt_fp 依赖模板含该占位）。
 - category/key 内部仍是英文规范 id —— **LLM 输出不变**（prompt 只是帮助它在中文
   对话里联想规范 id）。
+- **自拟 key 出口保留**（规则 3 允许词表外自拟）：新概念不被词表卡死、不漏事实；
+  自拟 key 落入「未收录 warning」观察清单（§3.3），运营反哺词表（§7.2 闭环）。
 
 ### 3.3 校验读表（ALLOWED_CATEGORIES 去硬编码）
 
@@ -192,5 +206,6 @@ HTTP 路由/前端本轮不做（二期），先提供窗口方法 + 单测。
 | B. 表结构 | category+key 两张表 **vs** 单表 | **两张**（category 是 key 的分组维度且自身需校验白名单/双语/启停，职责不同） |
 | C. key 校验强度 | 未收录 key 仅 warning **vs** reject 强制收敛 | **warning**（reject 会整批丢事实；词表未收录≠无效） |
 | D. seed 范围 | prompt 枚举+复用≥2 次自动收录 **vs** 纯手工精修 | **自动收录+人工审定 name/别名**（472 个单次 key 一律不收） |
+| E. 自拟 key 语义（规则 3 出口） | 保留自拟 + 未收录 warning 反哺词表 **vs** 严格禁用自拟（key 必须 ∈ 词表） | **保留自拟**（词表不可能穷尽新概念；禁用会导致 LLM 硬凑/漏事实；自拟只是命名层噪音，有 warning+运营闭环兜底） |
 
 拍板后本方案状态转定稿，按 §5 批 1→3 实施。
