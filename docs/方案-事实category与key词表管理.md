@@ -1,8 +1,8 @@
-# 方案：事实 category 受控词表（已实施）→ key 词表下一期
+# 方案：事实 category 受控词表（已实施）→ key 词表（已评估：layer1 阶段不立项）
 
 日期：2026-09-08 · 状态：**已实施（category 期，2026-09-08）**：批1-3 完成（表/seed/vocab/
 prompt 渲染/校验读表/admin 窗口），单测 133 passed 全绿，真实 memories.db 已幂等建表+seed；
-key 词表（`fact_key_catalog`）**缓行待用户再想**，本期不建表
+key 词表（`fact_key_catalog`）**评估更新见 §1 下一期段（2026-09-09：layer1 阶段不立项）**
 关联：`os_mem/extraction/prompt.py`、`os_mem/extraction/extractor.py`、提取链路、`os_mem/admin`
 上游：方案-记忆更新收敛 §4.5（key 规范化）、§11（串键覆盖）；评测数据 93% key 单次出现（发散）
 
@@ -24,9 +24,27 @@ key 词表（`fact_key_catalog`）**缓行待用户再想**，本期不建表
 - verbatim 指纹 key 体系（`verbatim_<sha12>`）与词表无关。
 - EvalView 词表管理前端（二期）。
 
-**下一期（key 词表，用户已定策略，未定表/时间）**：`fact_key_catalog` 表；
-seed=prompt 枚举直接收录 active + **实测复用≥2 次 key 进观察列表**（非 active）；
-未收录输出 key 仅 warning；词表外保留自拟 + warning 反哺（用户拍板 E）。
+**下一期（key 词表）——评估更新 2026-09-09：layer1 阶段不立项，转 layer2/3 基线后再定**
+
+原设想（用户已定策略）：`fact_key_catalog` 表；seed=prompt 枚举直接收录 active +
+实测复用≥2 次 key 进观察列表（非 active）；未收录输出 key 仅 warning；词表外保留自拟 +
+warning 反哺。
+
+**评估结论与数据**（基于提取侧成果落地后，R1 覆盖去重 + 事实句英文化 + 兜底盲区，
+见 git 559b081/8dbb335 与 方案-检索注入verbatim区分策略.md）：
+- 对 E2 全英文新库逐期望 token 检测"多行多 key 冗余"：基本**单值单 key**；命中的多行
+  多为**不同语义恰好同数值**（11 的 45000 = 薪资/储蓄/售房三笔不同事实，不可合并）或
+  **子串误报**（5000 ∈ 15000）；仅 18 的 Freedom 2045 出现一例同义双 key
+  （rollover_ira_fund / rollover_ira_investment）——零星冗余，可用 prompt 纪律 +
+  key 观察列表反哺低成本压住，无需整套表实体化；
+- 当前 layer1 分数墙（覆盖漏 31 / 回答漏 6，见 §八-续）与 key 无关，key 实体化救不了；
+- key 实体化的真正买单场景 = **layer2/3 多会话跨会话收敛**：新会话换 key 提同一事实 →
+  `(user, key)` upsert 收敛失效 → 旧值残留/双版本并存；届时需要的是 §10 来源锚定/新旧
+  判定机制，词表只是地基之一。
+
+**落地路径（若 layer2/3 基线确认需要）**：先最小形态——key 观察列表（实测复用≥2 次）
++ 词表外输出 warning 反哺（提取校验处小改，清缓存重提取验证），再决定是否整套
+`fact_key_catalog` 实体化。
 
 ## 2. 设计（定稿）
 
@@ -116,7 +134,7 @@ HTTP 路由/前端二期（可先用 CLI/python -c 调窗口管理）。
 
 | 项 | 结论 |
 |---|---|
-| 范围 | **本期仅 category**；key 词表缓行（用户再想），未来 `fact_key_catalog` |
+| 范围 | **本期仅 category**；key 词表经评估 2026-09-09 定为 **layer1 阶段不立项**（见 §1 下一期段），layer2/3 基线后再定 |
 | 中英文语义 | key/category 保持英文规范 id；词条 name_zh/name_en 双语（prompt 双语提示） |
 | 表结构 | category+key 两张表方向保留；**本期只建 fact_category** |
 | 校验强度 | 未收录 key（未来）仅 warning；category 维持强校验（出界 ValueError）不变 |
