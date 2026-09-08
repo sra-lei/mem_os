@@ -3,4 +3,5 @@ export { Button } from './Button';
 export { Skeleton, TableSkeleton } from './Skeleton';
 export { RateBar } from './RateBar';
 export { ToastProvider, useToast, useAsyncErrorToast } from './Toast';
+export { Modal, ConfirmModal } from './Modal';
 export { AppErrorBoundary } from './ErrorBoundary';

@@ -536,3 +536,87 @@
   color: var(--color-text-primary);
 }
 
+
+/* ==========================================================================
+ * EvalView 记忆管理（Memory Admin）专用样式
+ * 全部基于 vars.css design tokens；复用现有 .table/.card/.modal 组件类。
+ * ======================================================================== */
+.mem-fact__text {
+  display: block;
+  line-height: 1.5;
+  color: var(--color-text-primary);
+}
+.mem-fact__prev {
+  display: block;
+  font-size: var(--fs-xs);
+  color: var(--color-text-tertiary);
+  margin-top: 3px;
+}
+.mem-fact__src {
+  display: block;
+  font-size: var(--fs-xs);
+  color: var(--color-text-tertiary);
+  margin-top: 3px;
+}
+.mem-danger-row {
+  display: flex;
+  gap: var(--s-4);
+  align-items: center;
+  padding: var(--s-3) 0;
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+.mem-danger-row:last-child {
+  border-bottom: none;
+}
+.mem-card__desc {
+  margin: 3px 0 0;
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  max-width: 720px;
+}
+.mem-msg-list {
+  max-height: 60vh;
+  overflow: auto;
+  white-space: normal;
+}
+.mem-msg-line {
+  display: flex;
+  gap: var(--s-3);
+  padding: 5px 0;
+  border-bottom: 1px dashed var(--color-border);
+}
+.mem-msg-line:last-child {
+  border-bottom: none;
+}
+.mem-msg-seq {
+  flex: none;
+  width: 36px;
+  text-align: right;
+  color: var(--color-text-tertiary);
+  font-size: var(--fs-xs);
+  padding-top: 2px;
+}
+.mem-msg-body {
+  flex: 1;
+  line-height: 1.6;
+  word-break: break-word;
+}
+.mem-form__textarea {
+  resize: vertical;
+  min-height: 66px;
+  width: 100%;
+  font-family: inherit;
+  line-height: 1.6;
+}
+.mem-overview-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-5);
+  align-items: center;
+  padding: var(--s-3) var(--s-4);
+  color: var(--color-text-secondary);
+  font-size: var(--fs-sm);
+}
+.mem-overview-strip .num {
+  margin-left: 2px;
+}

@@ -8,6 +8,8 @@ import { RunDetailPage } from './RunDetailPage';
 import { CasesPage } from './CasesPage';
 import { CaseDetailPage } from './CaseDetailPage';
 import { CaseHistoryPage } from './CaseHistoryPage';
+import { MemoryUsersPage } from './MemoryUsersPage';
+import { MemoryUserPage } from './MemoryUserPage';
 
 export function ErrorPage({ code = 404, title = '页面不存在' }: { code?: number; title?: string }) {
   return (
@@ -77,6 +79,22 @@ export const routes: RouteObject[] = [
     element: (
       <AppLayout>
         <CaseHistoryPage />
+      </AppLayout>
+    ),
+  },
+  {
+    path: '/memories',
+    element: (
+      <AppLayout>
+        <MemoryUsersPage />
+      </AppLayout>
+    ),
+  },
+  {
+    path: '/memories/:userId',
+    element: (
+      <AppLayout>
+        <MemoryUserPage />
       </AppLayout>
     ),
   },

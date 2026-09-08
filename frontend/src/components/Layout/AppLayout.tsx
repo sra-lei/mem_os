@@ -26,6 +26,13 @@ const NAV: Array<{ to: string; label: string; icon: ReactNode }> = [
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 3h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M14 3v6h6"/></svg>
     ),
   },
+  {
+    to: '/memories',
+    label: '记忆管理',
+    icon: (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3a7 7 0 0 1 7 7c0 2.5-1 4-2 5.5V19a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1v-3.5C6 14 5 12.5 5 10a7 7 0 0 1 7-7z"/><path d="M9 22h6"/><path d="M9 19h6"/></svg>
+    ),
+  },
 ];
 
 /** 整个应用的外层壳：Header + Side Nav + Outlet。 */

@@ -60,7 +60,7 @@ async function readJsonSafe<T = unknown>(res: Response): Promise<T> {
 }
 
 async function request<T>(
-  method: 'GET' | 'POST' | 'PUT' | 'DELETE',
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
   path: string,
   options: {
     query?: Record<string, unknown>;
@@ -140,6 +140,8 @@ export const apiClient = {
     request<T>('POST', path, { body, ...opts }),
   put: <T>(path: string, body?: unknown, opts: { signal?: AbortSignal } = {}) =>
     request<T>('PUT', path, { body, ...opts }),
+  patch: <T>(path: string, body?: unknown, opts: { signal?: AbortSignal } = {}) =>
+    request<T>('PATCH', path, { body, ...opts }),
   delete: <T>(path: string, query?: Record<string, unknown>, opts: { signal?: AbortSignal } = {}) =>
     request<T>('DELETE', path, { query, ...opts }),
 };
