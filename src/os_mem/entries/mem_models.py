@@ -114,3 +114,21 @@ class ConversationMeta(SQLModel, table=True):
 
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+# ========== 事实 category 词表（fact_category）：提取侧 allowed category 受控词表 ==========
+# 设计见 docs/方案-事实category与key词表管理.md：
+# - 英文规范 id（category）为内部稳定标识；name_zh/name_en 双语名供 prompt 渲染与展示；
+# - active=0 停用：不进 prompt 渲染；提取校验（validate_response）视其为非法 category
+#   （与现状 ALLOWED_CATEGORIES 硬白名单语义一致，只是来源表化）；
+# - seed 幂等由 init_db 完成（空表才灌入），词表演进走管理窗口（os_mem.admin）。
+class FactCategory(SQLModel, table=True):
+    __tablename__: str = "fact_category"
+
+    category: str = Field(primary_key=True, max_length=32)
+    name_zh: str = Field(default="")
+    name_en: str = Field(default="")
+    sort: int = Field(default=0)
+    active: int = Field(default=1)  # 0=停用
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)

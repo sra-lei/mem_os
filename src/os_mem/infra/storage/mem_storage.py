@@ -50,6 +50,7 @@ class MemoryDatabase:
         # （testing.db.models）也注册在里面，绝不能建进记忆库
         from os_mem.entries.mem_models import (
             ConversationMeta,
+            FactCategory,
             Message,
             StructuredMemory,
         )
@@ -60,6 +61,7 @@ class MemoryDatabase:
                 Message.__table__,
                 StructuredMemory.__table__,
                 ConversationMeta.__table__,
+                FactCategory.__table__,
             ],
         )
         # 老库迁移：conv_memories 已被 conv_meta 取代（方案1 合并），数据不需迁移 → 删表
@@ -68,7 +70,26 @@ class MemoryDatabase:
         # 老库迁移：conv_messages 补 seq/previous_content 列并回填 + 建唯一索引
         # （create_all 只建新表，不会给已存在表加列，故需显式 ALTER）
         self._migrate_conv_messages(engine)
+        self._seed_fact_category(engine)
         self._logger.info(f"Database initialized at {self.db_path}")
+
+    @staticmethod
+    def _seed_fact_category(engine: Engine) -> None:
+        """幂等 seed：fact_category 空表才灌入内置 10 类双语种子（不覆盖人工演进）。"""
+        from sqlmodel import Session, func, select
+
+        from os_mem.entries.mem_models import FactCategory
+        from os_mem.vocab import CATEGORY_SEED
+
+        with Session(engine) as session:
+            exists = session.exec(
+                select(func.count()).select_from(FactCategory)
+            ).one()
+            if exists:
+                return
+            for item in CATEGORY_SEED:
+                session.add(FactCategory(**item))
+            session.commit()
 
     @staticmethod
     def _migrate_conv_messages(engine: Engine) -> None:
