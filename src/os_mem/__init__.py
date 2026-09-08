@@ -6,6 +6,7 @@ Package layout:
     ├── __init__.py   对外公共 API：仅 provider 契约 + 两个评测必需能力
     ├── provider.py   MemoryProvider 协议 / register_provider / build_memory_provider（对外主接口）
     ├── memory.py     Memory 数据模型（契约签名的一部分）
+    ├── admin/        管理窗口：外部管理面（EvalView/testing）操作记忆数据的唯一受控入口
     ├── core/         core 记忆实现：generator（提取）/ retriever（检索）/ prompt（注入）/ stub
     ├── storage/      存储层：独立库 os_mem.db 与评测 memos.db 解耦
     └── guide/        用户实现指南骨架：sanitizer（日志脱敏，需求文档 1.1）
