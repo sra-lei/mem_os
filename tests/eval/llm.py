@@ -11,6 +11,7 @@ OpenAI-compatible API) can be dropped in later without changing the caller.
 """
 from __future__ import annotations
 
+import os
 import time
 from dataclasses import dataclass
 from typing import Protocol
@@ -79,12 +80,20 @@ class DeepSeekLLM:
         # 否则模型会当成"自己说过的话"而非"用户的记忆"，容易忽视/否认
         system = SYSTEM_PROMPT + f"\n\n{memories}"
         t0 = time.monotonic()
+        # answer 默认开思考（与原始基线口径一致：合成/消歧类用例依赖推理，实测 09
+        # 0.2→0.8；成本 ~12s/例可接受）。EVAL_ANSWER_THINKING=0 可关（实验对照用）。
+        # 注意：提取侧永远关思考（简单结构化任务）；提取侧的新旧更新/冲突解决属
+        # 系统设计（实体/版本语义），不得依赖模型推理来掩盖。
+        request_kwargs = {}
+        if os.environ.get("EVAL_ANSWER_THINKING") == "0":
+            request_kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
         resp = self.client.chat.completions.create(
             model=settings.DEEPSEEK_MODEL,
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
+            **request_kwargs,
         )
         usage = resp.usage
         _logger.info(
