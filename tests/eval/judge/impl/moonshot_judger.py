@@ -114,17 +114,16 @@ class MoonshotJudgeProvider(JudgeProvider):
             )
             usage = getattr(completion, 'usage', None)
             _logger.info(
-                '[llm] chat ok role=judge provider=moonshot model=%s ms=%d '
-                'throttle_ms=%d in_tok=%s out_tok=%s',
-                settings.MOONSHOT_MODEL,
-                int((time.monotonic() - t0) * 1000),
-                wait_ms,
-                getattr(usage, 'prompt_tokens', None),
-                getattr(usage, 'completion_tokens', None),
+                f'[llm] chat ok role=judge provider=moonshot '
+                f'model={settings.MOONSHOT_MODEL} '
+                f'ms={int((time.monotonic() - t0) * 1000)} '
+                f'throttle_ms={wait_ms} '
+                f'in_tok={getattr(usage, "prompt_tokens", None)} '
+                f'out_tok={getattr(usage, "completion_tokens", None)}'
             )
             content = completion.choices[0].message.content
             # 判分原始输出进日志（脱敏后；原 print 直接暴露 reasoning，可能含用户号码）
-            _logger.info('[judge] 输出: %s', mask_pii(content or ''))
+            _logger.info(f'[judge] 输出: {mask_pii(content or "")}')
 
             obj: dict[str, Any]= json.loads(content or "")
             return JudgeResult(**obj)

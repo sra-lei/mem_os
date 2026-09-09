@@ -88,12 +88,11 @@ class DeepSeekLLM:
         )
         usage = resp.usage
         _logger.info(
-            '[llm] chat ok role=answer provider=deepseek model=%s ms=%d '
-            'in_tok=%s out_tok=%s',
-            settings.DEEPSEEK_MODEL,
-            int((time.monotonic() - t0) * 1000),
-            getattr(usage, 'prompt_tokens', 0) or 0,
-            getattr(usage, 'completion_tokens', 0) or 0,
+            f'[llm] chat ok role=answer provider=deepseek '
+            f'model={settings.DEEPSEEK_MODEL} '
+            f'ms={int((time.monotonic() - t0) * 1000)} '
+            f'in_tok={getattr(usage, "prompt_tokens", 0) or 0} '
+            f'out_tok={getattr(usage, "completion_tokens", 0) or 0}'
         )
         return Completion(
             text=resp.choices[0].message.content or "",
