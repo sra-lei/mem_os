@@ -156,6 +156,31 @@ class TestChunkDialog:
             for msg in prev.split("\n")[-5:]:
                 assert msg in nxt
 
+    def test_message_count_dimension_triggers_split(self) -> None:
+        """字符数不超但消息条数超限 → 仍切分（双维 OR 语义，防消息密集短句漏网）。"""
+        lines = [f"短消息{i}" for i in range(1, 60)]  # ~600 字符 < 默认 4500
+        chunks = FactExtractor.chunk_dialog(
+            "\n".join(lines), max_chars=10000, max_msgs=20, overlap=3
+        )
+        assert len(chunks) >= 3
+        for prev, nxt in zip(chunks, chunks[1:]):
+            for msg in prev.split("\n")[-3:]:
+                assert msg in nxt
+
+    def test_both_within_limits_single_chunk(self) -> None:
+        lines = [f"短消息{i}" for i in range(1, 10)]
+        chunks = FactExtractor.chunk_dialog(
+            "\n".join(lines), max_chars=10000, max_msgs=50, overlap=3
+        )
+        assert chunks == ["\n".join(lines)]
+
+    def test_default_settings_dual_dim(self) -> None:
+        """默认参数（4500 字符 / 35 条消息）下：30 条短消息不分段、40 条即分段。"""
+        small = "\n".join(f"第{i}条短消息" for i in range(1, 31))
+        assert len(FactExtractor.chunk_dialog(small)) == 1
+        big = "\n".join(f"第{i}条短消息" for i in range(1, 41))
+        assert len(FactExtractor.chunk_dialog(big)) >= 2
+
 
 # ------------------------------------------------------------------ #
 #  extract_structured_facts（注入 fake complete，无真实 LLM）

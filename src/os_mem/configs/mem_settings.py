@@ -26,11 +26,15 @@ class MemorySetting(BaseSettings):
     DEEPSEEK_TEMPERATURE: float = Field(default=0.1, ge=0, le=1)
     DEEPSEEK_TIMEOUT: int = Field(default=60, ge=1)
     DEEPSEEK_MAX_TOKENS: int = Field(default=8192, ge=1)
-    # 长对话分段提取参数（按当前模型上下文限制调整；换模型需复核）
-    DEEPSEEK_EXTRACT_MAX_CHARS: int = Field(default=8000, ge=256)  # 每段最大字符数
-    DEEPSEEK_EXTRACT_OVERLAP: int = Field(default=5, ge=0)  # 段间重叠消息条数（冗余）
-    # 单次提取事实数量上限（防失控保险；正常提取靠 prompt 质量标准引导，碰不到）
-    DEEPSEEK_EXTRACT_MAX_FACTS: int = Field(default=100, ge=1)
+    # 长对话分段提取参数（2026-09-09 双维化：字符数 OR 消息数任一超限即切。
+    # 真正瓶颈是输出预算（由事实条数≈消息数决定），非输入长度；
+    # 初值保守估计，观测修复后按真实 usage 校准——见方案：事实提取鲁棒性与成本优化）
+    DEEPSEEK_EXTRACT_MAX_CHARS: int = Field(default=4500, ge=256)  # 每段最大字符数
+    DEEPSEEK_EXTRACT_MAX_MSGS: int = Field(default=35, ge=1)  # 每段最大消息条数
+    DEEPSEEK_EXTRACT_OVERLAP: int = Field(default=3, ge=0)  # 段间重叠消息条数（冗余）
+    # 单次（每段）提取事实数量上限（防失控保险；分段后每段 60 足够，
+    # 100×~70tok≈7000 逼近 8192 输出预算无收尾余量）
+    DEEPSEEK_EXTRACT_MAX_FACTS: int = Field(default=60, ge=1)
 
     # ------------------------------------------------------------------
     # LLM client 编排（os_mem.infra.llm 工厂，见 infra/llm/factory.py）

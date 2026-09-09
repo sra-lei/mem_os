@@ -149,24 +149,35 @@ class FactExtractor:
     def chunk_dialog(
         dialog_text: str,
         max_chars: int | None = None,
+        max_msgs: int | None = None,
         overlap: int | None = None,
     ) -> list[str]:
-        """按消息分段：每段 < max_chars 字符，段间保留 overlap 条消息冗余。
+        """按消息分段（双维：字符数 OR 消息数任一超限即切），段间保留冗余。
 
         冗余保证落在分段边界附近的信息不被切掉，两边都能提取到。
+        双维依据（方案：事实提取鲁棒性与成本优化 §3.2）：输出预算 8192 tokens
+        是硬约束，而产出需求由「事实条数 ≈ 消息数」决定——仅按字符切会漏掉
+        「消息密集但每条短」的段（layer2 中长会话崩因），仅按消息切会漏掉
+        「少数超长消息」；两维 OR 语义使两盲区互不穿透。
         """
         max_chars = max_chars or memory_settings.DEEPSEEK_EXTRACT_MAX_CHARS
+        max_msgs = (
+            max_msgs if max_msgs is not None else memory_settings.DEEPSEEK_EXTRACT_MAX_MSGS
+        )
         overlap = (
             overlap if overlap is not None else memory_settings.DEEPSEEK_EXTRACT_OVERLAP
         )
-        if len(dialog_text) <= max_chars:
-            return [dialog_text]
         messages = dialog_text.split('\n')
+        if len(dialog_text) <= max_chars and len(messages) <= max_msgs:
+            return [dialog_text]
         chunks: list[str] = []
         current_chunk: list[str] = []
         current_length = 0
         for message in messages:
-            if current_chunk and current_length + len(message) > max_chars:
+            if current_chunk and (
+                current_length + len(message) > max_chars
+                or len(current_chunk) >= max_msgs
+            ):
                 chunks.append('\n'.join(current_chunk))
                 # 冗余：保留本段末尾 overlap 条消息作为下一段开头
                 overlap_keep = max(0, len(current_chunk) - overlap)
