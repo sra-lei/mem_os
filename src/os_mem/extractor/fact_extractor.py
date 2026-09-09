@@ -1,7 +1,8 @@
 """事实提取执行器（FactExtractor）—— 结构化记忆提取链路的确定性内聚封装。
 
-归属：``os_mem.extraction`` 记忆提取域（2026-09-08 由 os_mem.utils 迁入，
-见 AGENTS.md 目录地图）。定位：被编排的**领域执行器**——不属 utils 小工具
+归属：``os_mem.extractor`` 记忆提取域（2026-09-08 由 os_mem.utils 迁入
+extraction/，2026-09-09 包更名 extraction→extractor 且 extractor.py 更名
+fact_extractor.py，见 AGENTS.md 目录地图）。定位：被编排的**领域执行器**——不属 utils 小工具
 （它是提取链路核心），也不属 core 业务编排（编排在 core/services/struc_mem_service，
 存储/网络副作用为零，LLM 通过注入的 ``complete(text) -> raw_json`` 回调（旧路径，
 测试/AB 脚本用）或 provider 自愈 caller（``extract(dialog_text, *, validate)``
@@ -15,14 +16,16 @@
   docs/方案-提取任务与LLM模型画像解耦.md）
 - ``extract_structured_facts``：分段编排（短对话单次 / 长对话并行）+ 全失败降级
   （可注入 provider 自愈 caller：每段走 ``caller.extract(dialog_text, *, validate)``）
-- ``dedup_facts``         ：按 (category, key, value) 跨段去重
+- ``dedup_facts``         ：按 (category, key, value) 跨段去重（实现收拢于
+  ``os_mem.extractor.common.dedup_facts``，单一实现源）
 - ``fallback_numeric_facts``：正则兜底 —— 含金额/编号/日期/百分比等精确 token 的
   原文句子原样入库（layer1 精确回忆防线：结构化提取改写会丢数字）
 - ``prune_redundant_verbatim``：R1 覆盖去重 —— token 全被结构化覆盖的兜底句不存
 
 命名规范：本包遵守"变量不用纯缩写"硬规则（snake_case 全称，如 signature /
 tokens / kept_facts），新增代码保持同水准。常量与默认值来自 memory_settings 或
-显式参数。
+显式参数；与 caller 共享的纯函数/常量（split_text_midpoint / dedup_facts /
+MAX_TRUNC_SPLIT_DEPTH / 统计 keys）见 ``os_mem.extractor.common``。
 """
 
 from __future__ import annotations
@@ -38,16 +41,18 @@ from typing import Any
 from pydantic import ValidationError
 
 from os_mem.configs.mem_settings import memory_settings
-from os_mem.extraction.callers import (
-    _ExtractionCore,
+from os_mem.extractor.callers import _ExtractionCore
+from os_mem.extractor.common import (
+    EXTRACTION_STATS_KEYS,
+    MAX_TRUNC_SPLIT_DEPTH,
     dedup_facts as _dedup_facts_by_signature,
     split_text_midpoint as _split_text_midpoint,
 )
-from os_mem.extraction.tokens import fact_tokens
+from os_mem.extractor.tokens import fact_tokens
 from os_mem.infra.logger import get_logger
 from os_mem.models.mem_models import MemoryFact, MemoryFacts
 
-_logger = get_logger('os_mem.extraction.extractor')
+_logger = get_logger('os_mem.extractor.fact_extractor')
 
 
 def _active_categories() -> frozenset[str]:
@@ -76,8 +81,8 @@ _NUMERIC_TOKENS = re.compile(
     r'\b[A-Z][a-z]+ \d{4}\b'
 )
 MAX_FALLBACK_FACTS = 60
-# 截断空返回的对半切段递归最大层数（每层把段再切半，≤1 层已足够收敛输出预算）
-MAX_TRUNC_SPLIT_DEPTH = 1
+# 截断空返回的对半切段递归最大层数 MAX_TRUNC_SPLIT_DEPTH（=1）单一实现源在
+# os_mem.extractor.common，caller 侧（callers.py）与任务侧（extract_chunk）同值共用
 
 
 def _complete_to_generate(
@@ -112,15 +117,12 @@ class FactExtractor:
         """
         self._complete = complete
         # 提取过程统计（线程安全；供编排方按「调用前后快照差」记账，见
-        # StrucMemService 提取账日志 —— 校准分段参数/成本记账用）
+        # StrucMemService 提取账日志 —— 校准分段参数/成本记账用）。
+        # keys：恢复循环 5 keys 共享自 os_mem.extractor.common.EXTRACTION_STATS_KEYS，
+        # degrade_rows 属任务层语义由本实例追加
         self._stats_lock = threading.Lock()
         self._stats: dict[str, int] = {
-            'llm_calls': 0,
-            'trunc_empties': 0,
-            'split_recursions': 0,
-            'repair_calls': 0,
-            'repair_ok': 0,
-            'degrade_rows': 0,
+            key: 0 for key in (*EXTRACTION_STATS_KEYS, 'degrade_rows')
         }
 
     # ------------------------------------------------------------------ #
@@ -239,8 +241,8 @@ class FactExtractor:
         """消息中点对半切（截断空返回的切段递归用）。
 
         少于 2 条消息或任一侧为空 → None（不可切）。
-        实现收敛于 ``os_mem.extraction.callers.split_text_midpoint``
-        （provider caller 侧同构共用，单一实现防漂移）。
+        实现收拢于 ``os_mem.extractor.common.split_text_midpoint``（caller
+        切段递归与任务侧共用同一实现，单一实现防漂移）。
         """
         return _split_text_midpoint(text)
 
@@ -253,7 +255,7 @@ class FactExtractor:
         """对单个分段提取结构化事实（薄委托兼容层——恢复策略已迁至 caller 核心）。
 
         恢复循环（repair 续写 / 截断对半切段 / 整段重试）自 2026-09-09 起收敛于
-        ``os_mem.extraction.callers._ExtractionCore``（等价迁移：不优化不改行为，
+        ``os_mem.extractor.callers._ExtractionCore``（等价迁移：不优化不改行为，
         日志文案逐字一致，见 docs/方案-提取任务与LLM模型画像解耦.md §2 v2 / §4
         步骤 1-2）。本方法保留旧签名作为兼容层：把 ``complete`` 的鸭子能力
         （``outcome`` / ``__call__`` / ``repair``，缺哪个退哪个）包成低层
@@ -420,8 +422,8 @@ class FactExtractor:
     def dedup_facts(facts: list[MemoryFact]) -> list[MemoryFact]:
         """按 (category, key, value) 去重（分段重叠会导致重复提取）。
 
-        实现收敛于 ``os_mem.extraction.callers.dedup_facts``（provider caller 侧
-        切段合并共用，单一实现防漂移）。
+        实现收拢于 ``os_mem.extractor.common.dedup_facts``（caller 切段合并与
+        任务侧跨段去重共用同一实现，单一实现防漂移）。
         """
         return _dedup_facts_by_signature(facts)
 

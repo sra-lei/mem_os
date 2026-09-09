@@ -3,7 +3,7 @@
 
 The evaluation framework (src/testing) depends ONLY on this contract.
 Implementations: base/struct/full providers under os_mem.core.mem_provider
-（struct 走 extraction 提取域 + 双写 + 混合检索，见 AGENTS.md §3/§4）。
+（struct 走 extractor 提取域 + 双写 + 混合检索，见 AGENTS.md §3/§4）。
 """
 from __future__ import annotations
 

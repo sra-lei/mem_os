@@ -3,12 +3,12 @@
 日期：2026-09-09（v2 修正：恢复策略收敛于 provider 内部，v1 于同日废弃）· 状态：**待评审（未实施）**
 关联：docs/实验记录-提取prompt精简AB-2026-09-09.md（prompt 迭代暴露：prompt 优化与模型强绑定）；
 docs/方案-事实提取鲁棒性与成本优化.md（截断/成本修复已完成）；layer2 评测 run_98df5b6320 / run_7a2a539541。
-涉及：`os_mem.extraction`（extractor / prompt）+ `os_mem.infra.llm`（base_client / deepseek_client / factory）
+涉及：`os_mem.extractor`（fact_extractor / prompt / callers）+ `os_mem.infra.llm`（base_client / deepseek_client / factory）
 + `configs/mem_settings`（提取 knobs）。
 
 ## 1. 问题：伪分离——client 与 prompt 表面解耦，实为 deepseek 专属耦合
 
-现状分层：通用 client（`infra/llm`）与任务 prompt（`extraction/prompt.py`）分文件，看似干净，
+现状分层：通用 client（`infra/llm`）与任务 prompt（`extractor/prompt.py`）分文件，看似干净，
 但适配层偷偷硬编码 deepseek-v4-flash 假设，换模型会静默退化：
 
 | # | 硬编码点 | 现状代码 | 换模型后果 |
@@ -91,7 +91,7 @@ FactExtractor（任务语义 · 不变其责）
 
 ## 4. 实施步骤（先等价迁移、再策略搬家；分 commit，纯逻辑单测；不跑评测）
 
-1. 新增 `extraction/callers/`：`ExtractionCaller`/`CallResult` 契约 + deepseek caller 首版
+1. 新增 `extractor/callers.py`：`ExtractionCaller`/`CallResult` 契约 + deepseek caller 首版
    ——把现 `_ExtractComplete`（prompt 拼装 + chat 调用）迁入，行为不变；
    FactExtractor 先经薄适配层调用（任务侧接口暂保持，便于等价验证）
 2. 策略搬家：`extract_chunk` 内 repair/切段分支删除，恢复循环移入 deepseek caller

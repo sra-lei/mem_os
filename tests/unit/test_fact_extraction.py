@@ -1,4 +1,4 @@
-"""FactExtractor（os_mem/extraction/extractor.py）单元测试。
+"""FactExtractor（os_mem/extractor/fact_extractor.py）单元测试。
 
 覆盖事实抽取工具类的全部确定性逻辑（不依赖真实 LLM / Milvus）：
   - ``validate_response``     ：LLM 返回清洗（markdown / 包装格式）与校验
@@ -18,7 +18,7 @@ import json
 
 import pytest
 
-from os_mem.extraction.extractor import FactExtractor
+from os_mem.extractor.fact_extractor import FactExtractor
 from os_mem.models.mem_models import MemoryFact
 
 

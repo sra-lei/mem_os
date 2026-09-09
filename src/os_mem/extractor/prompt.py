@@ -1,7 +1,8 @@
 """事实提取任务 prompt 与 LLM 适配 —— 与通用客户端解耦。
 
-归属：``os_mem.extraction`` 记忆提取域（2026-09-08 由 os_mem.utils 迁入），
-与 extractor.py / tokens.py 同域内聚；通用指纹工具仍留 ``os_mem.utils.prompt_fp``。
+归属：``os_mem.extractor`` 记忆提取域（2026-09-08 由 os_mem.utils 迁入
+extraction/，2026-09-09 包更名 extraction→extractor），与 fact_extractor.py /
+callers.py / tokens.py 同域内聚；通用指纹工具仍留 ``os_mem.utils.prompt_fp``。
 
 职责划分（2026-09 重构，为接入 LLM 网关铺路）：
 - ``os_mem.infra.llm.deepseek_client.DeepSeekClient`` 是
@@ -153,7 +154,7 @@ def build_repair_messages(
 def build_extract_complete(client: ChatClient) -> Callable[[str], str]:
     """把通用 LLM client 适配为 ``FactExtractor`` 期望的提取回调（薄兼容层）。
 
-    「LLM 调用 + 恢复策略」已收敛至 ``os_mem.extraction.callers`` 的
+    「LLM 调用 + 恢复策略」已收敛至 ``os_mem.extractor.callers`` 的
     provider 自愈 caller（见 docs/方案-提取任务与LLM模型画像解耦.md §2 v2）——
     本函数返回的正是 ``DeepSeekExtractionCaller``：它具备旧 ``_ExtractComplete``
     的全部鸭子接口（``outcome`` / ``__call__`` / ``repair``，拼装仍用本模块的
@@ -161,7 +162,7 @@ def build_extract_complete(client: ChatClient) -> Callable[[str], str]:
     validate, retries) -> CallResult`` 契约。函数体内延迟 import callers 避免循环
     依赖（callers 顶层 import 本模块的 prompt 渲染，见模块头依赖方向说明）。
     """
-    from os_mem.extraction.callers import build_extraction_caller
+    from os_mem.extractor.callers import build_extraction_caller
 
     return build_extraction_caller(client)
 

@@ -1,12 +1,13 @@
 """数值 token 抽取（共享工具）—— 从事实文本抽取"可核验精确信息"token。
 
-归属：``os_mem.extraction`` 记忆提取域（2026-09-08 由 os_mem.utils 迁入）。
+归属：``os_mem.extractor`` 记忆提取域（2026-09-08 由 os_mem.utils 迁入
+extraction/，2026-09-09 包更名 extraction→extractor）。
 
 口径与判分（tests/eval/judge/impl/assert_judger.py）的期望信息点一致：
 金额 / 字母数字编号 / 长数字串 / ≥4 位纯数字，归一化（去 $ 千分位连字符，小写）。
 
 用途：
-- 提取侧（os_mem.extraction.extractor）：verbatim 兜底句与 LLM 结构化事实的
+- 提取侧（os_mem.extractor.fact_extractor）：verbatim 兜底句与 LLM 结构化事实的
   覆盖去重（R1：token 全被结构化覆盖的兜底句不存）；
 - 检索侧（os_mem.core.retrieval_strategies）：verbatim 信息唯一性判定/冗余过滤；
 - 判分侧与审计工具各保留独立副本（分属 tests / 工具，注明同步义务）。

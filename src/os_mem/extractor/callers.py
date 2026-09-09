@@ -12,7 +12,7 @@ confidence 边界）由任务注入。分段编排/去重/verbatim 兜底/降级
   （generate / repair_fn / dedup_fn / split_fn / max_split_depth）由构造注入，
   供各 provider 内部策略拼装。
 - ``DeepSeekExtractionCaller``：deepseek 提供方首版 caller——prompt 拼装复用
-  ``os_mem.extraction.prompt`` 的 SYSTEM_PROMPT/REPAIR_PROMPT 渲染（词表/max_facts
+  ``os_mem.extractor.prompt`` 的 SYSTEM_PROMPT/REPAIR_PROMPT 渲染（词表/max_facts
   全部原样），generate 走 ``client.chat_outcome``（json_object 响应格式）。
 - ``build_extraction_caller(client)``：工厂（现阶段 single provider；多路注册表留待
   方案 §3 扩展）。
@@ -24,8 +24,9 @@ confidence 边界）由任务注入。分段编排/去重/verbatim 兜底/降级
 同样经此接口工作。
 
 依赖方向（无环）：callers → prompt → （configs / infra.llm.base_client / utils.prompt_fp）；
-extractor → callers；prompt 不反向 import extractor/callers（其兼容构造在函数体内延迟
-import，见 prompt.build_extract_complete）。
+callers / fact_extractor → common（共享纯函数/常量，common 不 import 包内其他模块）；
+fact_extractor → callers；prompt 不反向 import fact_extractor/callers（其兼容构造在
+函数体内延迟 import，见 prompt.build_extract_complete）。
 """
 
 from __future__ import annotations
@@ -33,29 +34,25 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from os_mem.extraction.prompt import build_extract_messages, build_repair_messages
+from os_mem.extractor.common import (
+    EXTRACTION_STATS_KEYS,
+    MAX_TRUNC_SPLIT_DEPTH,
+    dedup_facts,
+    split_text_midpoint,
+)
+from os_mem.extractor.prompt import build_extract_messages, build_repair_messages
 from os_mem.infra.llm.base_client import ChatClient, ChatOutcome
 from os_mem.infra.logger import get_logger
 
-_logger = get_logger('os_mem.extraction.callers')
-
-# 单段提取恢复循环的切段递归最大层数（与 extractor.MAX_TRUNC_SPLIT_DEPTH 现行值一致；
-# 每层把段再切半，≤1 层已足够收敛输出预算）
-MAX_TRUNC_SPLIT_DEPTH = 1
+_logger = get_logger('os_mem.extractor.callers')
 
 
 # ------------------------------------------------------------------ #
-#  契约与纯函数能力
+#  契约
 # ------------------------------------------------------------------ #
 def _empty_stats() -> dict[str, int]:
     """恢复循环遥测计数（keys 与 FactExtractor 实例计数一致；degrade_rows 属任务层）。"""
-    return {
-        'llm_calls': 0,
-        'trunc_empties': 0,
-        'split_recursions': 0,
-        'repair_calls': 0,
-        'repair_ok': 0,
-    }
+    return {key: 0 for key in EXTRACTION_STATS_KEYS}
 
 
 @dataclass
@@ -64,37 +61,6 @@ class CallResult:
 
     facts: list | None
     stats: dict[str, int] = field(default_factory=_empty_stats)
-
-
-def split_text_midpoint(text: str) -> tuple[str, str] | None:
-    """消息中点对半切（截断空返回的切段递归用）。
-
-    与 ``FactExtractor._split_text`` 逐行同构（callers 不得反向 import extractor
-    防环，故双实现；单测与代码评审须保持两侧同步）。少于 2 条消息或任一侧为空
-    → None（不可切）。
-    """
-    lines = text.split('\n')
-    if len(lines) < 2:
-        return None
-    mid = len(lines) // 2
-    left = '\n'.join(lines[:mid])
-    right = '\n'.join(lines[mid:])
-    if not left or not right:
-        return None
-    return left, right
-
-
-def dedup_facts(facts: list) -> list:
-    """按 (category, key, value) 去重（切段递归合并用；与 FactExtractor.dedup_facts 同构）。"""
-    seen_signatures: set[tuple[str, str, str]] = set()
-    result: list = []
-    for fact in facts:
-        signature = (fact.category, fact.key, fact.value)
-        if signature in seen_signatures:
-            continue
-        seen_signatures.add(signature)
-        result.append(fact)
-    return result
 
 
 # ------------------------------------------------------------------ #
@@ -249,7 +215,7 @@ class _ExtractionCore:
 #  DeepSeek 提供方 caller
 # ------------------------------------------------------------------ #
 class DeepSeekExtractionCaller:
-    """DeepSeek 自愈提取 caller：恢复策略=代码（prompt 数据仍来自 extraction.prompt）。
+    """DeepSeek 自愈提取 caller：恢复策略=代码（prompt 数据仍来自 extractor.prompt）。
 
     - ``extract(dialog_text, *, validate, retries=2)``：任务侧唯一入口
       → CallResult{facts|None, stats}；validate 由任务注入；
@@ -280,7 +246,7 @@ class DeepSeekExtractionCaller:
         facts, stats = self._core.extract(dialog_text, validate=validate, retries=retries)
         return CallResult(facts=facts, stats=stats)
 
-    # ---- 低层能力（prompt 拼装复用 extraction.prompt，渲染逻辑零改动）---- #
+    # ---- 低层能力（prompt 拼装复用 extractor.prompt，渲染逻辑零改动）---- #
     def _generate(self, dialog_text: str) -> tuple[str, str | None]:
         chat_outcome = getattr(self._client, 'chat_outcome', None)
         if chat_outcome is not None:
