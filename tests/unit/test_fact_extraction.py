@@ -402,6 +402,35 @@ class TestTruncationEmptyFlow:
 
 
 # ------------------------------------------------------------------ #
+#  降级切片（_degrade_fact ≤900 字符确定性切片，防撞 Milvus 1024 上限）
+# ------------------------------------------------------------------ #
+class TestDegradeSlicing:
+    def test_short_text_single_row(self) -> None:
+        text = "短对话内容"
+        out = FactExtractor._degrade_fact(text)
+        assert len(out) == 1
+        assert out[0].key == "raw_conversation"
+        assert out[0].value == text
+
+    def test_long_text_sliced_into_sequence(self) -> None:
+        text = "原始对话内容。" * 300  # 2400 字符 > 900 → 3 片
+        out = FactExtractor._degrade_fact(text)
+        keys = [f.key for f in out]
+        assert keys == ["raw_conversation", "raw_conversation_2", "raw_conversation_3"]
+        assert all(len(f.value) <= 900 for f in out)
+        assert "".join(f.value for f in out) == text
+        # 确定性：同输入重跑产出相同 key/value 集（投影删旧插新幂等）
+        again = FactExtractor._degrade_fact(text)
+        assert [(f.key, f.value) for f in again] == [(f.key, f.value) for f in out]
+
+    def test_boundary_900_exactly_single_row(self) -> None:
+        text = "x" * 900
+        out = FactExtractor._degrade_fact(text)
+        assert len(out) == 1
+        assert out[0].value == text
+
+
+# ------------------------------------------------------------------ #
 #  prune_redundant_verbatim（R1：兜底句与结构化事实做 token 覆盖去重）
 # ------------------------------------------------------------------ #
 class TestPruneRedundantVerbatim:

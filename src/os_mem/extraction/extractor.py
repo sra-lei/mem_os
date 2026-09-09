@@ -364,15 +364,44 @@ class FactExtractor:
 
     @staticmethod
     def _degrade_fact(dialog_text: str) -> list[MemoryFact]:
-        return [
-            MemoryFact(
-                fact=f'原始对话: {dialog_text[:200]}...',
-                category='other',
-                key='raw_conversation',
-                value=dialog_text,
-                confidence=0.1,
-            )
+        """全败降级：原始对话按 ≤900 字符确定性切片为多条 fact。
+
+        切片防线（方案：事实提取鲁棒性与成本优化 §3.3）：整段原文可到
+        5.5-7.9KB，超过 Milvus ``value`` varchar(1024) 上限——降级是
+        「LLM 全挂时保底写库」的路径，不能自己再炸向量写入。
+
+        900 < 1024 留 schema 余量；固定窗口切分 → 同会话重跑产出同 key 集
+        （raw_conversation / raw_conversation_2 / …），投影删旧插新幂等收敛。
+        SQLite 侧无长度限制，原文完整仍可审计（此防线只保护向量投影）。
+        """
+        slice_size = 900
+        if len(dialog_text) <= slice_size:
+            return [
+                MemoryFact(
+                    fact=f'原始对话: {dialog_text[:200]}...',
+                    category='other',
+                    key='raw_conversation',
+                    value=dialog_text,
+                    confidence=0.1,
+                )
+            ]
+        parts = [
+            dialog_text[index:index + slice_size]
+            for index in range(0, len(dialog_text), slice_size)
         ]
+        facts: list[MemoryFact] = []
+        for index, part in enumerate(parts, 1):
+            key = 'raw_conversation' if index == 1 else f'raw_conversation_{index}'
+            facts.append(
+                MemoryFact(
+                    fact=f'原始对话({index}/{len(parts)}): {part[:180]}...',
+                    category='other',
+                    key=key,
+                    value=part,
+                    confidence=0.1,
+                )
+            )
+        return facts
 
     # ------------------------------------------------------------------ #
     #  去重
@@ -476,7 +505,7 @@ class FactExtractor:
         """
         if not llm_facts:
             return fallback_facts
-        if any(fact.key == 'raw_conversation' for fact in llm_facts):
+        if any(fact.key.startswith('raw_conversation') for fact in llm_facts):
             return fallback_facts
         structured_tokens: set[str] = set()
         for fact in llm_facts:

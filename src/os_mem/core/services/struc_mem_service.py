@@ -137,11 +137,23 @@ class StructuredMemService:
         if on_stage:
             on_stage(STATUS_EXTRACTING)
         # LLM 结构化提取（分段/并行/降级，见 FactExtractor）
+        stats_before = _extractor.stats_snapshot()
         llm_facts: list[MemoryFact] = _extractor.extract_structured_facts(
             dialog_text,
             complete=self._extract_complete,
         )
         t_extract = time.perf_counter()
+        # 提取账（观测/校准/成本记账）：本次会话的调用·截断·repair·降级统计
+        extract_stats = _extractor.stats_delta(stats_before)
+        _logger.info(
+            f'  提取账: calls={extract_stats["llm_calls"]} '
+            f'截断空={extract_stats["trunc_empties"]} '
+            f'切段={extract_stats["split_recursions"]} '
+            f'repair={extract_stats["repair_calls"]}'
+            f'(成功 {extract_stats["repair_ok"]}) '
+            f'降级行={extract_stats["degrade_rows"]} '
+            f'{(t_extract - t0) * 1000:.0f}ms'
+        )
 
         # LLM 提取兜底：从原文把含金额/编号/日期/百分比等精确 token 的句子原样入库，
         # 避免结构化提取改写/省略精确数值（如 $2,400、CLM-2024-894327、2:30 PM）。
