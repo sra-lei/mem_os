@@ -48,6 +48,7 @@ from os_mem.extractor.common import (
     dedup_facts as _dedup_facts_by_signature,
     split_text_midpoint as _split_text_midpoint,
 )
+from os_mem.extractor.profile import ChunkCaps
 from os_mem.extractor.tokens import fact_tokens
 from os_mem.infra.logger import get_logger
 from os_mem.models.mem_models import MemoryFact, MemoryFacts
@@ -87,23 +88,30 @@ MAX_FALLBACK_FACTS = 60
 
 def _complete_to_generate(
     complete: Callable[[str], str],
-) -> Callable[[str], tuple[str, str | None]]:
-    """把旧 complete 鸭子接口包成恢复核心需要的低层 generate(text) -> (content, finish_reason)。
+) -> Callable[[str], tuple[str, str | None, tuple[int, int] | None]]:
+    """把旧 complete 鸭子接口包成恢复核心需要的低层 generate 三元组
+    (content, finish_reason, usage_tokens)。
 
-    优先走 ``outcome()``（带 finish_reason，length 截断可路由）；纯 ``__call__``
-    回调（无 outcome）→ finish_reason=None（旧整段重试语义，见 FakeComplete）。
+    优先走 ``outcome()``（带 finish_reason，length 截断可路由）；usage_tokens
+    恒 None——旧 complete 路径无 usage 口径，token 记账仅 caller 的
+    chat_outcome 路径提供。纯 ``__call__`` 回调（无 outcome）→
+    finish_reason=None（旧整段重试语义，见 FakeComplete）。
     """
     outcome_call = getattr(complete, 'outcome', None)
     if outcome_call is not None:
 
-        def _generate_with_outcome(text: str) -> tuple[str, str | None]:
+        def _generate_with_outcome(
+            text: str,
+        ) -> tuple[str, str | None, tuple[int, int] | None]:
             outcome = outcome_call(text)
-            return outcome.content, outcome.finish_reason
+            return outcome.content, outcome.finish_reason, None
 
         return _generate_with_outcome
 
-    def _generate_plain(text: str) -> tuple[str, str | None]:
-        return complete(text), None
+    def _generate_plain(
+        text: str,
+    ) -> tuple[str, str | None, tuple[int, int] | None]:
+        return complete(text), None, None
 
     return _generate_plain
 
@@ -118,8 +126,9 @@ class FactExtractor:
         self._complete = complete
         # 提取过程统计（线程安全；供编排方按「调用前后快照差」记账，见
         # StrucMemService 提取账日志 —— 校准分段参数/成本记账用）。
-        # keys：恢复循环 5 keys 共享自 os_mem.extractor.common.EXTRACTION_STATS_KEYS，
-        # degrade_rows 属任务层语义由本实例追加
+        # keys：恢复循环遥测共享自 os_mem.extractor.common.EXTRACTION_STATS_KEYS
+        # （llm_calls/trunc_empties/split_recursions/repair_calls/repair_ok +
+        # in_tokens/out_tokens token 记账），degrade_rows 属任务层语义由本实例追加
         self._stats_lock = threading.Lock()
         self._stats: dict[str, int] = {
             key: 0 for key in (*EXTRACTION_STATS_KEYS, 'degrade_rows')
@@ -261,7 +270,8 @@ class FactExtractor:
         （``outcome`` / ``__call__`` / ``repair``，缺哪个退哪个）包成低层
         ``generate`` 喂给核心，并把核心返回的遥测累加进实例计数
         （stats_snapshot/stats_delta 口径不变）。纯 ``__call__`` 无 outcome/repair
-        的 complete → generate 返回 (content, None)、repair_fn=None → 整段重试语义。
+        的 complete → generate 返回 (content, None, None)、repair_fn=None
+        → 整段重试语义。
         """
         complete_fn = self._resolve_complete(complete)
         core = _ExtractionCore(
@@ -311,6 +321,7 @@ class FactExtractor:
         retries: int = 2,
         complete: Callable[[str], str] | None = None,
         caller: Any | None = None,
+        chunk_caps: ChunkCaps | None = None,
     ) -> list[MemoryFact]:
         """对整段对话提取结构化事实（分段 + 并行 + 全失败降级）。
 
@@ -319,15 +330,27 @@ class FactExtractor:
         ``retries`` 默认 2 = 初始 1 次 + 至多 1 次整段重试（截断确定性已证，
         更多整段重试无信息增益，见方案：事实提取鲁棒性与成本优化）。
 
+        ``chunk_caps``：分段上限（字符/消息/overlap）——None → settings 现值
+        （ChunkCaps.from_settings()，默认路径与现状逐字节等价）；显式传入时
+        caller 与 complete 两条路径共用同一分段调用点（方案 §4 步骤 3：
+        分段上限改由 profile.chunk_caps 供给任务层）。
+
         提取回调二选一（2026-09-09 起 caller 优先；恢复策略=provider 内部代码，
         见 docs/方案-提取任务与LLM模型画像解耦.md §2 v2）：
         - ``caller``：provider 自愈提取 caller（满足 ``extract(dialog_text, *,
           validate, retries) -> CallResult`` 契约）——每段走 caller.extract，
           validate 由本任务注入（= validate_response），并把每段返回的 stats
-          累加进实例计数（stats_snapshot/delta 口径不变）；
+          累加进实例计数（stats_snapshot/delta 口径不变，含 in/out token 记账）；
         - ``complete``：旧回调路径（薄委托 extract_chunk，测试 / AB 脚本兼容）。
         """
-        chunks = self.chunk_dialog(dialog_text)
+        # 分段上限：入参优先，None → settings 现值（默认路径与现状逐字节等价）
+        chunk_caps = chunk_caps or ChunkCaps.from_settings()
+        chunks = self.chunk_dialog(
+            dialog_text,
+            max_chars=chunk_caps.max_chars,
+            max_msgs=chunk_caps.max_msgs,
+            overlap=chunk_caps.overlap,
+        )
         if len(chunks) <= 1:
             # 短对话：单次提取（原有重试 + 降级）
             if caller is not None:

@@ -283,6 +283,7 @@ def _flush_eval_case(holder: dict[str, Any]) -> None:
     import uuid
     from types import SimpleNamespace
 
+    from os_mem.configs.mem_settings import memory_settings
     from testing.services.store_service import get_store_service
 
     svc = get_store_service()
@@ -300,6 +301,9 @@ def _flush_eval_case(holder: dict[str, Any]) -> None:
                 'top_k': cfg.getoption('--top-k'),
                 'threshold': cfg.getoption('--threshold'),
                 'prompt_fingerprints': _prompt_fingerprints(),
+                # 提取模型画像（provider:model）——与 os_mem.extractor.profile 的
+                # 注册表 key 同口径，跑分可回溯当时提取画像/模型（方案 §4 步骤 4）
+                'extraction_profile': f'deepseek:{memory_settings.DEEPSEEK_MODEL}',
             },
             ensure_ascii=False,
         )

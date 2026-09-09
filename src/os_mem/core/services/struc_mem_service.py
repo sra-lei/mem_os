@@ -12,6 +12,7 @@ from os_mem.core.services.conv_meta_service import (
 )
 from os_mem.entries.mem_models import StructuredMemory
 from os_mem.extractor import FactExtractor, build_extraction_caller
+from os_mem.extractor.profile import resolve_extraction_profile
 from os_mem.infra.llm import ChatClient, get_llm_client
 from os_mem.infra.logger import get_logger
 from os_mem.infra.storage import (
@@ -39,8 +40,11 @@ class StructuredMemService:
     ) -> None:
         self.client = client
         # provider 自愈提取 caller（prompt/恢复策略见 os_mem/extractor/{callers,prompt}；
-        # validate 由 FactExtractor 注入——任务侧只见干净 extract 契约）
-        self._caller = build_extraction_caller(client)
+        # validate 由 FactExtractor 注入——任务侧只见干净 extract 契约）。
+        # 画像：resolve_extraction_profile()——显式注册条目优先，否则 settings 现值
+        # 默认画像（等价现状；max_facts 渲染进 prompt、chunk_caps 供任务层分段）。
+        self._profile = resolve_extraction_profile()
+        self._caller = build_extraction_caller(client, profile=self._profile)
         self.vectorizer = vectorizer
         self.vector_store = vector_store
 
@@ -137,14 +141,16 @@ class StructuredMemService:
 
         if on_stage:
             on_stage(STATUS_EXTRACTING)
-        # LLM 结构化提取（分段/并行/降级，见 FactExtractor；调用经 provider 自愈 caller）
+        # LLM 结构化提取（分段/并行/降级，见 FactExtractor；调用经 provider 自愈
+        # caller；分段上限取 profile.chunk_caps——默认 = settings 现值）
         stats_before = _extractor.stats_snapshot()
         llm_facts: list[MemoryFact] = _extractor.extract_structured_facts(
             dialog_text,
             caller=self._caller,
+            chunk_caps=self._profile.chunk_caps,
         )
         t_extract = time.perf_counter()
-        # 提取账（观测/校准/成本记账）：本次会话的调用·截断·repair·降级统计
+        # 提取账（观测/校准/成本记账）：本次会话的调用·截断·repair·降级·token 统计
         extract_stats = _extractor.stats_delta(stats_before)
         _logger.info(
             f'  提取账: calls={extract_stats["llm_calls"]} '
@@ -153,6 +159,8 @@ class StructuredMemService:
             f'repair={extract_stats["repair_calls"]}'
             f'(成功 {extract_stats["repair_ok"]}) '
             f'降级行={extract_stats["degrade_rows"]} '
+            f'in_tok={extract_stats["in_tokens"]} '
+            f'out_tok={extract_stats["out_tokens"]} '
             f'{(t_extract - t0) * 1000:.0f}ms'
         )
 

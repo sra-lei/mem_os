@@ -99,19 +99,27 @@ SYSTEM_PROMPT = """
 """
 
 
-def build_extract_messages(dialog_text: str) -> list[dict[str, str]]:
+def build_extract_messages(
+    dialog_text: str, *, max_facts: int | None = None
+) -> list[dict[str, str]]:
     """拼装事实提取的完整 messages（system 提示 + 待提取对话）。
 
     system 由静态模板渲染而成：
-    - ``{max_facts}``    → 单次提取事实上限（settings）；
+    - ``{max_facts}``    → 单次提取事实上限：入参优先，None → settings 现值
+      （默认路径行为不变；caller 侧按自身画像的 max_facts 传入，见 callers）；
     - ``{categories_section}`` → active category 双语列表（fact_category 词表，
       见 os_mem.vocab）——改词表（停用/增补）即改提示，不动代码。
     """
     from os_mem.vocab import render_categories_section
 
+    fact_limit = (
+        max_facts
+        if max_facts is not None
+        else memory_settings.DEEPSEEK_EXTRACT_MAX_FACTS
+    )
     system = (
         SYSTEM_PROMPT.replace(
-            '{max_facts}', str(memory_settings.DEEPSEEK_EXTRACT_MAX_FACTS)
+            '{max_facts}', str(fact_limit)
         ).replace(
             '{categories_section}', render_categories_section()
         )

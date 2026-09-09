@@ -22,13 +22,17 @@ extractor.py 曾各持一份逐行同构实现，靠单测/评审手工同步防
 from __future__ import annotations
 
 # 恢复循环遥测 keys（与 FactExtractor 实例计数一致；degrade_rows 属任务层，
-# 由 fact_extractor 实例计数在共享 keys 之外自行追加）
+# 由 fact_extractor 实例计数在共享 keys 之外自行追加）。
+# in_tokens / out_tokens：每次 generate 后由恢复核心按 usage 累计（None→0），
+# 递归/重试全路径自然计入——见 callers._ExtractionCore 与方案 §4 步骤 4 观测增强。
 EXTRACTION_STATS_KEYS = (
     'llm_calls',
     'trunc_empties',
     'split_recursions',
     'repair_calls',
     'repair_ok',
+    'in_tokens',
+    'out_tokens',
 )
 
 # 单段提取恢复循环的切段递归最大层数（每层把段再切半，≤1 层已足够收敛输出预算）
