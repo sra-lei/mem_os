@@ -13,10 +13,26 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 # OpenAI 兼容 messages（role/content 条目）
 type Message = dict[str, str]
+
+
+@dataclass
+class ChatOutcome:
+    """单次 chat 调用的完整结果——content 之外携带 finish_reason / usage，
+    供上层（事实提取）区分「输出预算截断」与「真偶发空返回」，避免盲目重试。
+
+    content 为字符串契约（空 = 无可用正文）；finish_reason 为
+    ``length``（输出预算截断）/ ``stop`` / None（无信息）等。
+    """
+
+    content: str
+    finish_reason: str | None = None
+    usage: Any | None = None
+
 
 
 class ChatClient(Protocol):

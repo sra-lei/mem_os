@@ -21,7 +21,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from os_mem.configs.mem_settings import memory_settings
-from os_mem.infra.llm.base_client import ChatClient
+from os_mem.infra.llm.base_client import ChatClient, ChatOutcome
 from os_mem.utils.prompt_fp import fingerprint
 
 # 提取任务系统提示：{max_facts} 为单次提取事实数量上限占位，调用时由
@@ -158,11 +158,28 @@ class _ExtractComplete:
         self._client = client
         self._response_format = {'type': 'json_object'}
 
-    def __call__(self, dialog_text: str) -> str:
-        return self._client.chat(
-            build_extract_messages(dialog_text),
-            response_format=self._response_format,
+    def outcome(self, dialog_text: str) -> ChatOutcome:
+        """带 finish_reason 的提取调用（截断路由需要）。
+
+        client 支持 ``chat_outcome`` 时返回完整 outcome（含 finish_reason，
+        length 截断可由 extractor 识别）；否则退回 ``chat`` 包一层
+        （无 finish 信息，退化为旧的重试语义）。
+        """
+        chat_outcome = getattr(self._client, 'chat_outcome', None)
+        if chat_outcome is not None:
+            return chat_outcome(
+                build_extract_messages(dialog_text),
+                response_format=self._response_format,
+            )
+        return ChatOutcome(
+            self._client.chat(
+                build_extract_messages(dialog_text),
+                response_format=self._response_format,
+            )
         )
+
+    def __call__(self, dialog_text: str) -> str:
+        return self.outcome(dialog_text).content
 
     def repair(self, partial_json: str) -> str:
         return self._client.chat(
