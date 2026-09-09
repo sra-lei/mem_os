@@ -167,3 +167,50 @@ routing `routing_number/daughter_routing_number`（同值 021000021）。
 - FactExtractor 职责不变（抽取）；StructuredMemService 的入库段改为调版本裁决。
 - 词表走 `fact_key` 表（仿 fact_category，os_mem.admin 管理窗口后续补）。
 - 符合既定分层：任务语义 / 确定性系统策略 / 模型数据画像——**裁决是系统策略，不是模型策略**。
+
+---
+
+## 8. D4-4 五例真实回放验证结果（2026-09-09）
+
+脚本 `scripts/d4_replay_5.py`（重置 10/11/12/17/20 → 仅提取入库 → 验库/验投影，不跑 judge）。
+
+### 8.1 机制层：完全正确 ✅
+
+- 版本链在全部 5 例触发：10 例 11 superseded / 7 historical；12 例 11 / 2；11 例 4；20 例 5。
+- 跨会话同属性 latest-wins 正确，且不限于 wire 簇：
+  - 10 例 `confirmation_number` KJMN89→LMPQ72→**NPRS45**（v1/v2 superseded，v3 current）；
+    `departure_date` Nov15→Nov12→**Nov22**；`seat_assignment` 21C/21D→21A。
+  - 11 例 `medication` Methotrexate→prednisone→**CBD**；`symptom`→**psoriasis patches**。
+  - 20 例 `insurance_change` PPO→**HMO**；`medication` Ozempic,Metformin→**Ozempic**。
+- historical 快照独立共存（original_wire_amount=$85k 与 current 并列，不被覆盖）。
+- **Milvus 投影干净**：每 (user, canonical attribute) 恰好一条 current 向量（实测 query 确认），
+  superseded/historical 不投影。case12 wire_reference 三版本正确收敛到 **WT-89089**。
+- 迟到旧会话不覆盖、同值幂等：单测 + 真实数据均验证。
+
+### 8.2 剩余缺口：attribute 语义归一不足（case12 金额/日期未收敛）❌
+
+case12 最终会话（09-26）模型把金额提成**泛词 `amount`**（fact 句 "User will send $95,000
+on October 1st"，不含 "wire"），而非任何 wire_* 变体：
+
+```
+amount        current = $95,000   wife_reversal(09-26)   ← 真值，但在独立命名空间
+wire_amount   current = $100,000  husband_changes(09-25) ← 停在旧值（簇内 latest）
+wire_date     current = Sept 27   husband_changes(09-25) ← 同因（Oct1 在 amount 句中）
+```
+
+- 静态 alias 表追不上：同一事实，模型在会话1/2 用 `wire_amount`，会话3 退化为 `amount`，
+  纯字符串别名无法预知每次漂移到哪个泛词。
+- 注入后果：top-20 召回含 wire_amount=$100k / wire_date=Sept27（合法 current，非投影脏数据），
+  而 $95k 的 fact 句无 "wire" 词、语义相关性低被挤出 → answer 仍看到旧值。
+- 这是**语义归一/实体属性锚定**问题，不是版本裁决问题。
+
+### 8.3 下一步方向（待评审，红线：不靠运行时模型推理）
+
+1. **提取时携带已有 attribute 词表（推荐，确定性上下文锚定，非思考）**：处理实体的后续会话时，
+   把该 user 已存在的 canonical attributes（如 wire_amount/wire_date/…）组装进提取 prompt，
+   要求"同实体同属性必须复用下列 key"。模型本就能产出 wire_amount，缺的是跨会话一致性约束。
+2. 扩充 L1 alias（case-by-case，脆，作为补充不做主力）。
+3. L3 离线聚类灌词表（原方案已列，周期性维护）。
+
+结论：**D4-0/1 的版本裁决与投影收敛目标达成且可复现**；layer2 矛盾题要拿分，关键转到
+§8.3-1「提取期跨会话 attribute 锚定」，列为 D4-1.5 / 下一迭代。
