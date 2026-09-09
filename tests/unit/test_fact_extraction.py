@@ -307,6 +307,76 @@ class TestRepairFlow:
 
 
 # ------------------------------------------------------------------ #
+#  截断空返回（finish_reason=length + content 空）→ 对半切段递归重提
+#  （方案：事实提取鲁棒性与成本优化，2026-09-09）
+# ------------------------------------------------------------------ #
+class OutcomeComplete:
+    """带 outcome() 的回调：按「被调用文本长度/内容」决定返回截断还是合法 JSON。
+
+    outcome 返回 ``ChatOutcome(content, finish_reason)``，模拟真实 client
+    的 chat_outcome 语义（length 截断时 content 为空）。
+    """
+
+    def __init__(self, truncate_prefix: str = "") -> None:
+        # 文本以 truncate_prefix 开头时返回截断空返回；否则返回合法 JSON
+        self.truncate_prefix = truncate_prefix
+        self.calls: list[str] = []
+
+    def outcome(self, text: str):
+        from os_mem.infra.llm.base_client import ChatOutcome
+
+        self.calls.append(text)
+        if text.startswith(self.truncate_prefix):
+            return ChatOutcome("", "length", None)
+        payload = (
+            '[{"fact":"User has card 4532-8876","category":"finance",'
+            '"key":"card_number","value":"4532-8876","confidence":0.95}]'
+        )
+        return ChatOutcome(payload, "stop", None)
+
+    def __call__(self, text: str) -> str:  # 兼容旧契约
+        return self.outcome(text).content
+
+
+class TestTruncationEmptyFlow:
+    def test_length_empty_split_halves_and_recover(self) -> None:
+        """整段截断空返回 → 对半切段，两半各自提取成功并去重合并。"""
+        full = "\n".join(f"第{i}条消息" for i in range(1, 10))
+        fx = FactExtractor()
+        fake = OutcomeComplete(truncate_prefix=full)
+        out = fx.extract_chunk(full, complete=fake)
+        assert len(out) == 1
+        assert out[0].key == "card_number"
+        # 整段只被调 1 次（未盲目整段重试），其余调用是两半
+        assert fake.calls[0] == full
+        assert len(fake.calls) == 3  # 整段 + 左半 + 右半
+        for half in fake.calls[1:]:
+            assert half != full and len(half) < len(full)
+        stats = fx.stats_delta({k: 0 for k in fx.stats_snapshot()})
+        assert stats["split_recursions"] == 1
+
+    def test_length_empty_halves_still_empty_degrades(self) -> None:
+        """两半仍截断空返回 → 放弃（depth 达上限），返回空由上层降级。"""
+        full = "\n".join(f"第{i}条消息" for i in range(1, 6))
+        fx = FactExtractor()
+        fake = OutcomeComplete(truncate_prefix="")  # 任何文本都截断空返回
+        out = fx.extract_chunk(full, retries=2, complete=fake)
+        assert out == []
+        # 整段 1 次 + 两半各 1 次；不因 depth 上限后再盲目整段重试（calls==3）
+        assert len(fake.calls) == 3
+
+    def test_plain_complete_without_outcome_keeps_old_path(self) -> None:
+        """无 outcome() 的普通回调（兼容旧用法）不受截断路由影响。"""
+        good = ('[{"fact":"用户邮箱 a@b.com","category":"contact",'
+                '"key":"email","value":"a@b.com","confidence":0.9}]')
+        fake = FakeComplete(payload_by_call={1: "", 2: good})
+        fx = FactExtractor()
+        out = fx.extract_chunk("对话", retries=2, complete=fake)
+        assert len(out) == 1
+        assert out[0].key == "email"
+
+
+# ------------------------------------------------------------------ #
 #  prune_redundant_verbatim（R1：兜底句与结构化事实做 token 覆盖去重）
 # ------------------------------------------------------------------ #
 class TestPruneRedundantVerbatim:

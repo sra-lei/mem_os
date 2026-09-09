@@ -26,6 +26,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -65,6 +66,8 @@ _NUMERIC_TOKENS = re.compile(
     r'\b[A-Z][a-z]+ \d{4}\b'
 )
 MAX_FALLBACK_FACTS = 60
+# 截断空返回的对半切段递归最大层数（每层把段再切半，≤1 层已足够收敛输出预算）
+MAX_TRUNC_SPLIT_DEPTH = 1
 
 
 class FactExtractor:
@@ -75,6 +78,34 @@ class FactExtractor:
         也可在调用时按次传入。
         """
         self._complete = complete
+        # 提取过程统计（线程安全；供编排方按「调用前后快照差」记账，见
+        # StrucMemService 提取账日志 —— 校准分段参数/成本记账用）
+        self._stats_lock = threading.Lock()
+        self._stats: dict[str, int] = {
+            'llm_calls': 0,
+            'trunc_empties': 0,
+            'split_recursions': 0,
+            'repair_calls': 0,
+            'repair_ok': 0,
+            'degrade_rows': 0,
+        }
+
+    # ------------------------------------------------------------------ #
+    #  过程统计
+    # ------------------------------------------------------------------ #
+    def stats_snapshot(self) -> dict[str, int]:
+        """当前累计计数快照（调用方自行做前后差 = 本次调用账目）。"""
+        with self._stats_lock:
+            return dict(self._stats)
+
+    def stats_delta(self, base: dict[str, int]) -> dict[str, int]:
+        """相对某次快照的增量（调用方在 extract_structured_facts 前后各取一次）。"""
+        current = self.stats_snapshot()
+        return {key: current[key] - base.get(key, 0) for key in current}
+
+    def _bump(self, name: str, count: int = 1) -> None:
+        with self._stats_lock:
+            self._stats[name] = self._stats.get(name, 0) + count
 
     # ------------------------------------------------------------------ #
     #  LLM 输出清洗与校验
@@ -159,37 +190,105 @@ class FactExtractor:
             raise ValueError('FactExtractor 需要 LLM complete 回调（构造或调用时传入）')
         return complete_fn
 
+    @staticmethod
+    def _split_text(text: str) -> tuple[str, str] | None:
+        """消息中点对半切（截断空返回的切段递归用）。
+
+        少于 2 条消息或任一侧为空 → None（不可切）。
+        """
+        lines = text.split('\n')
+        if len(lines) < 2:
+            return None
+        mid = len(lines) // 2
+        left = '\n'.join(lines[:mid])
+        right = '\n'.join(lines[mid:])
+        if not left or not right:
+            return None
+        return left, right
+
     def extract_chunk(
         self,
         text: str,
-        retries: int = 3,
+        retries: int = 2,
         complete: Callable[[str], str] | None = None,
+        _depth: int = 0,
     ) -> list[MemoryFact]:
         """对单个分段提取结构化事实（校验失败/异常按 retries 重试）。
 
-        失败续写（方案 3）：若 LLM 返回了非空但解析失败的 JSON（典型为 max_tokens
-        截断导致的 ``Unterminated string``），且回调具备 ``repair(partial_json)``
-        能力，则先尝试让模型**修复/续写**该 JSON（秒级），修复仍失败才整段重提取。
-        避免每次截断都触发 1-3 分钟的整段重新提取。
+        失败分流（方案：事实提取鲁棒性与成本优化，2026-09-09）：
+        - 非空但解析失败（典型为 max_tokens 截断的 ``Unterminated string``），
+          且回调具备 ``repair(partial_json)`` → 先让模型**修复/续写**（秒级）；
+        - **空 content + finish_reason=length**（截断到 content 空，无法 repair）
+          → 消息中点对半切段递归重提（≤ ``MAX_TRUNC_SPLIT_DEPTH`` 层）——
+          用「更小的段」而非「同样的段再试」；
+        - 其余失败按 retries 整段重试（截断确定性已证，默认仅 1 次整段重试）。
         """
         complete_fn = self._resolve_complete(complete)
         repair_callback = getattr(complete_fn, 'repair', None)
+        outcome_call = getattr(complete_fn, 'outcome', None)
         for attempt in range(retries):
             try:
-                raw_json = complete_fn(text)
+                if outcome_call is not None:
+                    outcome = outcome_call(text)
+                    raw_json = outcome.content
+                    finish_reason = outcome.finish_reason
+                else:
+                    raw_json = complete_fn(text)
+                    finish_reason = None
+                self._bump('llm_calls')
                 facts = self.validate_response(raw_json)
                 if facts:
                     return facts
+                if not raw_json or not raw_json.strip():
+                    if finish_reason == 'length' and _depth < MAX_TRUNC_SPLIT_DEPTH:
+                        halves = self._split_text(text)
+                        if halves is not None:
+                            self._bump('trunc_empties')
+                            self._bump('split_recursions')
+                            left, right = halves
+                            merged = self.dedup_facts(
+                                self.extract_chunk(
+                                    left, retries=1, complete=complete_fn,
+                                    _depth=_depth + 1,
+                                )
+                                + self.extract_chunk(
+                                    right, retries=1, complete=complete_fn,
+                                    _depth=_depth + 1,
+                                )
+                            )
+                            if merged:
+                                return merged
+                            # 两半仍全空：截断为确定性失败，整段再试无信息增益，
+                            # 直接放弃该段交给上层降级（不再走 retries 整段重试）
+                            _logger.warning(
+                                f'截断空返回，对半切段仍全空（depth={_depth}），'
+                                '放弃该段（降级）'
+                            )
+                            return []
+                        self._bump('trunc_empties')
+                        _logger.warning(
+                            f'截断空返回且不可切段（depth={_depth}），'
+                            '放弃该段（降级）'
+                        )
+                        return []
+                    # 真偶发空返回（无 finish 信息或非 length）
+                    _logger.warning(
+                        f'第 {attempt + 1} 次提取返回空'
+                        f'（finish={finish_reason}），整段重试中...'
+                    )
+                    continue
                 # 非空但解析失败：尝试 repair 续写（若回调支持）
-                if raw_json and raw_json.strip() and repair_callback is not None:
+                if repair_callback is not None:
                     try:
                         _logger.warning(
                             f'第 {attempt + 1} 次输出解析失败，尝试 repair 续写 '
                             f'（len={len(raw_json)}）...'
                         )
+                        self._bump('repair_calls')
                         repaired_json = repair_callback(raw_json)
                         repaired_facts = self.validate_response(repaired_json)
                         if repaired_facts:
+                            self._bump('repair_ok')
                             _logger.info(
                                 f'repair 成功: {len(repaired_facts)} 条'
                                 f'（原始 len={len(raw_json)}'
@@ -200,7 +299,9 @@ class FactExtractor:
                     except Exception as error:
                         _logger.error(f'repair 调用失败，回退整段重试: {error}')
                 else:
-                    _logger.warning(f'第 {attempt + 1} 次提取验证失败，整段重试中...')
+                    _logger.warning(
+                        f'第 {attempt + 1} 次提取验证失败，整段重试中...'
+                    )
             except Exception as error:
                 _logger.error(f'Attempt {attempt + 1} failed: {error}')
         return []
@@ -208,13 +309,15 @@ class FactExtractor:
     def extract_structured_facts(
         self,
         dialog_text: str,
-        retries: int = 3,
+        retries: int = 2,
         complete: Callable[[str], str] | None = None,
     ) -> list[MemoryFact]:
         """对整段对话提取结构化事实（分段 + 并行 + 全失败降级）。
 
         返回提取结果（长对话已跨段去重）；全部失败时降级为
         ``raw_conversation`` 原始对话事实（confidence=0.1），保证不空手。
+        ``retries`` 默认 2 = 初始 1 次 + 至多 1 次整段重试（截断确定性已证，
+        更多整段重试无信息增益，见方案：事实提取鲁棒性与成本优化）。
         """
         chunks = self.chunk_dialog(dialog_text)
         if len(chunks) <= 1:
@@ -223,7 +326,9 @@ class FactExtractor:
             if facts:
                 return facts
             _logger.error('提取失败，降级存储原始对话')
-            return self._degrade_fact(dialog_text)
+            degraded = self._degrade_fact(dialog_text)
+            self._bump('degrade_rows', len(degraded))
+            return degraded
 
         # 长对话：分段提取，每段独立调用 LLM（并行），结果合并去重
         all_facts: list[MemoryFact] = []
@@ -240,7 +345,9 @@ class FactExtractor:
         deduped = self.dedup_facts(all_facts)
         if not deduped:
             _logger.error('全部分段提取失败，降级存储原始对话')
-            return self._degrade_fact(dialog_text)
+            degraded = self._degrade_fact(dialog_text)
+            self._bump('degrade_rows', len(degraded))
+            return degraded
         _logger.info(f'分段提取完成: {len(all_facts)} 条（去重后 {len(deduped)} 条）')
         return deduped
 
