@@ -128,11 +128,11 @@ class TestPromptMaxFacts:
         return system['content']
 
     def test_explicit_max_facts_rendered(self) -> None:
-        assert '最多 42 条' in self._system_content('对话文本', max_facts=42)
+        assert '最多输出 42 条' in self._system_content('对话文本', max_facts=42)
 
     def test_default_max_facts_from_settings(self) -> None:
         default_text = self._system_content('对话文本', max_facts=None)
-        assert f'最多 {memory_settings.DEEPSEEK_EXTRACT_MAX_FACTS} 条' in default_text
+        assert f'最多输出 {memory_settings.DEEPSEEK_EXTRACT_MAX_FACTS} 条' in default_text
 
 
 # ------------------------------------------------------------------ #
@@ -185,7 +185,7 @@ class TestCallerProfilePrompt:
         assert finish_reason == 'stop'
         assert usage_tokens is None  # 假 client 无 usage → None
         assert client.last_messages is not None
-        assert '最多 33 条' in self._system(client.last_messages)
+        assert '最多输出 33 条' in self._system(client.last_messages)
 
     def test_repair_renders_profile_max_facts(self) -> None:
         """repair prompt 同样按画像 max_facts 约束（默认=settings，逐字节等价）。"""

@@ -154,5 +154,5 @@ def test_build_extract_messages_renders_categories_section(tmp_db: Path) -> None
     # 渲染完成：无占位残留，双语列表出现
     assert "{categories_section}" not in system
     assert "{max_facts}" not in system
-    assert "category 必须从以下列表选取：personal（个人）, contact（联系方式）" in system
+    assert "category 从以下列表选择：personal（个人）, contact（联系方式）" in system
     assert msgs[1]["content"].startswith("请从以下对话中提取结构化事实")

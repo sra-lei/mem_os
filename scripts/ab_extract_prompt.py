@@ -16,6 +16,7 @@ import time
 import yaml
 from os_mem.extractor.fact_extractor import FactExtractor, _NUMERIC_TOKENS
 from os_mem.extractor.prompt import (
+    build_extract_complete,
     build_repair_messages,
 )
 from os_mem.extractor.tokens import fact_tokens
@@ -91,8 +92,7 @@ CANDIDATE_V15_SYSTEM = """你是一个信息提取助手，从对话中提取值
    - "Refund of $1,600, minus 20% admin fee of $320, net refund $1,280"
    - "Weekly tuition is $617.50 (Emma $325 + Olivia $292.50)"
 5. **叙述宁缺毋滥**：非精确的叙述性信息只保留确有长期价值的，拿不准的不提取；
-   不提取对话中的过程性描述、客套与瞬时内容。精确值条目优先占位，单次最多输出
-   {max_facts} 条。
+   不提取对话中的过程性描述、客套与瞬时内容。精确值条目优先占位，单次最多输出 {max_facts} 条。
 
 ## 输出格式（JSON 对象，facts 为数组）
 {"facts": [{"fact": "User's checking account number is 4429853327", "category": "finance", "key": "checking_account_number", "value": "4429853327", "confidence": 0.9}]}
@@ -214,13 +214,29 @@ def run_arm(session_text: str, complete_factory, label: str) -> dict:
 
 def main() -> None:
     client = get_llm_client()
-    # 单臂跑候选版本（v1 已测判废存档；默认 v1.5），基线=线上旧 prompt 已实测在档
-    variant = sys.argv[1] if len(sys.argv) > 1 else "v15"
-    system_text = (
-        CANDIDATE_SYSTEM if variant == "v1" else CANDIDATE_V15_SYSTEM
-    )
-    print(f"候选 prompt 版本: {variant}（字符 {len(system_text)} ≈ {len(system_text) // 3} tok）")
-    new_factory = lambda c: CandidateComplete(c, system_text)  # noqa: E731
+    # 变体：compare = 三臂（旧/v1/v15）同 5 段；v1/v15 = 单臂候选
+    # 注意：client 已关思考（DEEPSEEK_THINKING=False）——v1/v1.5 早期判废数据
+    # 是思考模式 ON 下测的（思考劣化输出污染了 prompt 文本对比），需关思考重测
+    variant = sys.argv[1] if len(sys.argv) > 1 else "compare"
+    compare = variant == "compare"
+    if compare:
+        factories = {
+            "old": build_extract_complete,
+            "v1": lambda c: CandidateComplete(c, CANDIDATE_SYSTEM),  # noqa: E731
+            "v15": lambda c: CandidateComplete(c, CANDIDATE_V15_SYSTEM),  # noqa: E731
+        }
+        arms = ["old", "v1", "v15"]
+        print(
+            f"候选对比: compare（旧/v1/v15）· v1={len(CANDIDATE_SYSTEM)}字符 "
+            f"v1.5={len(CANDIDATE_V15_SYSTEM)}字符"
+        )
+    else:
+        system_text = (
+            CANDIDATE_SYSTEM if variant == "v1" else CANDIDATE_V15_SYSTEM
+        )
+        print(f"候选 prompt 版本: {variant}（字符 {len(system_text)} ≈ {len(system_text) // 3} tok）")
+        factories = {"v15" if variant != "v1" else "v1": lambda c, st=system_text: CandidateComplete(c, st)}
+        arms = list(factories)
 
     all_plans = [
         # (case_path, conv_idx, label)
@@ -237,20 +253,23 @@ def main() -> None:
             f"[{label}] {case_path} conv#{conv_idx} "
             f"字符={len(session_text)} 消息={len(session_text.splitlines())}"
         )
-        r = run_arm(session_text, new_factory, f"{label}:{variant}")
-        results.append(r)
-        print(
-            f"  {variant:>4} | calls={r['calls']} 截断={r['trunc']} 切段={r['split']} "
-            f"repair={r['repair']}(ok{r['repair_ok']}) 降级={r['degrade']} "
-            f"| in={r['in']:,} out={r['out']:,} | facts={r['facts']} "
-            f"数字保真={r['cov']:.0%} | {r['sec']:.0f}s"
-        )
+        for arm in arms:
+            factory = factories[arm]
+            r = run_arm(session_text, factory, f"{label}:{arm}")
+            results.append(r)
+            print(
+                f"  {arm:>4} | calls={r['calls']} 截断={r['trunc']} 切段={r['split']} "
+                f"repair={r['repair']}(ok{r['repair_ok']}) 降级={r['degrade']} "
+                f"| in={r['in']:,} out={r['out']:,} | facts={r['facts']} "
+                f"数字保真={r['cov']:.0%} | {r['sec']:.0f}s"
+            )
+            sys.stdout.flush()
         sys.stdout.flush()
     out_path = f"/tmp/ab_{variant}_results.json"
     with open(out_path, "w") as fh:
         json.dump(results, fh, ensure_ascii=False, indent=1)
     print(f"[saved] {out_path} ({len(results)} rows)")
-    print("对比基线见 docs/实验记录-提取prompt精简AB-2026-09-09.md（旧 prompt 实测在档）")
+    print("基线/历史见 docs/实验记录-提取prompt精简AB-2026-09-09.md")
 
 
 if __name__ == "__main__":
