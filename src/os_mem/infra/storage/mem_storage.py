@@ -70,6 +70,7 @@ class MemoryDatabase:
         # 老库迁移：conv_messages 补 seq/previous_content 列并回填 + 建唯一索引
         # （create_all 只建新表，不会给已存在表加列，故需显式 ALTER）
         self._migrate_conv_messages(engine)
+        self._migrate_struct_memories_d4(engine)
         self._seed_fact_category(engine)
         self._logger.info(f"Database initialized at {self.db_path}")
 
@@ -134,6 +135,80 @@ class MemoryDatabase:
             conn.execute(text(
                 "CREATE UNIQUE INDEX IF NOT EXISTS uq_conv_messages_user_session_seq "
                 "ON conv_messages(user_id, source_session_id, seq)"
+            ))
+
+    @staticmethod
+    def _migrate_struct_memories_d4(engine: Engine) -> None:
+        """幂等迁移 D4-0：struct_memories 补实体归属/版本裁决列（零行为变化）。
+
+        新列：entity_ref / attribute / lifecycle / source_started_at / version /
+        supersedes_id（create_all 对已存在表不补列，故显式 ALTER）。
+        旧行回填语义（旧库已按 (user,category,key) upsert，每键一行=当前值）：
+        - entity_ref='SELF'、lifecycle='current'、version=1、supersedes_id=''（列默认值）；
+        - attribute 回填为旧 key（未归一前规范属性名等同 key）；
+        - source_started_at 按 (user_id, source_conversation_id) join
+          conv_meta.started_at 回填（拿对话内时间，供 D4-1 as-of 裁决）。
+        """
+        from sqlalchemy import text
+
+        with engine.begin() as conn:
+            cols = {
+                row[1]
+                for row in conn.execute(
+                    text("PRAGMA table_info(struct_memories)")
+                ).fetchall()
+            }
+            if "entity_ref" not in cols:
+                conn.execute(text(
+                    "ALTER TABLE struct_memories ADD COLUMN entity_ref "
+                    "TEXT NOT NULL DEFAULT 'SELF'"
+                ))
+            if "attribute" not in cols:
+                conn.execute(text(
+                    "ALTER TABLE struct_memories ADD COLUMN attribute "
+                    "TEXT NOT NULL DEFAULT ''"
+                ))
+            if "lifecycle" not in cols:
+                conn.execute(text(
+                    "ALTER TABLE struct_memories ADD COLUMN lifecycle "
+                    "TEXT NOT NULL DEFAULT 'current'"
+                ))
+            if "source_started_at" not in cols:
+                conn.execute(text(
+                    "ALTER TABLE struct_memories ADD COLUMN source_started_at DATETIME"
+                ))
+            if "version" not in cols:
+                conn.execute(text(
+                    "ALTER TABLE struct_memories ADD COLUMN version "
+                    "INTEGER NOT NULL DEFAULT 1"
+                ))
+            if "supersedes_id" not in cols:
+                conn.execute(text(
+                    "ALTER TABLE struct_memories ADD COLUMN supersedes_id "
+                    "TEXT NOT NULL DEFAULT ''"
+                ))
+
+            # attribute 回填旧 key（只补空值行，幂等）
+            conn.execute(text(
+                "UPDATE struct_memories SET attribute = key "
+                "WHERE attribute = '' AND key <> ''"
+            ))
+            # source_started_at 回填：join conv_meta 取对话内时间（只补 NULL 行，幂等）
+            conn.execute(text(
+                "UPDATE struct_memories SET source_started_at = ("
+                "  SELECT c.started_at FROM conv_meta c"
+                "  WHERE c.user_id = struct_memories.user_id"
+                "    AND c.source_session_id = struct_memories.source_conversation_id"
+                ") WHERE source_started_at IS NULL"
+            ))
+            # 新列索引（IF NOT EXISTS 幂等；新库由 create_all 已建则跳过）
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_memories_entity_attribute "
+                "ON struct_memories(user_id, entity_ref, attribute)"
+            ))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_memories_lifecycle "
+                "ON struct_memories(user_id, lifecycle)"
             ))
 
 

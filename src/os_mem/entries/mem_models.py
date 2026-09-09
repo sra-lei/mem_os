@@ -76,6 +76,23 @@ class StructuredMemory(SQLModel, table=True):
     created_at: datetime = Field(index=True, default_factory=datetime.utcnow) # ✅ 创建索引 (idx_memories_created_at)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
+    # ========== D4：实体归属与版本裁决（方案 docs/方案-D4-实体归属与as-of版本裁决.md）==========
+    # D4-0 仅加列+迁移回填，入库/检索行为零变化（收敛签名仍为 (user_id, category, key)）。
+    # D4-1 起写入侧才使用这些列。
+    # 实体标识：缺省 SELF=用户本人；非本人实体（PERSON:xxx / CASE:xxx ...）由归一器解析
+    entity_ref: str = Field(index=True, nullable=False, default="SELF")
+    # 规范属性名（canonical attribute，如 wire.amount）；迁移回填=旧 key，未归一前等同 key
+    attribute: str = Field(index=True, nullable=False, default="")
+    # 生命周期：current（当前值，参与向量投影/注入）/ superseded（被新版本取代，仅 SQLite 留痕）
+    # historical（原始/历史快照属性，如 original_wire_amount，独立签名永不被覆盖）
+    lifecycle: str = Field(index=True, nullable=False, default="current")
+    # 来源会话的「对话内时间」（join conv_meta.started_at 回填）：as-of 裁决按它而非入库时间
+    source_started_at: datetime | None = Field(default=None, index=True)
+    # 版本号：同 (user, entity_ref, attribute) 首次=1，每被新版本取代 +1
+    version: int = Field(default=1, nullable=False)
+    # 版本链：本行取代的上一版本行 id（首版为空串）
+    supersedes_id: str = Field(default="", nullable=False)
+
 
 # ========== 对话元数据表（conv_meta）：会话元数据 + 处理状态 ==========
 # 设计见 docs/方案-会话处理状态机与原子入库.md；命名定位为「对话元数据表」，
