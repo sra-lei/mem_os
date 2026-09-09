@@ -1,18 +1,23 @@
 """os_mem.extraction —— 记忆提取域（2026-09-08 由 os_mem.utils 迁入）。
 
 定位：被编排的**领域执行器**——不属 utils 小工具，也不属 core 业务编排：
-- ``extractor.py``   ：FactExtractor（分段/并行/修复/降级/去重/兜底/R1 剪枝）
-- ``prompt.py``      ：提取任务 prompt 与 LLM 适配（system/repair、回调封装）
+- ``extractor.py``   ：FactExtractor（分段/并行/降级/去重/兜底/R1 剪枝，任务语义）
+- ``callers.py``     ：provider 自愈 extraction caller（「LLM 调用 + 恢复策略」=
+  repair/截断切段/整段重试收敛于此，见 docs/方案-提取任务与LLM模型画像解耦.md §2 v2）
+- ``prompt.py``      ：提取任务 prompt（SYSTEM_PROMPT/REPAIR_PROMPT 渲染与指纹）
 - ``tokens.py``      ：数值 token 口径（提取 R1 与检索冗余过滤共享）
 
-对外入口：本包只暴露提取链路需要的两个高层能力——
-``FactExtractor``（执行器）与 ``build_extract_complete``（client → 回调适配），
-编排与存储由 core/services/struc_mem_service 负责；纯数据变换、无存储/网络副作用
-（LLM 经注入回调），可离线单测。
+对外入口：本包暴露提取链路需要的三个高层能力——
+``FactExtractor``（执行器，任务语义）与 ``build_extraction_caller``（provider 自愈
+caller 工厂，编排/存储侧首选入口）以及 ``build_extract_complete``（旧 client →
+complete 回调薄兼容，返回同 caller 实例；测试/AB 脚本用）；编排与存储由
+core/services/struc_mem_service 负责；纯数据变换、无存储/网络副作用（LLM 经注入
+回调或 caller），可离线单测。
 """
 
 from __future__ import annotations
 
+from os_mem.extraction.callers import build_extraction_caller
 from os_mem.extraction.extractor import FactExtractor
 from os_mem.extraction.prompt import (
     build_extract_complete,
@@ -24,5 +29,6 @@ __all__ = [
     'FactExtractor',
     'build_extract_complete',
     'build_extract_messages',
+    'build_extraction_caller',
     'build_repair_messages',
 ]

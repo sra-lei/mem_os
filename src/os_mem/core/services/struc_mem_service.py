@@ -11,7 +11,7 @@ from os_mem.core.services.conv_meta_service import (
     STATUS_SAVING_VECTOR,
 )
 from os_mem.entries.mem_models import StructuredMemory
-from os_mem.extraction import FactExtractor, build_extract_complete
+from os_mem.extraction import FactExtractor, build_extraction_caller
 from os_mem.infra.llm import ChatClient, get_llm_client
 from os_mem.infra.logger import get_logger
 from os_mem.infra.storage import (
@@ -38,8 +38,9 @@ class StructuredMemService:
         vector_store: MemoryVectorStore,
     ) -> None:
         self.client = client
-        # 通用 client 适配为事实提取 complete 回调（prompt 见 os_mem/extraction/prompt）
-        self._extract_complete = build_extract_complete(client)
+        # provider 自愈提取 caller（prompt/恢复策略见 os_mem/extraction/{callers,prompt}；
+        # validate 由 FactExtractor 注入——任务侧只见干净 extract 契约）
+        self._caller = build_extraction_caller(client)
         self.vectorizer = vectorizer
         self.vector_store = vector_store
 
@@ -136,11 +137,11 @@ class StructuredMemService:
 
         if on_stage:
             on_stage(STATUS_EXTRACTING)
-        # LLM 结构化提取（分段/并行/降级，见 FactExtractor）
+        # LLM 结构化提取（分段/并行/降级，见 FactExtractor；调用经 provider 自愈 caller）
         stats_before = _extractor.stats_snapshot()
         llm_facts: list[MemoryFact] = _extractor.extract_structured_facts(
             dialog_text,
-            complete=self._extract_complete,
+            caller=self._caller,
         )
         t_extract = time.perf_counter()
         # 提取账（观测/校准/成本记账）：本次会话的调用·截断·repair·降级统计

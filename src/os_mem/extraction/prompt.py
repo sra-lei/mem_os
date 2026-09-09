@@ -10,6 +10,10 @@
 - 本模块负责「事实提取」这个任务的系统提示、消息拼装，并把任意满足
   ``ChatClient`` 契约的 client（DeepSeek / 未来网关实现）适配成提取链路需要的
   ``complete(dialog_text) -> raw_json`` 回调（见 ``FactExtractor``）。
+  「LLM 调用 + 恢复策略」自 2026-09-09 起收敛于 ``callers.py`` 的 provider 自愈
+  caller（恢复循环 + repair/截断路由 = provider 内部代码，validate 由任务注入），
+  本模块的 ``build_extract_complete`` 保留为薄兼容（返回 caller 实例，鸭子接口
+  outcome/__call__/repair 不变；拼装仍走本模块渲染）。
 
 因此修改提取 prompt（含 {max_facts} 占位等）只需改本文件；
 接入新的 LLM provider 时在 ``os_mem.infra.llm.factory`` 注册即可，
@@ -21,7 +25,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from os_mem.configs.mem_settings import memory_settings
-from os_mem.infra.llm.base_client import ChatClient, ChatOutcome
+from os_mem.infra.llm.base_client import ChatClient
 from os_mem.utils.prompt_fp import fingerprint
 
 # 提取任务系统提示：{max_facts} 为单次提取事实数量上限占位，调用时由
@@ -146,56 +150,20 @@ def build_repair_messages(
     ]
 
 
-class _ExtractComplete:
-    """把 ChatClient 适配成 FactExtractor 的 complete 回调，并附带 repair 能力。
-
-    - ``__call__(dialog_text)``：正常提取（兼容原 ``Callable[[str], str]`` 用法）；
-    - ``repair(partial_json)``：修复截断/损坏的 JSON（方案 3：失败续写而非整段重提取）。
-    FactExtractor 用鸭子类型探测 ``hasattr(callable, 'repair')`` 决定是否可用续写。
-    """
-
-    def __init__(self, client: ChatClient) -> None:
-        self._client = client
-        self._response_format = {'type': 'json_object'}
-
-    def outcome(self, dialog_text: str) -> ChatOutcome:
-        """带 finish_reason 的提取调用（截断路由需要）。
-
-        client 支持 ``chat_outcome`` 时返回完整 outcome（含 finish_reason，
-        length 截断可由 extractor 识别）；否则退回 ``chat`` 包一层
-        （无 finish 信息，退化为旧的重试语义）。
-        """
-        chat_outcome = getattr(self._client, 'chat_outcome', None)
-        if chat_outcome is not None:
-            return chat_outcome(
-                build_extract_messages(dialog_text),
-                response_format=self._response_format,
-            )
-        return ChatOutcome(
-            self._client.chat(
-                build_extract_messages(dialog_text),
-                response_format=self._response_format,
-            )
-        )
-
-    def __call__(self, dialog_text: str) -> str:
-        return self.outcome(dialog_text).content
-
-    def repair(self, partial_json: str) -> str:
-        return self._client.chat(
-            build_repair_messages(partial_json),
-            response_format=self._response_format,
-        )
-
-
 def build_extract_complete(client: ChatClient) -> Callable[[str], str]:
-    """把通用 LLM client 适配为 ``FactExtractor`` 期望的提取回调。
+    """把通用 LLM client 适配为 ``FactExtractor`` 期望的提取回调（薄兼容层）。
 
-    返回 ``(dialog_text) -> raw_json``：内部按事实提取任务要求拼装
-    system/user 消息并以 json_object 响应格式调用 ``client.chat``。
-    返回对象同时具备 ``.repair(partial_json)`` 续写能力（见 ``_ExtractComplete``）。
+    「LLM 调用 + 恢复策略」已收敛至 ``os_mem.extraction.callers`` 的
+    provider 自愈 caller（见 docs/方案-提取任务与LLM模型画像解耦.md §2 v2）——
+    本函数返回的正是 ``DeepSeekExtractionCaller``：它具备旧 ``_ExtractComplete``
+    的全部鸭子接口（``outcome`` / ``__call__`` / ``repair``，拼装仍用本模块的
+    SYSTEM_PROMPT/REPAIR_PROMPT 渲染），同时携带新的 ``extract(dialog_text, *,
+    validate, retries) -> CallResult`` 契约。函数体内延迟 import callers 避免循环
+    依赖（callers 顶层 import 本模块的 prompt 渲染，见模块头依赖方向说明）。
     """
-    return _ExtractComplete(client)
+    from os_mem.extraction.callers import build_extraction_caller
+
+    return build_extraction_caller(client)
 
 
 # ------------------------------------------------------------------ #

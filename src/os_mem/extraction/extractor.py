@@ -3,14 +3,18 @@
 归属：``os_mem.extraction`` 记忆提取域（2026-09-08 由 os_mem.utils 迁入，
 见 AGENTS.md 目录地图）。定位：被编排的**领域执行器**——不属 utils 小工具
 （它是提取链路核心），也不属 core 业务编排（编排在 core/services/struc_mem_service，
-存储/网络副作用为零，LLM 通过注入的 ``complete(text) -> raw_json`` 回调使用，
-便于单测与替换）：
+存储/网络副作用为零，LLM 通过注入的 ``complete(text) -> raw_json`` 回调（旧路径，
+测试/AB 脚本用）或 provider 自愈 caller（``extract(dialog_text, *, validate)``
+干净契约，见 callers.py；恢复策略=provider 内部代码）使用，便于单测与替换）：
 
 - ``validate_response``   ：LLM 原始输出清洗（markdown 围栏/包装格式）与校验
   （分类白名单、confidence 边界、非法 JSON → 空列表触发重试）
 - ``chunk_dialog``        ：长对话按消息分段 + 段间冗余重叠（边界信息不切丢）
-- ``extract_chunk``       ：单段提取（重试 + 修复续写）
+- ``extract_chunk``       ：单段提取（薄委托兼容层——repair 续写/截断切段/整段重试等
+  恢复策略已收敛于 ``callers._ExtractionCore``，语义等价迁移见
+  docs/方案-提取任务与LLM模型画像解耦.md）
 - ``extract_structured_facts``：分段编排（短对话单次 / 长对话并行）+ 全失败降级
+  （可注入 provider 自愈 caller：每段走 ``caller.extract(dialog_text, *, validate)``）
 - ``dedup_facts``         ：按 (category, key, value) 跨段去重
 - ``fallback_numeric_facts``：正则兜底 —— 含金额/编号/日期/百分比等精确 token 的
   原文句子原样入库（layer1 精确回忆防线：结构化提取改写会丢数字）
@@ -29,10 +33,16 @@ import re
 import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Any
 
 from pydantic import ValidationError
 
 from os_mem.configs.mem_settings import memory_settings
+from os_mem.extraction.callers import (
+    _ExtractionCore,
+    dedup_facts as _dedup_facts_by_signature,
+    split_text_midpoint as _split_text_midpoint,
+)
 from os_mem.extraction.tokens import fact_tokens
 from os_mem.infra.logger import get_logger
 from os_mem.models.mem_models import MemoryFact, MemoryFacts
@@ -68,6 +78,29 @@ _NUMERIC_TOKENS = re.compile(
 MAX_FALLBACK_FACTS = 60
 # 截断空返回的对半切段递归最大层数（每层把段再切半，≤1 层已足够收敛输出预算）
 MAX_TRUNC_SPLIT_DEPTH = 1
+
+
+def _complete_to_generate(
+    complete: Callable[[str], str],
+) -> Callable[[str], tuple[str, str | None]]:
+    """把旧 complete 鸭子接口包成恢复核心需要的低层 generate(text) -> (content, finish_reason)。
+
+    优先走 ``outcome()``（带 finish_reason，length 截断可路由）；纯 ``__call__``
+    回调（无 outcome）→ finish_reason=None（旧整段重试语义，见 FakeComplete）。
+    """
+    outcome_call = getattr(complete, 'outcome', None)
+    if outcome_call is not None:
+
+        def _generate_with_outcome(text: str) -> tuple[str, str | None]:
+            outcome = outcome_call(text)
+            return outcome.content, outcome.finish_reason
+
+        return _generate_with_outcome
+
+    def _generate_plain(text: str) -> tuple[str, str | None]:
+        return complete(text), None
+
+    return _generate_plain
 
 
 class FactExtractor:
@@ -206,122 +239,76 @@ class FactExtractor:
         """消息中点对半切（截断空返回的切段递归用）。
 
         少于 2 条消息或任一侧为空 → None（不可切）。
+        实现收敛于 ``os_mem.extraction.callers.split_text_midpoint``
+        （provider caller 侧同构共用，单一实现防漂移）。
         """
-        lines = text.split('\n')
-        if len(lines) < 2:
-            return None
-        mid = len(lines) // 2
-        left = '\n'.join(lines[:mid])
-        right = '\n'.join(lines[mid:])
-        if not left or not right:
-            return None
-        return left, right
+        return _split_text_midpoint(text)
 
     def extract_chunk(
         self,
         text: str,
         retries: int = 2,
         complete: Callable[[str], str] | None = None,
-        _depth: int = 0,
     ) -> list[MemoryFact]:
-        """对单个分段提取结构化事实（校验失败/异常按 retries 重试）。
+        """对单个分段提取结构化事实（薄委托兼容层——恢复策略已迁至 caller 核心）。
 
-        失败分流（方案：事实提取鲁棒性与成本优化，2026-09-09）：
-        - 非空但解析失败（典型为 max_tokens 截断的 ``Unterminated string``），
-          且回调具备 ``repair(partial_json)`` → 先让模型**修复/续写**（秒级）；
-        - **空 content + finish_reason=length**（截断到 content 空，无法 repair）
-          → 消息中点对半切段递归重提（≤ ``MAX_TRUNC_SPLIT_DEPTH`` 层）——
-          用「更小的段」而非「同样的段再试」；
-        - 其余失败按 retries 整段重试（截断确定性已证，默认仅 1 次整段重试）。
+        恢复循环（repair 续写 / 截断对半切段 / 整段重试）自 2026-09-09 起收敛于
+        ``os_mem.extraction.callers._ExtractionCore``（等价迁移：不优化不改行为，
+        日志文案逐字一致，见 docs/方案-提取任务与LLM模型画像解耦.md §2 v2 / §4
+        步骤 1-2）。本方法保留旧签名作为兼容层：把 ``complete`` 的鸭子能力
+        （``outcome`` / ``__call__`` / ``repair``，缺哪个退哪个）包成低层
+        ``generate`` 喂给核心，并把核心返回的遥测累加进实例计数
+        （stats_snapshot/stats_delta 口径不变）。纯 ``__call__`` 无 outcome/repair
+        的 complete → generate 返回 (content, None)、repair_fn=None → 整段重试语义。
         """
         complete_fn = self._resolve_complete(complete)
-        repair_callback = getattr(complete_fn, 'repair', None)
-        outcome_call = getattr(complete_fn, 'outcome', None)
-        for attempt in range(retries):
-            try:
-                if outcome_call is not None:
-                    outcome = outcome_call(text)
-                    raw_json = outcome.content
-                    finish_reason = outcome.finish_reason
-                else:
-                    raw_json = complete_fn(text)
-                    finish_reason = None
-                self._bump('llm_calls')
-                facts = self.validate_response(raw_json)
-                if facts:
-                    return facts
-                if not raw_json or not raw_json.strip():
-                    if finish_reason == 'length' and _depth < MAX_TRUNC_SPLIT_DEPTH:
-                        halves = self._split_text(text)
-                        if halves is not None:
-                            self._bump('trunc_empties')
-                            self._bump('split_recursions')
-                            left, right = halves
-                            merged = self.dedup_facts(
-                                self.extract_chunk(
-                                    left, retries=1, complete=complete_fn,
-                                    _depth=_depth + 1,
-                                )
-                                + self.extract_chunk(
-                                    right, retries=1, complete=complete_fn,
-                                    _depth=_depth + 1,
-                                )
-                            )
-                            if merged:
-                                return merged
-                            # 两半仍全空：截断为确定性失败，整段再试无信息增益，
-                            # 直接放弃该段交给上层降级（不再走 retries 整段重试）
-                            _logger.warning(
-                                f'截断空返回，对半切段仍全空（depth={_depth}），'
-                                '放弃该段（降级）'
-                            )
-                            return []
-                        self._bump('trunc_empties')
-                        _logger.warning(
-                            f'截断空返回且不可切段（depth={_depth}），'
-                            '放弃该段（降级）'
-                        )
-                        return []
-                    # 真偶发空返回（无 finish 信息或非 length）
-                    _logger.warning(
-                        f'第 {attempt + 1} 次提取返回空'
-                        f'（finish={finish_reason}），整段重试中...'
-                    )
-                    continue
-                # 非空但解析失败：尝试 repair 续写（若回调支持）
-                if repair_callback is not None:
-                    try:
-                        _logger.warning(
-                            f'第 {attempt + 1} 次输出解析失败，尝试 repair 续写 '
-                            f'（len={len(raw_json)}）...'
-                        )
-                        self._bump('repair_calls')
-                        repaired_json = repair_callback(raw_json)
-                        repaired_facts = self.validate_response(repaired_json)
-                        if repaired_facts:
-                            self._bump('repair_ok')
-                            _logger.info(
-                                f'repair 成功: {len(repaired_facts)} 条'
-                                f'（原始 len={len(raw_json)}'
-                                f' → 修复 len={len(repaired_json)}）'
-                            )
-                            return repaired_facts
-                        _logger.warning('repair 输出仍解析失败，回退整段重试')
-                    except Exception as error:
-                        _logger.error(f'repair 调用失败，回退整段重试: {error}')
-                else:
-                    _logger.warning(
-                        f'第 {attempt + 1} 次提取验证失败，整段重试中...'
-                    )
-            except Exception as error:
-                _logger.error(f'Attempt {attempt + 1} failed: {error}')
-        return []
+        core = _ExtractionCore(
+            generate=_complete_to_generate(complete_fn),
+            repair_fn=getattr(complete_fn, 'repair', None),
+            dedup_fn=self.dedup_facts,
+            split_fn=self._split_text,
+            max_split_depth=MAX_TRUNC_SPLIT_DEPTH,
+        )
+        facts, stats = core.extract(
+            text, validate=self.validate_response, retries=retries
+        )
+        self._absorb_stats(stats)
+        return facts or []
+
+    def _absorb_stats(self, stats: dict[str, int]) -> None:
+        """把一次 caller/核心调用的遥测累加进实例计数（快照差口径不变）。
+
+        caller 模式（extract_structured_facts caller 路径）逐 chunk 回收；
+        complete 委托路径（extract_chunk）在单段恢复循环结束后回收。
+        """
+        for name, count in stats.items():
+            if count:
+                self._bump(name, count)
+
+    def _extract_chunk_via_caller(
+        self,
+        caller: Any,
+        chunk_text: str,
+        retries: int,
+    ) -> list[MemoryFact]:
+        """caller 模式单段提取（长对话并行 worker）：注入任务侧校验并回收遥测。
+
+        caller 须满足 ``extract(dialog_text, *, validate, retries) -> CallResult``
+        契约（见 callers.CallResult）；facts 为 None = 全败（等效旧 extract_chunk
+        返回 []，上层降级逻辑不变）。
+        """
+        result = caller.extract(
+            chunk_text, validate=self.validate_response, retries=retries
+        )
+        self._absorb_stats(result.stats)
+        return result.facts or []
 
     def extract_structured_facts(
         self,
         dialog_text: str,
         retries: int = 2,
         complete: Callable[[str], str] | None = None,
+        caller: Any | None = None,
     ) -> list[MemoryFact]:
         """对整段对话提取结构化事实（分段 + 并行 + 全失败降级）。
 
@@ -329,11 +316,26 @@ class FactExtractor:
         ``raw_conversation`` 原始对话事实（confidence=0.1），保证不空手。
         ``retries`` 默认 2 = 初始 1 次 + 至多 1 次整段重试（截断确定性已证，
         更多整段重试无信息增益，见方案：事实提取鲁棒性与成本优化）。
+
+        提取回调二选一（2026-09-09 起 caller 优先；恢复策略=provider 内部代码，
+        见 docs/方案-提取任务与LLM模型画像解耦.md §2 v2）：
+        - ``caller``：provider 自愈提取 caller（满足 ``extract(dialog_text, *,
+          validate, retries) -> CallResult`` 契约）——每段走 caller.extract，
+          validate 由本任务注入（= validate_response），并把每段返回的 stats
+          累加进实例计数（stats_snapshot/delta 口径不变）；
+        - ``complete``：旧回调路径（薄委托 extract_chunk，测试 / AB 脚本兼容）。
         """
         chunks = self.chunk_dialog(dialog_text)
         if len(chunks) <= 1:
             # 短对话：单次提取（原有重试 + 降级）
-            facts = self.extract_chunk(dialog_text, retries=retries, complete=complete)
+            if caller is not None:
+                result = caller.extract(
+                    dialog_text, validate=self.validate_response, retries=retries
+                )
+                self._absorb_stats(result.stats)
+                facts = result.facts or []
+            else:
+                facts = self.extract_chunk(dialog_text, retries=retries, complete=complete)
             if facts:
                 return facts
             _logger.error('提取失败，降级存储原始对话')
@@ -345,10 +347,18 @@ class FactExtractor:
         all_facts: list[MemoryFact] = []
         _logger.info(f'分段提取开始: {len(chunks)} 段（并行 {min(4, len(chunks))} 路）')
         with ThreadPoolExecutor(max_workers=min(4, len(chunks))) as executor:
-            future_map = {
-                executor.submit(self.extract_chunk, chunk, retries, complete): index
-                for index, chunk in enumerate(chunks, 1)
-            }
+            if caller is not None:
+                future_map = {
+                    executor.submit(
+                        self._extract_chunk_via_caller, caller, chunk, retries
+                    ): index
+                    for index, chunk in enumerate(chunks, 1)
+                }
+            else:
+                future_map = {
+                    executor.submit(self.extract_chunk, chunk, retries, complete): index
+                    for index, chunk in enumerate(chunks, 1)
+                }
             for future in as_completed(future_map):
                 chunk_index = future_map[future]
                 _logger.info(f'提取分段 {chunk_index}/{len(chunks)} 完成')
@@ -408,16 +418,12 @@ class FactExtractor:
     # ------------------------------------------------------------------ #
     @staticmethod
     def dedup_facts(facts: list[MemoryFact]) -> list[MemoryFact]:
-        """按 (category, key, value) 去重（分段重叠会导致重复提取）。"""
-        seen_signatures: set[tuple[str, str, str]] = set()
-        result: list[MemoryFact] = []
-        for fact in facts:
-            signature = (fact.category, fact.key, fact.value)
-            if signature in seen_signatures:
-                continue
-            seen_signatures.add(signature)
-            result.append(fact)
-        return result
+        """按 (category, key, value) 去重（分段重叠会导致重复提取）。
+
+        实现收敛于 ``os_mem.extraction.callers.dedup_facts``（provider caller 侧
+        切段合并共用，单一实现防漂移）。
+        """
+        return _dedup_facts_by_signature(facts)
 
     # ------------------------------------------------------------------ #
     #  数字兜底（verbatim 事实）
