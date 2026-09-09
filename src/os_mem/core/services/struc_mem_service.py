@@ -12,6 +12,7 @@ from os_mem.core.services.conv_meta_service import (
 )
 from os_mem.entries.mem_models import StructuredMemory
 from os_mem.extractor import FactExtractor, build_extraction_caller
+from os_mem.extractor.normalize import normalize_key
 from os_mem.extractor.profile import resolve_extraction_profile
 from os_mem.infra.llm import ChatClient, get_llm_client
 from os_mem.infra.logger import get_logger
@@ -53,52 +54,114 @@ class StructuredMemService:
         user_id: str,
         source_conversation_id: str,
         facts: list[MemoryFact],
+        started_at: datetime | None = None,
     ) -> int:
-        """把结构化事实落库到 SQLite ``struct_memories`` 表（与向量库双写）。
+        """把结构化事实按 D4 版本裁决落库到 SQLite ``struct_memories`` 表。
 
-        冲突检测（v0.2 变更 2.3）：同一 ``(user_id, category, key)`` 已有记录则
-        UPDATE —— 新值覆盖，旧值归档到 ``previous_fact``；否则 INSERT。
+        D4-1 起取代旧的同 ``(user_id, category, key)`` 原地 UPDATE：
+        - key 经 :func:`normalize_key` 归一为 ``(entity_ref, attribute, lifecycle)``；
+        - current 同签名按对话时间 ``started_at`` latest-wins：新版本 INSERT
+          （version+1、supersedes_id 指旧版），旧 current 置 ``lifecycle=superseded``
+          保留不删（旧值同时镜像到 previous_fact 保持既有审计习惯）；
+        - historical（original_*/previous_* 快照）独立签名共存，永不被覆盖；
+        - 同值幂等跳过；更早会话的迟到事实被忽略（不覆盖权威 current）。
 
-        纯本地落库，与 Milvus / LLM / 向量化解耦，供审计、回溯以及向量库重建兜底。
-        返回本次写入（INSERT + UPDATE）的条数。
+        纯本地落库，与 Milvus / LLM / 向量化解耦。返回新插入的版本行数。
         """
+        from os_mem.core.services.memory_versioning import (
+            ExistingVersion,
+            IncomingFact,
+            plan_versioning,
+        )
+        from os_mem.extractor.normalize import normalize_key
+
         if not facts:
             return 0
         now = datetime.utcnow()
-        written = 0
+
+        incoming = [
+            IncomingFact(
+                fact=f.fact,
+                category=f.category,
+                key=f.key,
+                value=f.value,
+                confidence=f.confidence,
+                nk=normalize_key(f.category, f.key),
+                source_conversation_id=source_conversation_id,
+                source_started_at=started_at,
+            )
+            for f in facts
+        ]
+        involved = {f.nk.signature for f in incoming}
+
         with get_session() as session:
-            for f in facts:
-                existing = session.exec(
-                    select(StructuredMemory).where(
-                        StructuredMemory.user_id == user_id,
-                        StructuredMemory.category == f.category,
-                        StructuredMemory.key == f.key,
-                    )
-                ).first()
-                if existing is not None:
-                    # 冲突：新值覆盖，旧值归档到 previous_fact
-                    existing.previous_fact = existing.fact
-                    existing.fact = f.fact
-                    existing.value = f.value
-                    existing.confidence = f.confidence
-                    existing.source_conversation_id = source_conversation_id
-                    existing.updated_at = now
-                    session.add(existing)
-                else:
-                    session.add(
-                        StructuredMemory(
-                            user_id=user_id,
-                            fact=f.fact,
-                            category=f.category,
-                            key=f.key,
-                            value=f.value,
-                            confidence=f.confidence,
-                            source_conversation_id=source_conversation_id,
+            # 取相关签名的全部既有行（current + historical），按签名分桶
+            rows = session.exec(
+                select(StructuredMemory).where(
+                    StructuredMemory.user_id == user_id
+                )
+            ).all()
+            existing_by_sig: dict[tuple[str, str, str], list[ExistingVersion]] = {}
+            row_by_id: dict[str, StructuredMemory] = {}
+            for r in rows:
+                sig = (r.entity_ref, r.attribute, r.lifecycle)
+                row_by_id[r.id] = r
+                # 裁决只以 current 行作基准；superseded 行不参与
+                if r.lifecycle == "current" and sig in involved:
+                    existing_by_sig.setdefault(sig, []).append(
+                        ExistingVersion(
+                            id=r.id,
+                            value=r.value,
+                            version=r.version,
+                            source_started_at=r.source_started_at,
                         )
                     )
-                written += 1
+                # historical 槽位需要已有的 historical 行做同值去重
+                if r.lifecycle == "historical":
+                    hist_sig = (r.entity_ref, r.attribute, "historical")
+                    if hist_sig in involved:
+                        existing_by_sig.setdefault(hist_sig, []).append(
+                            ExistingVersion(
+                                id=r.id,
+                                value=r.value,
+                                version=r.version,
+                                source_started_at=r.source_started_at,
+                            )
+                        )
+
+            plan = plan_versioning(incoming, existing_by_sig)
+
+            # 旧 current 置 superseded（保留行；旧 fact 镜像进新行 previous_fact）
+            superseded_fact_by_id: dict[str, str] = {}
+            for sid in plan.supersede_ids:
+                old = row_by_id[sid]
+                old.lifecycle = "superseded"
+                old.updated_at = now
+                superseded_fact_by_id[sid] = old.fact
+                session.add(old)
+
+            for nv in plan.inserts:
+                f = nv.fact
+                session.add(
+                    StructuredMemory(
+                        user_id=user_id,
+                        fact=f.fact,
+                        previous_fact=superseded_fact_by_id.get(nv.supersedes_id, ""),
+                        category=f.category,
+                        key=f.key,
+                        value=f.value,
+                        confidence=f.confidence,
+                        source_conversation_id=source_conversation_id,
+                        entity_ref=f.nk.entity_ref,
+                        attribute=f.nk.attribute,
+                        lifecycle=f.nk.lifecycle,
+                        source_started_at=f.source_started_at,
+                        version=nv.version,
+                        supersedes_id=nv.supersedes_id,
+                    )
+                )
             session.commit()
-        return written
+        return len(plan.inserts)
 
     @staticmethod
     def _converge_by_key(facts: list[MemoryFact]) -> list[MemoryFact]:
@@ -180,7 +243,7 @@ class StructuredMemService:
                 f'（LLM {len(llm_facts)} → 合并 {len(conv_facts)}）'
             )
 
-        # SQLite 双写：结构化事实同步落库（审计/回溯 + 向量库重建兜底）。
+        # SQLite 双写：结构化事实按 D4 版本裁决落库（审计/回溯 + 向量库重建兜底）。
         # 本地落库先于向量写入，保证即便 Milvus 写入失败，记忆仍持久化在 SQLite。
         if on_stage:
             on_stage(STATUS_SAVING_SQLITE)
@@ -190,51 +253,74 @@ class StructuredMemService:
             or conversation.source_session_id
             or '',
             facts=conv_facts,
+            started_at=conversation.started_at,
         )
         t_sqlite = time.perf_counter()
-        _logger.info(f'  落库 SQLite struct_memories: {sqlite_written} 条')
+        _logger.info(f'  落库 SQLite struct_memories: 新版本 {sqlite_written} 条')
 
-        # ---- 投影期收敛：本批 facts 按 (category, key) 收敛为每键一条
-        #      （confidence 高者优先，见方案文档 §9-3） ----
-        conv_facts = self._converge_by_key(conv_facts)
-
-        # ---- 删旧插新：按 category 分组批量删旧向量，再 embed + INSERT 新值 ----
+        # ---- D4 投影：Milvus 只镜像 SQLite 中 lifecycle=current 的行，
+        #      投影 key=canonical attribute（每 (user, entity, attribute) 一条）；
+        #      superseded / historical 行不投影。以 SQLite 回读为准（裁决后的赢家），
+        #      而非直接投传入 facts——批内可能含被忽略的更旧事实。 ----
         if on_stage:
             on_stage(STATUS_SAVING_VECTOR)
         user_id = conversation.user_id
-        # 收集本批涉及的全部 key（收敛后每键一条），按 category 分组
-        by_category: dict[str, list[MemoryFact]] = {}
-        for conv_fact in conv_facts:
-            by_category.setdefault(conv_fact.category, []).append(conv_fact)
-        for cat, cat_facts in by_category.items():
-            keys = [f.key for f in cat_facts]
+
+        # 本批触及的 current 签名（historical 不进投影）
+        touched_attrs: dict[str, set[str]] = {}
+        for cf in conv_facts:
+            nk = normalize_key(cf.category, cf.key)
+            if nk.lifecycle == 'current':
+                touched_attrs.setdefault(cf.category, set()).add(nk.attribute)
+
+        # 从权威 SQLite 回读这些签名的 current 行
+        projected: list[StructuredMemory] = []
+        if touched_attrs:
+            with get_session() as ro_session:
+                all_rows = ro_session.exec(
+                    select(StructuredMemory).where(
+                        StructuredMemory.user_id == user_id,
+                        StructuredMemory.lifecycle == 'current',
+                    )
+                ).all()
+            wanted = {
+                (cat, attr) for cat, attrs in touched_attrs.items() for attr in attrs
+            }
+            for r in all_rows:
+                if (r.category, r.attribute) in wanted:
+                    projected.append(r)
+
+        # 删旧插新：按 category + canonical attribute 批量删旧向量（含被取代的旧版）
+        for cat, attrs in touched_attrs.items():
             try:
                 self.vector_store.delete_memories(
-                    user_id=user_id, category=cat, keys=keys
+                    user_id=user_id, category=cat, keys=sorted(attrs)
                 )
             except Exception as e:
                 # 删除失败不阻断入库（SQLite 权威仍在，可重建）；
                 # 记日志便于排查，后续重跑会再次删旧。
                 _logger.error(
                     f'  投影删旧失败 user={user_id} category={cat} '
-                    f'keys_n={len(keys)}: {e}'
+                    f'attrs_n={len(attrs)}: {e}'
                 )
 
         records: list[dict] = []
         texts: list[str] = []
-        for conv_fact in conv_facts:
+        for r in projected:
             records.append(
                 {
+                    # 投影行用新随机 id（与 SQLite id 无关，投影可整体重建）
                     'id': uuid.uuid4().hex,
-                    'fact': conv_fact.fact,
-                    'category': conv_fact.category,
-                    'key': conv_fact.key,
-                    'value': conv_fact.value,
+                    'fact': r.fact,
+                    'category': r.category,
+                    # 投影 key=canonical attribute：保证同属性漂移 key 收敛为一条向量
+                    'key': r.attribute,
+                    'value': r.value,
                     'user_id': user_id,
                     'updated_at': datetime.utcnow().isoformat(),
                 }
             )
-            texts.append(conv_fact.fact)
+            texts.append(r.fact)
         embeddings: list[list[float]] = (
             self.vectorizer.embed_batch(texts) if texts else []
         )
@@ -243,7 +329,8 @@ class StructuredMemService:
             self.vector_store.add_structured_memories(records, embeddings)
         _logger.info(
             f'struct 入库完成 user={user_id} session={session_id} '
-            f'facts={len(records)} 提取={(t_extract - t0) * 1000:.0f}ms '
+            f'新版本={sqlite_written} 投影current={len(records)} '
+            f'提取={(t_extract - t0) * 1000:.0f}ms '
             f'落库={(t_sqlite - t_extract) * 1000:.0f}ms '
             f'向量={(time.perf_counter() - t_sqlite) * 1000:.0f}ms '
             f'总={(time.perf_counter() - t0) * 1000:.0f}ms'

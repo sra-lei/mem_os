@@ -2,10 +2,9 @@
 
 不依赖 Milvus / DashScope / LLM：直接调用
 ``StructuredMemService.save_structured_memories_to_sqlite`` 验证
-INSERT 与冲突 UPDATE（旧值归档 ``previous_fact``）。
-
-对照 v0.2 需求文档「变更 2.3 冲突检测」：同一 (user_id, category, key)
-已有记录则 UPDATE 覆盖，旧值归档；否则 INSERT。
+D4 版本链：同 (user, entity_ref, attribute) current 新值 → 追加新版本行、
+旧行置 lifecycle=superseded（旧 fact 归档到新行 previous_fact）；
+不同属性独立；historical 快照独立共存。
 """
 from __future__ import annotations
 
@@ -84,7 +83,7 @@ def test_insert_and_conflict_update(tmp_memory_db: Path) -> None:
     assert rows[0].previous_fact == ""
     assert rows[0].source_conversation_id == "conv-1"
 
-    # 冲突：同 (user_id, category, key) 新值 → UPDATE，旧值归档
+    # 冲突：同属性新值 → 追加 v2，旧 v1 置 superseded（旧 fact 归档 v2.previous_fact）
     n2 = StructuredMemService.save_structured_memories_to_sqlite(
         user_id=user_id,
         source_conversation_id="conv-2",
@@ -101,10 +100,55 @@ def test_insert_and_conflict_update(tmp_memory_db: Path) -> None:
     assert n2 == 1
 
     rows = _query_rows(user_id)
-    assert len(rows) == 1  # 仍是 1 条（覆盖，不追加）
-    assert rows[0].value == "8847293001"
-    assert rows[0].previous_fact == "用户支票账户号码是 4429853327"
-    assert rows[0].source_conversation_id == "conv-2"
+    assert len(rows) == 2  # 版本链：v1(superseded) + v2(current) 各一行
+    current = [r for r in rows if r.lifecycle == "current"]
+    superseded = [r for r in rows if r.lifecycle == "superseded"]
+    assert len(current) == 1 and len(superseded) == 1
+    assert current[0].value == "8847293001"
+    assert current[0].version == 2
+    assert current[0].supersedes_id == superseded[0].id
+    assert current[0].previous_fact == "用户支票账户号码是 4429853327"
+    assert current[0].source_conversation_id == "conv-2"
+    assert superseded[0].value == "4429853327"
+    assert superseded[0].version == 1
+
+
+def test_earlier_started_at_does_not_supersede_current(tmp_memory_db: Path) -> None:
+    """D4 as-of：迟到的更早会话（对话时间更早）不得覆盖 current。"""
+    from datetime import datetime as DT
+
+    from os_mem.core.services.struc_mem_service import StructuredMemService
+
+    user_id = "user-asof"
+    svc = StructuredMemService.save_structured_memories_to_sqlite
+    # 最新会话 09-26：$95,000
+    svc(user_id, "conv-new", [_make_fact("w 95k", "finance", "wire_amount", "$95,000")],
+        started_at=DT(2024, 9, 26))
+    # 迟到旧会话 09-15：$85,000 —— 必须被忽略
+    n = svc(user_id, "conv-old", [_make_fact("w 85k", "finance", "wire_amount", "$85,000")],
+            started_at=DT(2024, 9, 15))
+    assert n == 0
+    rows = [r for r in _query_rows(user_id) if r.lifecycle == "current"]
+    assert len(rows) == 1
+    assert rows[0].value == "$95,000"
+
+
+def test_historical_snapshot_coexists_with_current(tmp_memory_db: Path) -> None:
+    """original_* 快照与 current 是不同签名：独立共存，互不取代。"""
+    from os_mem.core.services.struc_mem_service import StructuredMemService
+
+    user_id = "user-hist"
+    svc = StructuredMemService.save_structured_memories_to_sqlite
+    svc(user_id, "conv-1", [_make_fact("wire now 95k", "finance", "wire_amount", "$95,000")])
+    svc(user_id, "conv-2", [
+        _make_fact("wire now 95k", "finance", "wire_amount", "$95,000"),
+        _make_fact("original wire 85k", "finance", "original_wire_amount", "$85,000"),
+    ])
+    rows = _query_rows(user_id)
+    current = [r for r in rows if r.lifecycle == "current" and r.attribute == "wire_amount"]
+    historical = [r for r in rows if r.lifecycle == "historical"]
+    assert len(current) == 1 and current[0].value == "$95,000"
+    assert len(historical) == 1 and historical[0].value == "$85,000"
 
 
 def test_multi_fact_insert_and_no_conflict_on_different_key(tmp_memory_db: Path) -> None:
