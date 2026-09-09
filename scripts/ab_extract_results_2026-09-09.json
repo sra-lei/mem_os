@@ -1,0 +1,44 @@
+[
+ {
+  "label": "L2-10-c3:new",
+  "calls": 3,
+  "trunc": 0,
+  "split": 0,
+  "repair": 0,
+  "repair_ok": 0,
+  "degrade": 0,
+  "in": 4422,
+  "out": 17874,
+  "facts": 16,
+  "cov": 0.06666666666666667,
+  "sec": 61.99346330296248
+ },
+ {
+  "label": "L2-13-c3:new",
+  "calls": 3,
+  "trunc": 0,
+  "split": 0,
+  "repair": 0,
+  "repair_ok": 0,
+  "degrade": 0,
+  "in": 3985,
+  "out": 12331,
+  "facts": 14,
+  "cov": 0.0,
+  "sec": 59.842130000237375
+ },
+ {
+  "label": "L2-20-c3:new",
+  "calls": 4,
+  "trunc": 0,
+  "split": 0,
+  "repair": 2,
+  "repair_ok": 0,
+  "degrade": 0,
+  "in": 4429,
+  "out": 8515,
+  "facts": 5,
+  "cov": 0.25,
+  "sec": 48.376821101643145
+ }
+]
