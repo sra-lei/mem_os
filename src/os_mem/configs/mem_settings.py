@@ -26,6 +26,11 @@ class MemorySetting(BaseSettings):
     DEEPSEEK_TEMPERATURE: float = Field(default=0.1, ge=0, le=1)
     DEEPSEEK_TIMEOUT: int = Field(default=60, ge=1)
     DEEPSEEK_MAX_TOKENS: int = Field(default=8192, ge=1)
+    # 思考模式（2026-09-09 探测实证：deepseek-v4-flash 默认开启 thinking，
+    # reasoning_content 计入 completion budget——提取这类简单结构化任务会
+    # 被思考吃光 8192 预算导致 content 空截断 + 慢（30-68s/次）且 completion
+    # tokens 虚高。False = 调用带 extra_body thinking disabled；True = 恢复模型默认)
+    DEEPSEEK_THINKING: bool = Field(default=False)
     # 长对话分段提取参数（2026-09-09 双维化：字符数 OR 消息数任一超限即切。
     # 真正瓶颈是输出预算（由事实条数≈消息数决定），非输入长度；
     # 初值保守估计，观测修复后按真实 usage 校准——见方案：事实提取鲁棒性与成本优化）

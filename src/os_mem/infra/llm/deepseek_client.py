@@ -107,6 +107,10 @@ class DeepSeekClient:
             )
             if response_format is not None:
                 kwargs['response_format'] = response_format
+            # 简单任务默认关思考（见 memory_settings.DEEPSEEK_THINKING 注释；
+            # 探测实证：思考吃掉输出预算 → content 空截断 + 延迟数倍）
+            if not memory_settings.DEEPSEEK_THINKING:
+                kwargs['extra_body'] = {'thinking': {'type': 'disabled'}}
             try:
                 resp = self.client.chat.completions.create(**kwargs)
             except Exception as exc:  # noqa: BLE001 —— 观测耗时后原样上抛

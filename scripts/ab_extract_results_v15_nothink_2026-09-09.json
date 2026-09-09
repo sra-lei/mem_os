@@ -1,0 +1,72 @@
+[
+ {
+  "label": "L2-10-c3:v15",
+  "calls": 3,
+  "trunc": 0,
+  "split": 0,
+  "repair": 0,
+  "repair_ok": 0,
+  "degrade": 0,
+  "in": 4485,
+  "out": 2910,
+  "facts": 51,
+  "cov": 0.7333333333333333,
+  "sec": 9.027411272749305
+ },
+ {
+  "label": "L2-13-c3:v15",
+  "calls": 3,
+  "trunc": 0,
+  "split": 0,
+  "repair": 0,
+  "repair_ok": 0,
+  "degrade": 0,
+  "in": 4048,
+  "out": 1353,
+  "facts": 21,
+  "cov": 1.0,
+  "sec": 3.2078661848790944
+ },
+ {
+  "label": "L2-20-c3:v15",
+  "calls": 4,
+  "trunc": 0,
+  "split": 0,
+  "repair": 2,
+  "repair_ok": 0,
+  "degrade": 0,
+  "in": 4513,
+  "out": 837,
+  "facts": 13,
+  "cov": 0.75,
+  "sec": 3.1978414757177234
+ },
+ {
+  "label": "L2-01-c1:v15",
+  "calls": 4,
+  "trunc": 0,
+  "split": 0,
+  "repair": 0,
+  "repair_ok": 0,
+  "degrade": 0,
+  "in": 5623,
+  "out": 2348,
+  "facts": 41,
+  "cov": 0.7142857142857143,
+  "sec": 3.859506392851472
+ },
+ {
+  "label": "L1-04:v15",
+  "calls": 4,
+  "trunc": 0,
+  "split": 0,
+  "repair": 0,
+  "repair_ok": 0,
+  "degrade": 0,
+  "in": 5949,
+  "out": 2349,
+  "facts": 32,
+  "cov": 0.25,
+  "sec": 3.3448409801349044
+ }
+]
