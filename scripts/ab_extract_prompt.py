@@ -15,7 +15,7 @@ import sys
 import time
 import yaml
 from os_mem.extractor.fact_extractor import FactExtractor
-from os_mem.extractor.prompt import (
+from os_mem.extractor.deepseek_caller import (
     build_extract_complete,
     build_repair_messages,
 )

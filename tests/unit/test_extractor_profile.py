@@ -34,7 +34,7 @@ from os_mem.extractor.profile import (
     register_extraction_profile,
     resolve_extraction_profile,
 )
-from os_mem.extractor.prompt import build_extract_messages
+from os_mem.extractor.deepseek_caller import build_extract_messages
 from os_mem.infra.llm.base_client import ChatOutcome
 
 _VALID_FACTS = (
@@ -63,7 +63,7 @@ class TestDefaultProfile:
         assert p.max_output_tokens == memory_settings.DEEPSEEK_MAX_TOKENS
         assert p.temperature == memory_settings.DEEPSEEK_TEMPERATURE
         assert p.max_facts == memory_settings.DEEPSEEK_EXTRACT_MAX_FACTS
-        # system/repair prompt 默认 None = 用 prompt.py 现行单源模板（防双份）
+        # system/repair prompt 默认 None = 用 deepseek_caller 现行单源模板（防双份）
         assert p.system_prompt is None
         assert p.repair_prompt is None
 

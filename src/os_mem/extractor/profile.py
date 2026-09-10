@@ -9,7 +9,7 @@ provider/model 换；恢复策略（repair/切段/重试）是**代码**，收�
 约束（防环 / 防双份模板）：
 - 本模块只依赖 stdlib、``os_mem.configs.mem_settings`` 与 ``os_mem.extractor.models``
   （告警用 stdlib logging，避免拉入 loguru 初始化副作用）；
-- ``system_prompt`` / ``repair_prompt`` 为 None = 用 ``extractor.prompt`` 的
+- ``system_prompt`` / ``repair_prompt`` 为 None = 用 ``deepseek_caller`` 的
   SYSTEM_PROMPT / REPAIR_PROMPT 现行单源模板（None 即单源，防双份文本漂移）；
 - 默认画像 ``build_default_profile()`` 从 memory_settings **现值**固化——settings
   现值即默认画像；不显式传 profile 的路径行为与现状逐字节等价；
