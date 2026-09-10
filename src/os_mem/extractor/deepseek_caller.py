@@ -26,7 +26,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
 
 from os_mem.configs.mem_settings import memory_settings
 from os_mem.extractor.callers import _ExtractionCore
@@ -135,35 +134,20 @@ class DeepSeekExtractionCaller:
         facts, stats = self._core.extract(dialog_text, validate=validate, retries=retries)
         return CallResult(facts=facts, stats=stats)
 
-    # ---- 低层能力（prompt 拼装用本模块渲染，模板零改动）---- #
-    def _extract_messages(self, dialog_text: str) -> list[dict[str, str]]:
-        """提取调用的 messages 拼装：{max_facts} 按本 caller 画像取值
-        （默认画像 = settings 现值，与旧无参渲染逐字节一致）。"""
-        return build_extract_messages(dialog_text, max_facts=self._profile.max_facts)
-
+    # ---- 低层能力：走 outcome() 单一调用路径，抽取 usage 三元组 ---- #
     def _generate(
         self, dialog_text: str
     ) -> tuple[str, str | None, tuple[int, int] | None]:
-        chat_outcome = getattr(self._client, 'chat_outcome', None)
-        if chat_outcome is not None:
-            outcome = chat_outcome(
-                self._extract_messages(dialog_text),
-                response_format=self._response_format,
+        outcome = self.outcome(dialog_text)
+        # usage 口径与旧 _ExtractComplete/AB Recorder 一致（getattr 容错缺属性按 0）；
+        # 恢复核心对每次 generate 累计 token 数（None → 0），见方案 §4 步骤 4。
+        usage_tokens: tuple[int, int] | None = None
+        if outcome.usage is not None:
+            usage_tokens = (
+                getattr(outcome.usage, 'prompt_tokens', 0) or 0,
+                getattr(outcome.usage, 'completion_tokens', 0) or 0,
             )
-            return (
-                outcome.content,
-                outcome.finish_reason,
-                _usage_token_counts(outcome.usage),
-            )
-        # 无 chat_outcome 的 client：无截断信号，退化为旧整段重试语义
-        return (
-            self._client.chat(
-                self._extract_messages(dialog_text),
-                response_format=self._response_format,
-            ),
-            None,
-            None,
-        )
+        return outcome.content, outcome.finish_reason, usage_tokens
 
     # ---- 旧鸭子接口（AB Recorder / 旧调用方兼容） ------------------- #
     def outcome(self, dialog_text: str) -> ChatOutcome:
@@ -172,15 +156,18 @@ class DeepSeekExtractionCaller:
         client 支持 ``chat_outcome`` 时返回完整 outcome（含 finish_reason，length
         截断可由恢复循环识别）；否则退回 ``chat`` 包一层（无 finish 信息）。
         """
+        messages = build_extract_messages(
+            dialog_text, max_facts=self._profile.max_facts
+        )
         chat_outcome = getattr(self._client, 'chat_outcome', None)
         if chat_outcome is not None:
             return chat_outcome(
-                self._extract_messages(dialog_text),
+                messages,
                 response_format=self._response_format,
             )
         return ChatOutcome(
             self._client.chat(
-                self._extract_messages(dialog_text),
+                messages,
                 response_format=self._response_format,
             )
         )
@@ -193,19 +180,6 @@ class DeepSeekExtractionCaller:
             build_repair_messages(partial_json, max_facts=self._profile.max_facts),
             response_format=self._response_format,
         )
-
-
-def _usage_token_counts(usage: Any) -> tuple[int, int] | None:
-    """从 chat outcome 的 usage 取 (input, output) token 数；usage 缺失 → None。
-
-    与旧 ``_ExtractComplete``/AB Recorder 口径一致（getattr 容错，缺属性按 0）：
-    恢复核心对每次 generate 累计 token 数（None → 0），见方案 §4 步骤 4。
-    """
-    if usage is None:
-        return None
-    input_tokens = getattr(usage, 'prompt_tokens', 0) or 0
-    output_tokens = getattr(usage, 'completion_tokens', 0) or 0
-    return input_tokens, output_tokens
 
 
 def build_caller(client: ChatClient, profile: ModelProfile | None = None) -> DeepSeekExtractionCaller:
