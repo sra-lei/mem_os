@@ -10,7 +10,9 @@
 - ``deepseek_caller.py``：DeepSeek 具体实现（DeepSeekExtractionCaller +
   build_caller 标准工厂；chat_outcome/json_object/usage 口径专属逻辑内聚于此）
 - ``prompt.py``      ：提取任务 prompt（SYSTEM_PROMPT/REPAIR_PROMPT 渲染与指纹）
-- ``tokens.py``      ：数值 token 口径（提取 R1 与检索冗余过滤共享）
+- ``regular_extractor.py``：不依赖 LLM 的确定性正则提取（RegularExtractor）——
+  verbatim 数字句兜底 / R1 覆盖剪枝 / fact_tokens 数值 token 口径
+  （提取 R1 与检索冗余过滤共享，原 tokens.py + FactExtractor 静态方法整合于此）
 - ``common.py``      ：共享纯函数/常量（split_text_midpoint / dedup_facts /
   MAX_TRUNC_SPLIT_DEPTH / 统计 keys / empty_extraction_stats）——单一实现源，
   fact_extractor 与 callers 共用

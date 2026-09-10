@@ -95,24 +95,24 @@ def test_converge_empty_and_single() -> None:
 #  verbatim 兜底句 key：内容指纹（B 批）
 # ------------------------------------------------------------------ #
 def test_verbatim_fingerprint_same_sentence_same_key() -> None:
-    from os_mem.extractor.fact_extractor import FactExtractor
+    from os_mem.extractor.regular_extractor import RegularExtractor
 
     dialog = '{"role":"user","content":"My claim number is CLM-2024-894327."}'
-    f1 = FactExtractor.fallback_numeric_facts(dialog)
-    f2 = FactExtractor.fallback_numeric_facts(dialog)
+    f1 = RegularExtractor.fallback_numeric_facts(dialog)
+    f2 = RegularExtractor.fallback_numeric_facts(dialog)
     assert len(f1) == 1 and len(f2) == 1
     assert f1[0].key == f2[0].key  # 同句重跑幂等（同 key → upsert 覆盖）
     assert f1[0].key.startswith('verbatim_')
 
 
 def test_verbatim_fingerprint_distinct_sentences_distinct_keys() -> None:
-    from os_mem.extractor.fact_extractor import FactExtractor
+    from os_mem.extractor.regular_extractor import RegularExtractor
 
     dialog = (
         '{"role":"user","content":"Claim CLM-2024-894327."}\n'
         '{"role":"assistant","content":"The report number is SAC-2024-78432."}'
     )
-    facts = FactExtractor.fallback_numeric_facts(dialog)
+    facts = RegularExtractor.fallback_numeric_facts(dialog)
     keys = {f.key for f in facts}
     assert len(keys) == len(facts)  # 异句不同 key，互不覆盖
     assert all(k.startswith('verbatim_') for k in keys)
@@ -120,13 +120,13 @@ def test_verbatim_fingerprint_distinct_sentences_distinct_keys() -> None:
 
 def test_verbatim_no_shared_aggregate_key() -> None:
     """回归：不得再出现聚合的 'verbatim_record' 共享 key。"""
-    from os_mem.extractor.fact_extractor import FactExtractor
+    from os_mem.extractor.regular_extractor import RegularExtractor
 
     dialog = (
         '{"role":"assistant","content":"Blood work $285 and X-ray $420."}\n'
         '{"role":"user","content":"And the DHPP vaccine is $42?"}'
     )
-    facts = FactExtractor.fallback_numeric_facts(dialog)
+    facts = RegularExtractor.fallback_numeric_facts(dialog)
     assert facts
     assert all(f.key != 'verbatim_record' for f in facts)
 

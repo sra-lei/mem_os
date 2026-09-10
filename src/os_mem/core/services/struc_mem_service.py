@@ -14,6 +14,7 @@ from os_mem.entries.mem_models import StructuredMemory
 from os_mem.extractor import FactExtractor, build_extraction_caller
 from os_mem.extractor.normalize import normalize_key
 from os_mem.extractor.profile import resolve_extraction_profile
+from os_mem.extractor.regular_extractor import RegularExtractor
 from os_mem.infra.llm import ChatClient, get_llm_client
 from os_mem.infra.logger import get_logger
 from os_mem.infra.storage import (
@@ -28,7 +29,8 @@ from os_mem.models.mem_models import MemoryFact
 
 _logger = get_logger('os_mem.struc_mem')
 
-# 事实提取执行器（校验/分段/去重/数字兜底/R1 剪枝/编排）—— 提取域见 os_mem/extractor/
+# 事实提取执行器（校验/分段/去重/编排；数字兜底/R1 剪枝在 RegularExtractor）——
+# 提取域见 os_mem/extractor/
 _extractor = FactExtractor()
 
 
@@ -229,11 +231,13 @@ class StructuredMemService:
 
         # LLM 提取兜底：从原文把含金额/编号/日期/百分比等精确 token 的句子原样入库，
         # 避免结构化提取改写/省略精确数值（如 $2,400、CLM-2024-894327、2:30 PM）。
-        fallback_facts = _extractor.fallback_numeric_facts(dialog_text)
+        fallback_facts = RegularExtractor.fallback_numeric_facts(dialog_text)
         # R1 覆盖去重：数值 token 全被结构化覆盖的兜底句不存（只保唯一信息，
-        # 无负收益——删的是重复；详见 FactExtractor.prune_redundant_verbatim）。
+        # 无负收益——删的是重复；详见 RegularExtractor.prune_redundant_verbatim）。
         raw_fallback = len(fallback_facts)
-        fallback_facts = _extractor.prune_redundant_verbatim(fallback_facts, llm_facts)
+        fallback_facts = RegularExtractor.prune_redundant_verbatim(
+            fallback_facts, llm_facts
+        )
         conv_facts = _extractor.dedup_facts(llm_facts + fallback_facts)
         if raw_fallback:
             _logger.info(

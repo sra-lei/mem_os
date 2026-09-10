@@ -7,7 +7,8 @@
   - ``extract_structured_facts``：单段提取 / 长对话并行 / 全失败降级
     （注入 fake complete）
   - ``dedup_facts``           ：按 (category, key, value) 跨段去重
-  - ``fallback_numeric_facts``：含金额/编号/日期/电话的原文句子 verbatim 兜底
+  - ``fallback_numeric_facts``（RegularExtractor）：含金额/编号/日期/电话的原文
+    句子 verbatim 兜底（测试调用见 regular_extractor.RegularExtractor）
 
 用法:
     pytest tests/unit/test_fact_extraction.py
@@ -19,6 +20,7 @@ import json
 import pytest
 
 from os_mem.extractor.fact_extractor import FactExtractor
+from os_mem.extractor.regular_extractor import RegularExtractor
 from os_mem.models.mem_models import MemoryFact
 
 
@@ -99,7 +101,7 @@ class TestDedupFacts:
 # ------------------------------------------------------------------ #
 class TestFallbackNumericFacts:
     def _run(self, text: str) -> list[MemoryFact]:
-        return FactExtractor.fallback_numeric_facts(text)
+        return RegularExtractor.fallback_numeric_facts(text)
 
     def test_picks_amount_phone_verbatim_sentences(self) -> None:
         text = (
@@ -136,7 +138,7 @@ class TestFallbackNumericFacts:
             for i in range(1, 80)
         ]
         text = "\n".join(lines)
-        facts = FactExtractor.fallback_numeric_facts(text, max_facts=10)
+        facts = RegularExtractor.fallback_numeric_facts(text, max_facts=10)
         assert len(facts) == 10
 
 
@@ -440,7 +442,7 @@ class TestPruneRedundantVerbatim:
         fallback = [
             _fact("The rollover IRA has $248,500.", key="verbatim_abc", value="x")
         ]
-        out = FactExtractor.prune_redundant_verbatim(fallback, llm)
+        out = RegularExtractor.prune_redundant_verbatim(fallback, llm)
         assert out == []
 
     def test_unique_carrier_kept(self) -> None:
@@ -453,7 +455,7 @@ class TestPruneRedundantVerbatim:
                 value="x",
             )
         ]
-        out = FactExtractor.prune_redundant_verbatim(fallback, llm)
+        out = RegularExtractor.prune_redundant_verbatim(fallback, llm)
         assert len(out) == 1
         assert out[0].fact == fallback[0].fact
 
@@ -469,12 +471,12 @@ class TestPruneRedundantVerbatim:
                 value="x",
             )
         ]
-        out = FactExtractor.prune_redundant_verbatim(fallback, llm)
+        out = RegularExtractor.prune_redundant_verbatim(fallback, llm)
         assert len(out) == 1  # 340/1200 未被结构化覆盖 → 整句保留
 
     def test_empty_llm_facts_keeps_all(self) -> None:
         fallback = [_fact("Balance is $127,845.", key="verbatim_abc", value="x")]
-        out = FactExtractor.prune_redundant_verbatim(fallback, [])
+        out = RegularExtractor.prune_redundant_verbatim(fallback, [])
         assert len(out) == 1
 
     def test_degrade_raw_conversation_skips_prune(self) -> None:
@@ -491,7 +493,7 @@ class TestPruneRedundantVerbatim:
             _fact("Balance is $127,845.", key="verbatim_abc", value="x"),
             _fact("IRA has $248,500.", key="verbatim_def", value="x"),
         ]
-        out = FactExtractor.prune_redundant_verbatim(fallback, llm)
+        out = RegularExtractor.prune_redundant_verbatim(fallback, llm)
         assert len(out) == 2
 
 
@@ -505,12 +507,12 @@ class TestFallbackBlindSpots:
             '{"role":"assistant","content":"Your rollover IRA has $248,500. '
             'Currently invested in the Freedom 2045 target-date fund."}'
         )
-        facts = FactExtractor.fallback_numeric_facts(dialog)
+        facts = RegularExtractor.fallback_numeric_facts(dialog)
         texts = [f.fact for f in facts]
         assert any("Freedom 2045" in text for text in texts)
 
     def test_bare_year_alone_not_captured(self) -> None:
         """裸 4 位年份（前词非大写词）不误收——避免把普通年份/计数当 verbatim 噪音。"""
         dialog = '{"role":"user","content":"We plan to retire sometime in 2045."}'
-        facts = FactExtractor.fallback_numeric_facts(dialog)
+        facts = RegularExtractor.fallback_numeric_facts(dialog)
         assert facts == []

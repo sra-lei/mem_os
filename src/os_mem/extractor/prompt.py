@@ -2,7 +2,7 @@
 
 归属：``os_mem.extractor`` 记忆提取域（2026-09-08 由 os_mem.utils 迁入
 extraction/，2026-09-09 包更名 extraction→extractor），与 fact_extractor.py /
-callers.py / tokens.py 同域内聚；通用指纹工具仍留 ``os_mem.utils.prompt_fp``。
+callers.py / regular_extractor.py 同域内聚；通用指纹工具仍留 ``os_mem.utils.prompt_fp``。
 
 职责划分（2026-09 重构，为接入 LLM 网关铺路）：
 - ``os_mem.infra.llm.deepseek_client.DeepSeekClient`` 是
