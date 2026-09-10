@@ -27,8 +27,8 @@ from os_mem.configs.mem_settings import memory_settings
 from os_mem.extractor import profile as profile_module
 from os_mem.extractor.callers import DeepSeekExtractionCaller, _ExtractionCore
 from os_mem.extractor.fact_extractor import FactExtractor
+from os_mem.extractor.models import ChunkCaps
 from os_mem.extractor.profile import (
-    ChunkCaps,
     build_default_profile,
     register_extraction_profile,
     resolve_extraction_profile,

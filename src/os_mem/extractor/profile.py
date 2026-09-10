@@ -1,12 +1,13 @@
-"""模型数据画像（ModelProfile）—— 纯数据，不携带任何策略/行为。
+"""模型数据画像注册表与解析 —— 纯数据类在 ``models.py``，本模块只放注册/解析逻辑。
 
 归属：``os_mem.extractor`` 记忆提取域。分层意图（docs/方案-提取任务与LLM模型画像
 解耦.md §2 v2 / §4 步骤 3-4）：模型数据画像（模型名、输出预算、温度、分段上限、
-prompt 覆盖）是**纯数据**，随 provider/model 换；恢复策略（repair/切段/重试）是
-**代码**，收敛在 ``callers.py`` 各 caller 内部——画像里刻意没有策略字段。
+prompt 覆盖，见 ``models.ModelProfile`` / ``models.ChunkCaps``）是**纯数据**，随
+provider/model 换；恢复策略（repair/切段/重试）是**代码**，收敛在 ``callers.py``
+各 caller 内部——画像里刻意没有策略字段。
 
 约束（防环 / 防双份模板）：
-- 本模块**不 import 包内其他模块**，只依赖 stdlib 与 ``os_mem.configs.mem_settings``
+- 本模块只依赖 stdlib、``os_mem.configs.mem_settings`` 与 ``os_mem.extractor.models``
   （告警用 stdlib logging，避免拉入 loguru 初始化副作用）；
 - ``system_prompt`` / ``repair_prompt`` 为 None = 用 ``extractor.prompt`` 的
   SYSTEM_PROMPT / REPAIR_PROMPT 现行单源模板（None 即单源，防双份文本漂移）；
@@ -19,63 +20,11 @@ prompt 覆盖）是**纯数据**，随 provider/model 换；恢复策略（repai
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 
 from os_mem.configs.mem_settings import memory_settings
+from os_mem.extractor.models import ChunkCaps, ModelProfile
 
 _logger = logging.getLogger('os_mem.extractor.profile')
-
-
-@dataclass(frozen=True)
-class ChunkCaps:
-    """单次提取调用的输入分段上限（纯数据；任务层分段编排取此供给）。
-
-    对应 memory_settings 的 DEEPSEEK_EXTRACT_MAX_CHARS / MAX_MSGS / OVERLAP
-    （双维分段：字符数 OR 消息数任一超限即切，段间冗余 overlap 条）。
-    """
-
-    max_chars: int
-    max_msgs: int
-    overlap: int
-
-    @classmethod
-    def from_settings(cls) -> ChunkCaps:
-        """读 memory_settings 现值构造（settings 即默认画像的单一数据源）。"""
-        return cls(
-            max_chars=memory_settings.DEEPSEEK_EXTRACT_MAX_CHARS,
-            max_msgs=memory_settings.DEEPSEEK_EXTRACT_MAX_MSGS,
-            overlap=memory_settings.DEEPSEEK_EXTRACT_OVERLAP,
-        )
-
-
-@dataclass(frozen=True)
-class ModelProfile:
-    """模型数据画像（frozen 纯数据，无策略字段——策略随 caller 实现走）。
-
-    字段语义：
-    - ``provider`` / ``model``：提供方与模型名（注册表 key = f'{provider}:{model}'）；
-    - ``caller``：provider 内自愈实现标识（策略注册点；v1 仅 'deepseek'）；
-    - ``max_output_tokens`` / ``temperature``：单次调用输出预算与温度（数据）；
-    - ``max_facts``：单次（每段）提取事实上限——渲染进 system/repair prompt 的
-      {max_facts} 占位（``prompt.build_extract_messages`` /
-      ``build_repair_messages``）；
-    - ``chunk_caps``：输入分段上限（任务层 ``chunk_dialog`` 取此供给）；
-    - ``system_prompt`` / ``repair_prompt``：模板覆盖；None = 用 ``extractor.prompt``
-      现行单源模板（防双份文本漂移）。
-
-    Python dataclass 要求无默认字段在前，故必填的 ``max_output_tokens`` /
-    ``temperature`` / ``max_facts`` / ``chunk_caps`` 排在带默认的字段之前。
-    """
-
-    max_output_tokens: int
-    temperature: float
-    max_facts: int
-    chunk_caps: ChunkCaps
-    provider: str = 'deepseek'
-    model: str = ''
-    caller: str = 'deepseek'
-    system_prompt: str | None = None
-    repair_prompt: str | None = None
 
 
 # 提取画像注册表：key = f'{provider}:{model}'（显式注册条目优先于默认画像）。

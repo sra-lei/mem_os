@@ -39,6 +39,17 @@ EXTRACTION_STATS_KEYS = (
 MAX_TRUNC_SPLIT_DEPTH = 1
 
 
+def empty_extraction_stats() -> dict[str, int]:
+    """恢复循环遥测计数的零值 dict（keys 与 FactExtractor 实例计数一致；
+    degrade_rows 属任务层，由任务层在共享 keys 之外自行追加）。
+
+    CallResult.stats 的 default_factory 与 callers 恢复循环共用此单一实现源。
+    in_tokens / out_tokens：每次 generate 后由恢复核心按 usage 累计（None→0），
+    递归/重试全路径自然计入——见 callers._ExtractionCore 与方案 §4 步骤 4 观测增强。
+    """
+    return {key: 0 for key in EXTRACTION_STATS_KEYS}
+
+
 def split_text_midpoint(text: str) -> tuple[str, str] | None:
     """消息中点对半切（截断空返回的切段递归用）。
 

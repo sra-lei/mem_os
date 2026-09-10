@@ -24,7 +24,9 @@ confidence 边界）由任务注入。分段编排/去重/verbatim 兜底/降级
 同样经此接口工作。
 
 依赖方向（无环）：callers → prompt → （configs / infra.llm.base_client / utils.prompt_fp）；
-callers / fact_extractor → profile → （configs.mem_settings，纯数据不反向依赖）；
+models 为纯数据类（仅依赖 common 与 configs.mem_settings），callers / fact_extractor /
+profile / normalize 均 → models；profile（注册表/解析）→ configs.mem_settings，
+纯数据不反向依赖；
 callers / fact_extractor → common（共享纯函数/常量，common 不 import 包内其他模块）；
 fact_extractor → callers；prompt 不反向 import fact_extractor/callers/profile（其兼容构造在
 函数体内延迟 import，见 prompt.build_extract_complete）。
@@ -33,37 +35,21 @@ fact_extractor → callers；prompt 不反向 import fact_extractor/callers/prof
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, field
 from typing import Any
 
 from os_mem.extractor.common import (
-    EXTRACTION_STATS_KEYS,
     MAX_TRUNC_SPLIT_DEPTH,
     dedup_facts,
+    empty_extraction_stats,
     split_text_midpoint,
 )
-from os_mem.extractor.profile import ModelProfile, build_default_profile
+from os_mem.extractor.models import CallResult, ModelProfile
+from os_mem.extractor.profile import build_default_profile
 from os_mem.extractor.prompt import build_extract_messages, build_repair_messages
 from os_mem.infra.llm.base_client import ChatClient, ChatOutcome
 from os_mem.infra.logger import get_logger
 
 _logger = get_logger('os_mem.extractor.callers')
-
-
-# ------------------------------------------------------------------ #
-#  契约
-# ------------------------------------------------------------------ #
-def _empty_stats() -> dict[str, int]:
-    """恢复循环遥测计数（keys 与 FactExtractor 实例计数一致；degrade_rows 属任务层）。"""
-    return {key: 0 for key in EXTRACTION_STATS_KEYS}
-
-
-@dataclass
-class CallResult:
-    """单段提取结果：facts|None（None = 全败/干净失败），stats = 本次调用遥测。"""
-
-    facts: list | None
-    stats: dict[str, int] = field(default_factory=_empty_stats)
 
 
 # ------------------------------------------------------------------ #
@@ -119,7 +105,7 @@ class _ExtractionCore:
         retries: int = 2,
     ) -> tuple[list | None, dict[str, int]]:
         """对单段文本跑完整恢复循环；返回 (facts|None, 本次遥测计数)。"""
-        stats = _empty_stats()
+        stats = empty_extraction_stats()
         facts = self._recover(text, validate, retries, depth=0, stats=stats)
         return facts, stats
 

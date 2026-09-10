@@ -9,7 +9,10 @@
 - ``prompt.py``      ：提取任务 prompt（SYSTEM_PROMPT/REPAIR_PROMPT 渲染与指纹）
 - ``tokens.py``      ：数值 token 口径（提取 R1 与检索冗余过滤共享）
 - ``common.py``      ：共享纯函数/常量（split_text_midpoint / dedup_facts /
-  MAX_TRUNC_SPLIT_DEPTH / 统计 keys）——单一实现源，fact_extractor 与 callers 共用
+  MAX_TRUNC_SPLIT_DEPTH / 统计 keys / empty_extraction_stats）——单一实现源，
+  fact_extractor 与 callers 共用
+- ``models.py``      ：提取域数据类单一存放点（NormalizedKey / CallResult /
+  ChunkCaps / ModelProfile，纯数据无策略）
 
 对外入口：本包暴露提取链路需要的三个高层能力——
 ``FactExtractor``（执行器，任务语义）与 ``build_extraction_caller``（provider 自愈

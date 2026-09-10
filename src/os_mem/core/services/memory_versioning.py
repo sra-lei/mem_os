@@ -17,10 +17,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from os_mem.extractor.models import NormalizedKey
 from os_mem.extractor.normalize import (
     LIFECYCLE_CURRENT,
     LIFECYCLE_HISTORICAL,
-    NormalizedKey,
 )
 
 

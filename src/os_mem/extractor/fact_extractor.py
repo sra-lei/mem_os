@@ -48,7 +48,7 @@ from os_mem.extractor.common import (
     dedup_facts as _dedup_facts_by_signature,
     split_text_midpoint as _split_text_midpoint,
 )
-from os_mem.extractor.profile import ChunkCaps
+from os_mem.extractor.models import ChunkCaps
 from os_mem.extractor.tokens import fact_tokens
 from os_mem.infra.logger import get_logger
 from os_mem.models.mem_models import MemoryFact, MemoryFacts
@@ -306,7 +306,7 @@ class FactExtractor:
         """caller 模式单段提取（长对话并行 worker）：注入任务侧校验并回收遥测。
 
         caller 须满足 ``extract(dialog_text, *, validate, retries) -> CallResult``
-        契约（见 callers.CallResult）；facts 为 None = 全败（等效旧 extract_chunk
+        契约（见 models.CallResult）；facts 为 None = 全败（等效旧 extract_chunk
         返回 []，上层降级逻辑不变）。
         """
         result = caller.extract(

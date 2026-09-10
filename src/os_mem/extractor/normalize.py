@@ -11,10 +11,13 @@
 
 三层归一防线中的 L2（确定性入库归一）。alias 词表刻意保守——只收已实测确认的
 同义簇，拿不准的不归一（保留独立行=旧行为，不会更差）；泛化交 L3 离线聚类。
+
+归一结果数据类 ``NormalizedKey`` 统一放 ``extractor/models.py``（提取域数据类
+单一存放点）；本模块只放归一函数/词表/生命周期常量。
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from os_mem.extractor.models import NormalizedKey
 
 # 缺省实体：用户本人（D4-2 前所有事实归 SELF）
 SELF_ENTITY = "SELF"
@@ -55,20 +58,6 @@ _CANONICAL_ALIASES: dict[tuple[str, str], str] = {
     # 注：recipient_name/recipient_bank/memo 是泛词（非电汇场景也可能出现），
     # 过度合并风险 > 收益，不收；模型在 case12 已自行产出 wire_recipient 专有名。
 }
-
-
-@dataclass(frozen=True)
-class NormalizedKey:
-    """归一结果：事实身份的 (实体, 规范属性, 生命周期)。"""
-
-    entity_ref: str
-    attribute: str
-    lifecycle: str
-
-    @property
-    def signature(self) -> tuple[str, str, str]:
-        """裁决分组签名：含 lifecycle —— historical 与 current 互不取代。"""
-        return (self.entity_ref, self.attribute, self.lifecycle)
 
 
 def _strip_one_of(prefixes: tuple[str, ...], key: str) -> tuple[str, bool]:
