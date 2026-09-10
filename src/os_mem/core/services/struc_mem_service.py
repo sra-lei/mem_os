@@ -13,7 +13,7 @@ from os_mem.core.services.conv_meta_service import (
 from os_mem.entries.mem_models import StructuredMemory
 from os_mem.extractor import FactExtractor, build_extraction_caller
 from os_mem.extractor.normalize import normalize_key
-from os_mem.extractor.profile import resolve_extraction_profile
+from os_mem.extractor.profile import build_default_profile
 from os_mem.extractor.regular_extractor import RegularExtractor
 from os_mem.infra.llm import ChatClient, get_llm_client
 from os_mem.infra.logger import get_logger
@@ -42,11 +42,11 @@ class StructuredMemService:
         vector_store: MemoryVectorStore,
     ) -> None:
         self.client = client
-        # provider 自愈提取 caller（prompt/恢复策略见 os_mem/extractor/{callers,prompt}；
-        # validate 由 FactExtractor 注入——任务侧只见干净 extract 契约）。
-        # 画像：resolve_extraction_profile()——显式注册条目优先，否则 settings 现值
-        # 默认画像（等价现状；max_facts 渲染进 prompt、chunk_caps 供任务层分段）。
-        self._profile = resolve_extraction_profile()
+        # provider 自愈提取 caller（prompt/恢复策略见 os_mem/extractor/callers、
+        # deepseek_caller；validate 由 FactExtractor 注入——任务侧只见干净 extract 契约）。
+        # 画像：build_default_profile() 从 settings 现值固化（max_facts 渲染进
+        # prompt、chunk_caps 供任务层分段）。
+        self._profile = build_default_profile()
         self._caller = build_extraction_caller(client, profile=self._profile)
         self.vectorizer = vectorizer
         self.vector_store = vector_store
@@ -164,24 +164,6 @@ class StructuredMemService:
                 )
             session.commit()
         return len(plan.inserts)
-
-    @staticmethod
-    def _converge_by_key(facts: list[MemoryFact]) -> list[MemoryFact]:
-        """投影收敛：同 (category, key) 多条只保留一条（confidence 高者优先）。
-
-        同批同刻无法用 updated_at 区分，confidence 由提取 LLM 给出（0-1）：
-        - confidence 高者胜出；
-        - confidence 相同 → 保留原序最后一条（稳定排序 confidence desc 后取每组末尾）。
-        返回收敛后的事实列表（顺序按原列表首次出现排序，保持稳定可测）。
-        """
-        best: dict[tuple[str, str], MemoryFact] = {}
-        for f in facts:
-            sig = (f.category, f.key)
-            prev = best.get(sig)
-            # confidence 高者胜出；相等时后者覆盖前者（保留原序最后一条）
-            if prev is None or f.confidence >= prev.confidence:
-                best[sig] = f
-        return list(best.values())
 
     def add_structured_memory(
         self,

@@ -86,9 +86,7 @@ class ModelProfile:
     - ``max_facts``：单次（每段）提取事实上限——渲染进 system/repair prompt 的
       {max_facts} 占位（``deepseek_caller.build_extract_messages`` /
       ``build_repair_messages``）；
-    - ``chunk_caps``：输入分段上限（任务层 ``chunk_dialog`` 取此供给）；
-    - ``system_prompt`` / ``repair_prompt``：模板覆盖；None = 用
-      ``deepseek_caller`` 的 SYSTEM_PROMPT 现行单源模板（防双份文本漂移）。
+    - ``chunk_caps``：输入分段上限（任务层 ``chunk_dialog`` 取此供给）。
 
     Python dataclass 要求无默认字段在前，故必填的 ``max_output_tokens`` /
     ``temperature`` / ``max_facts`` / ``chunk_caps`` 排在带默认的字段之前。
@@ -101,5 +99,3 @@ class ModelProfile:
     provider: str = 'deepseek'
     model: str = ''
     caller: str = 'deepseek'
-    system_prompt: str | None = None
-    repair_prompt: str | None = None

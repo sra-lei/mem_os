@@ -1,9 +1,7 @@
-"""ModelProfile 提取画像 + 观测增强（token 记账）单元测试（方案 §4 步骤 3-4）。
+"""默认提取画像 + 观测增强（token 记账）单元测试（方案 §4 步骤 3-4）。
 
 覆盖（不依赖真实 LLM / Milvus）：
   - ``build_default_profile`` / ``ChunkCaps.from_settings``：默认画像 = settings 现值；
-  - 注册表：``register_extraction_profile`` 覆盖 + ``resolve_extraction_profile``
-    显式条目优先 / 未注册回退默认画像并告警；
   - ``build_extract_messages(max_facts=...)``：{max_facts} 入参优先渲染；
   - ``DeepSeekExtractionCaller(profile=...)``：profile.max_facts 渲染进
     system/repair prompt（fake client 捕获 messages 断言）；
@@ -17,23 +15,15 @@
 """
 from __future__ import annotations
 
-import logging
 from dataclasses import replace
 from types import SimpleNamespace
 
-import pytest
-
 from os_mem.configs.mem_settings import memory_settings
-from os_mem.extractor import profile as profile_module
 from os_mem.extractor.callers import _ExtractionCore
 from os_mem.extractor.deepseek_caller import DeepSeekExtractionCaller
 from os_mem.extractor.fact_extractor import FactExtractor
 from os_mem.extractor.models import ChunkCaps
-from os_mem.extractor.profile import (
-    build_default_profile,
-    register_extraction_profile,
-    resolve_extraction_profile,
-)
+from os_mem.extractor.profile import build_default_profile
 from os_mem.extractor.deepseek_caller import build_extract_messages
 from os_mem.infra.llm.base_client import ChatOutcome
 
@@ -41,14 +31,6 @@ _VALID_FACTS = (
     '[{"fact":"用户账户 4429853327","category":"finance",'
     '"key":"account","value":"4429853327","confidence":0.95}]'
 )
-
-
-@pytest.fixture(autouse=True)
-def _clean_profile_registry() -> None:
-    """每个测试前后清空注册表，防止注册污染跨测试泄漏。"""
-    profile_module.EXTRACTION_PROFILES.clear()
-    yield
-    profile_module.EXTRACTION_PROFILES.clear()
 
 
 # ------------------------------------------------------------------ #
@@ -63,60 +45,12 @@ class TestDefaultProfile:
         assert p.max_output_tokens == memory_settings.DEEPSEEK_MAX_TOKENS
         assert p.temperature == memory_settings.DEEPSEEK_TEMPERATURE
         assert p.max_facts == memory_settings.DEEPSEEK_EXTRACT_MAX_FACTS
-        # system/repair prompt 默认 None = 用 deepseek_caller 现行单源模板（防双份）
-        assert p.system_prompt is None
-        assert p.repair_prompt is None
 
     def test_chunk_caps_from_settings_matches_settings(self) -> None:
         caps = ChunkCaps.from_settings()
         assert caps.max_chars == memory_settings.DEEPSEEK_EXTRACT_MAX_CHARS
         assert caps.max_msgs == memory_settings.DEEPSEEK_EXTRACT_MAX_MSGS
         assert caps.overlap == memory_settings.DEEPSEEK_EXTRACT_OVERLAP
-
-    def test_resolve_without_registration_falls_back_to_default(self, caplog) -> None:
-        """未注册任何画像 → resolve 回退默认画像并告警（默认路径=现状，不抛错）。"""
-        with caplog.at_level(logging.WARNING, logger='os_mem.extractor.profile'):
-            resolved = resolve_extraction_profile()
-        assert resolved == build_default_profile()
-        assert '使用 settings 默认画像' in caplog.text
-
-    def test_explicit_unregistered_pair_also_falls_back(self) -> None:
-        resolved = resolve_extraction_profile(provider='fake', model='unknown-1')
-        assert resolved == build_default_profile()
-
-
-# ------------------------------------------------------------------ #
-#  注册表：注册覆盖 + 显式条目优先
-# ------------------------------------------------------------------ #
-class TestProfileRegistry:
-    def test_register_overrides_and_resolve_prefers_registered(self) -> None:
-        default = build_default_profile()
-        custom_first = replace(default, model='custom-1', max_facts=7)
-        register_extraction_profile(custom_first)
-        assert resolve_extraction_profile(
-            provider='deepseek', model='custom-1'
-        ) == custom_first
-
-        # 同 key 后注册覆盖先注册（最新生效）
-        custom_second = replace(default, model='custom-1', max_facts=9)
-        register_extraction_profile(custom_second)
-        assert resolve_extraction_profile(
-            provider='deepseek', model='custom-1'
-        ).max_facts == 9
-
-    def test_resolve_registered_default_key_takes_precedence(self) -> None:
-        """注册表命中默认 key（deepseek:settings 模型）→ 显式条目优先于默认画像。"""
-        default = build_default_profile()
-        custom = replace(default, max_facts=11)
-        register_extraction_profile(custom)
-        resolved = resolve_extraction_profile()
-        assert resolved == custom  # 不再回退/告警
-        assert resolved.max_facts == 11
-
-    def test_register_requires_provider_and_model(self) -> None:
-        default = build_default_profile()
-        with pytest.raises(ValueError, match='provider'):
-            register_extraction_profile(replace(default, model=''))
 
 
 # ------------------------------------------------------------------ #

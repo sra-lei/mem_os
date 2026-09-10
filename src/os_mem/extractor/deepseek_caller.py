@@ -110,8 +110,8 @@ class DeepSeekExtractionCaller:
     def __init__(
         self, client: ChatClient, profile: ModelProfile | None = None
     ) -> None:
-        # 画像：不传 → settings 现值固化默认（行为与现状逐字节等价）；
-        # system/repair prompt 字段为 None = 用本模块现行单源模板。
+        # prompt 模板固定用本模块的 SYSTEM_PROMPT/REPAIR_PROMPT 单源（历史画像里
+        # 曾预留 system_prompt/repair_prompt 覆盖字段，零消费已移除）。
         self._profile = profile or build_default_profile()
         self._client = client
         self._response_format = {'type': 'json_object'}
