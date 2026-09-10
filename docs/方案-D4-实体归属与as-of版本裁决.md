@@ -1,6 +1,10 @@
 # D4 方案：实体归属与 as-of 版本裁决
 
-> 状态：**待评审**（2026-09-09）
+> 状态：**D4-1/D4-3 已实施，D4-4 已回放验证**（2026-09-09 起）：收敛签名已升级为
+> `(entity_ref, attribute, lifecycle)`（`extractor/normalize.py` 的 `normalize_key` +
+> `core/services/memory_versioning.py` 的 `plan_versioning`）；投影只镜像 SQLite 回读的
+> lifecycle=current 赢家、投影 key=canonical attribute；旧的批内 `_converge_by_key` 已删除
+> （2026-09-10，commit 8f82058）。D4-2 实体解析仍为 SELF 占位，D4-5 全量复测待跑。
 > 关联：layer2=5/20 最大结构性瓶颈；`docs/方案-记忆更新收敛与Milvus投影一致性.md`（批内收敛已做，跨会话裁决=本方案）
 > 红线：**裁决逻辑必须是确定性系统代码，不依赖 LLM 思考能力**（用户 2026-09-09 明确要求）
 
@@ -11,7 +15,7 @@
 ### 1.1 已有的版本原语（但失效）
 
 - SQLite `struct_memories` 落库按 `(user_id, category, key)` upsert：同键新值覆盖、旧值归档 `previous_fact`（struc_mem_service.py L59-101）。
-- Milvus 按 category 删旧插新，批内按 `(category, key)` 投影收敛（`_converge_by_key`）。
+- Milvus 按 category 删旧插新，批内按 `(category, key)` 投影收敛（`_converge_by_key`，**已删**：D4-3 起改为只投影 SQLite 回读的 lifecycle=current 赢家，见 §3.4 与 8f82058）。
 - **失效原因：收敛签名是 key 字符串精确相等，而 LLM 提取的 key 严重漂移。**
 
 ### 1.2 实锤：同一事实被提成 6 个 key（case 12，电汇金额演进 $85k→$100k→$95k）

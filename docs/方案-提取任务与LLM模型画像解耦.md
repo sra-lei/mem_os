@@ -1,6 +1,22 @@
-# 方案：提取任务与 LLM 自愈适配器解耦（待评审）
+# 方案：提取任务与 LLM 自愈适配器解耦（已实施 · v2）
 
-日期：2026-09-09（v2 修正：恢复策略收敛于 provider 内部，v1 于同日废弃）· 状态：**待评审（未实施）**
+日期：2026-09-09（v2 修正：恢复策略收敛于 provider 内部，v1 于同日废弃）· 状态：**已实施（2026-09-09/10）**
+
+> **实施落地与本文档的偏差（以代码为准，2026-09-10 重构后终态）**：
+> - 文件结构：`callers.py`=provider 无关上层（`ExtractionCaller` Protocol + `_ExtractionCore`
+>   通用恢复循环 + `build_extraction_caller` 工厂，按 `profile.caller` 经 `_CALLER_IMPL_MODULES`
+>   分发）；`deepseek_caller.py`=DeepSeek 全部专属实现，**含原 prompt.py 的 SYSTEM_PROMPT/
+>   REPAIR_PROMPT 模板与渲染/指纹**（prompt 已并入，prompt.py 删除）；`fact_extractor.py`=
+>   任务执行器；`regular_extractor.py`=正则兜底/R1 剪枝/token 口径。
+> - 本文 §2 画像示意中的 `system_prompt` 字段**已删**（零消费，违背「策略不进 schema」）；
+>   字段实际命名 `chunk_caps`（非 chunk_budget）。画像注册表/`resolve_extraction_profile`
+>   曾实现但生产零调用且刷假警告，已于 commit 8f82058 删除——`profile.py` 只剩
+>   `build_default_profile()`；caller 注册表保留（callers 内的模块分发表）。
+> - 旧 `_ExtractComplete` 鸭子接口（outcome/__call__/repair）作为 AB 脚本/旧 complete
+>   路径兼容保留在 DeepSeekExtractionCaller 上。
+>
+> 以下正文为 v2 设计推理（历史快照），路径与字段名以本注记为准。
+
 关联：docs/实验记录-提取prompt精简AB-2026-09-09.md（prompt 迭代暴露：prompt 优化与模型强绑定）；
 docs/方案-事实提取鲁棒性与成本优化.md（截断/成本修复已完成）；layer2 评测 run_98df5b6320 / run_7a2a539541。
 涉及：`os_mem.extractor`（fact_extractor / prompt / callers）+ `os_mem.infra.llm`（base_client / deepseek_client / factory）

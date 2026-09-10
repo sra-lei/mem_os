@@ -136,7 +136,7 @@ src/
 │   │   ├── retrieval_strategies.py   # 检索注入策略链（verbatim 区分准入，固定链 v2）
 │   │   └── guide/              # sanitizer（日志脱敏）
 │   ├── entries/                # SQLModel 表：conv_messages / struct_memories / conv_meta（conv_memories 已退役）
-│   ├── extractor/              # 记忆提取域（2026-09-08 迁自 utils；09-09 更名 extraction→extractor）：fact_extractor（FactExtractor）/ callers（provider 自愈 caller）/ prompt（任务 prompt+LLM 适配）/ tokens（数值口径）/ common（共享纯函数）
+│   ├── extractor/              # 记忆提取域：fact_extractor（LLM 结构化任务执行器）/ callers（provider 无关：协议+恢复循环+分发工厂）/ deepseek_caller（DeepSeek caller + prompt 模板/渲染/指纹）/ regular_extractor（正则兜底+R1 剪枝+fact_tokens）/ models（数据类）/ profile（默认画像）/ normalize（D4 key 归一）/ common（共享纯函数）
 │   ├── models/                 # 领域数据模型
 │   ├── infra/                  # llm（base_client/deepseek_client/factory/failover）· storage（mem/vec/vectorizer）· retriever（BM25）· logger · p2check
 │   └── utils/                  # prompt_fp（通用 prompt 指纹；提取域已迁至 extractor/）
