@@ -4,8 +4,11 @@
 
 定位：被编排的**领域执行器**——不属 utils 小工具，也不属 core 业务编排：
 - ``fact_extractor.py``：FactExtractor（分段/并行/降级/去重/兜底/R1 剪枝，任务语义）
-- ``callers.py``     ：provider 自愈 extraction caller（「LLM 调用 + 恢复策略」=
-  repair/截断切段/整段重试收敛于此，见 docs/方案-提取任务与LLM模型画像解耦.md §2 v2）
+- ``callers.py``      ：provider 无关的上层（ExtractionCaller 协议 / _ExtractionCore
+  单一恢复循环 / build_extraction_caller 按 profile.caller 分发，
+  见 docs/方案-提取任务与LLM模型画像解耦.md §2 v2）
+- ``deepseek_caller.py``：DeepSeek 具体实现（DeepSeekExtractionCaller +
+  build_caller 标准工厂；chat_outcome/json_object/usage 口径专属逻辑内聚于此）
 - ``prompt.py``      ：提取任务 prompt（SYSTEM_PROMPT/REPAIR_PROMPT 渲染与指纹）
 - ``tokens.py``      ：数值 token 口径（提取 R1 与检索冗余过滤共享）
 - ``common.py``      ：共享纯函数/常量（split_text_midpoint / dedup_facts /

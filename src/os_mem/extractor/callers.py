@@ -1,59 +1,63 @@
-"""provider 自愈 extraction caller —— 「LLM 调用 + 恢复策略」收敛于此（架构搬迁·等价重构）。
+"""provider 无关的 extraction caller 上层 —— 干净契约 + 单一恢复循环 + 工厂。
 
 背景（docs/方案-提取任务与LLM模型画像解耦.md §2 v2）：恢复策略（截断检测、
 repair、对半切段、整段重试）是「怎么跟某个模型要到合法结果」的实现细节——每个
-provider/model 各不同，收敛在 caller 内部，**不暴露给任务层**，也不进通用 schema。
-任务层（FactExtractor）只认识干净契约 ``extract(dialog_text, *, validate) -> CallResult``
-（facts|None = 合法结果或明确全败，stats = 遥测）；validate（schema 校验权：分类白名单/
-confidence 边界）由任务注入。分段编排/去重/verbatim 兜底/降级仍是任务层语义。
+provider/model 各不同。本模块只承载 **provider 无关** 的部分，具体实现内聚在
+各自模块（deepseek 专属逻辑见 ``deepseek_caller.py``），不与任何 provider 耦合：
 
 - ``_ExtractionCore``：单一恢复循环。语义 = 迁出前的 ``FactExtractor.extract_chunk``
   现行实现逐行等价复刻（不优化不改行为，日志文案与旧实现逐字一致）；低层能力
   （generate / repair_fn / dedup_fn / split_fn / max_split_depth）由构造注入，
   供各 provider 内部策略拼装。
-- ``DeepSeekExtractionCaller``：deepseek 提供方首版 caller——prompt 拼装复用
-  ``os_mem.extractor.prompt`` 的 SYSTEM_PROMPT/REPAIR_PROMPT 渲染（词表/max_facts
-  全部原样），generate 走 ``client.chat_outcome``（json_object 响应格式）。
-- ``build_extraction_caller(client)``：工厂（现阶段 single provider；多路注册表留待
-  方案 §3 扩展）。
+- ``ExtractionCaller``：任务侧 caller 协议（``extract(dialog_text, *, validate)
+  -> CallResult``）。
+- ``build_extraction_caller(client, profile=None)``：按 ``profile.caller`` 分发的
+  工厂——具体 provider 模块在函数体内 lazy import（避免上层反向依赖具体实现、
+  防环）；未注册 caller 标识回退 deepseek（v1 唯一实现，等价现状）。
 
-兼容面：``DeepSeekExtractionCaller`` 保留 ``outcome()`` / ``__call__()`` / ``repair()``
-鸭子接口（与迁出前的 ``prompt._ExtractComplete`` 同构）——AB 脚本 Recorder 依赖
-``.outcome(...)`` 返回带 ``.usage`` 的 ChatOutcome，且逐字读 ``__call__ = outcome().content``、
-``repair(partial)`` 走 ``client.chat``；旧调用方（build_extract_complete / complete 注入）
-同样经此接口工作。
+任务层（FactExtractor）只认识干净契约 ``extract(dialog_text, *, validate)
+-> CallResult``（facts|None = 合法结果或明确全败，stats = 遥测）；validate
+（schema 校验权：分类白名单/confidence 边界）由任务注入。分段编排/去重/
+verbatim 兜底/降级仍是任务层语义。
 
-依赖方向（无环）：callers → prompt → （configs / infra.llm.base_client / utils.prompt_fp）；
-models 为纯数据类（仅依赖 common 与 configs.mem_settings），callers / fact_extractor /
-profile / normalize 均 → models；profile（注册表/解析）→ configs.mem_settings，
-纯数据不反向依赖；
-callers / fact_extractor → common（共享纯函数/常量，common 不 import 包内其他模块）；
-fact_extractor → callers；prompt 不反向 import fact_extractor/callers/profile（其兼容构造在
-函数体内延迟 import，见 prompt.build_extract_complete）。
+依赖方向（无环）：callers（本模块）→ prompt 不发生（本模块不拼 prompt）；
+callers → common（共享纯函数/常量）/ models（契约数据类）；具体实现
+（deepseek_caller 等）→ callers；工厂只在函数体内 lazy import 具体实现。
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import Protocol
 
 from os_mem.extractor.common import (
     MAX_TRUNC_SPLIT_DEPTH,
-    dedup_facts,
     empty_extraction_stats,
-    split_text_midpoint,
 )
 from os_mem.extractor.models import CallResult, ModelProfile
-from os_mem.extractor.profile import build_default_profile
-from os_mem.extractor.prompt import build_extract_messages, build_repair_messages
-from os_mem.infra.llm.base_client import ChatClient, ChatOutcome
+from os_mem.infra.llm.base_client import ChatClient
 from os_mem.infra.logger import get_logger
 
 _logger = get_logger('os_mem.extractor.callers')
 
 
 # ------------------------------------------------------------------ #
-#  单一恢复循环
+#  caller 协议（任务侧只依赖此契约，不认识具体 provider 实现）
+# ------------------------------------------------------------------ #
+class ExtractionCaller(Protocol):
+    """提取 caller 协议：facts|None = 合法结果或明确全败，stats = 遥测。"""
+
+    def extract(
+        self,
+        dialog_text: str,
+        *,
+        validate: Callable[[str], list],
+        retries: int = 2,
+    ) -> CallResult: ...
+
+
+# ------------------------------------------------------------------ #
+#  单一恢复循环（provider 无关；低层能力由具体 caller 注入）
 # ------------------------------------------------------------------ #
 class _ExtractionCore:
     """单段提取的模型恢复循环（语义逐条等价于旧 FactExtractor.extract_chunk）。
@@ -212,127 +216,43 @@ class _ExtractionCore:
 
 
 # ------------------------------------------------------------------ #
-#  DeepSeek 提供方 caller
+#  工厂：按 profile.caller 分发到具体 provider 实现（lazy import 防环）
 # ------------------------------------------------------------------ #
-class DeepSeekExtractionCaller:
-    """DeepSeek 自愈提取 caller：恢复策略=代码（prompt 数据仍来自 extractor.prompt）。
-
-    - ``extract(dialog_text, *, validate, retries=2)``：任务侧唯一入口
-      → CallResult{facts|None, stats}；validate 由任务注入；
-    - ``outcome(dialog_text)`` / ``__call__(dialog_text)`` / ``repair(partial_json)``：
-      旧鸭子接口保留（与迁出前 ``prompt._ExtractComplete`` 同构，供 AB 脚本 Recorder
-      与旧 complete 调用方兼容）。
-    """
-
-    def __init__(
-        self, client: ChatClient, profile: ModelProfile | None = None
-    ) -> None:
-        # 画像：不传 → settings 现值固化默认（行为与现状逐字节等价）；
-        # system/repair prompt 字段为 None = 用 prompt.py 现行单源模板。
-        self._profile = profile or build_default_profile()
-        self._client = client
-        self._response_format = {'type': 'json_object'}
-        self._core = _ExtractionCore(
-            generate=self._generate,
-            repair_fn=self.repair,
-            dedup_fn=dedup_facts,
-            split_fn=split_text_midpoint,
-            max_split_depth=MAX_TRUNC_SPLIT_DEPTH,
-        )
-
-    # ---- 任务侧干净契约 ------------------------------------------ #
-    def extract(
-        self,
-        dialog_text: str,
-        *,
-        validate: Callable[[str], list],
-        retries: int = 2,
-    ) -> CallResult:
-        facts, stats = self._core.extract(dialog_text, validate=validate, retries=retries)
-        return CallResult(facts=facts, stats=stats)
-
-    # ---- 低层能力（prompt 拼装复用 extractor.prompt，渲染逻辑零改动）---- #
-    def _extract_messages(self, dialog_text: str) -> list[dict[str, str]]:
-        """提取调用的 messages 拼装：{max_facts} 按本 caller 画像取值
-        （默认画像 = settings 现值，与旧无参渲染逐字节一致）。"""
-        return build_extract_messages(dialog_text, max_facts=self._profile.max_facts)
-
-    def _generate(
-        self, dialog_text: str
-    ) -> tuple[str, str | None, tuple[int, int] | None]:
-        chat_outcome = getattr(self._client, 'chat_outcome', None)
-        if chat_outcome is not None:
-            outcome = chat_outcome(
-                self._extract_messages(dialog_text),
-                response_format=self._response_format,
-            )
-            return (
-                outcome.content,
-                outcome.finish_reason,
-                _usage_token_counts(outcome.usage),
-            )
-        # 无 chat_outcome 的 client：无截断信号，退化为旧整段重试语义
-        return (
-            self._client.chat(
-                self._extract_messages(dialog_text),
-                response_format=self._response_format,
-            ),
-            None,
-            None,
-        )
-
-    # ---- 旧鸭子接口（AB Recorder / 旧调用方兼容） ------------------- #
-    def outcome(self, dialog_text: str) -> ChatOutcome:
-        """带 finish_reason 的提取调用（截断路由需要；兼容旧 _ExtractComplete）。
-
-        client 支持 ``chat_outcome`` 时返回完整 outcome（含 finish_reason，length
-        截断可由恢复循环识别）；否则退回 ``chat`` 包一层（无 finish 信息）。
-        """
-        chat_outcome = getattr(self._client, 'chat_outcome', None)
-        if chat_outcome is not None:
-            return chat_outcome(
-                self._extract_messages(dialog_text),
-                response_format=self._response_format,
-            )
-        return ChatOutcome(
-            self._client.chat(
-                self._extract_messages(dialog_text),
-                response_format=self._response_format,
-            )
-        )
-
-    def __call__(self, dialog_text: str) -> str:
-        return self.outcome(dialog_text).content
-
-    def repair(self, partial_json: str) -> str:
-        return self._client.chat(
-            build_repair_messages(partial_json, max_facts=self._profile.max_facts),
-            response_format=self._response_format,
-        )
-
-
-def _usage_token_counts(usage: Any) -> tuple[int, int] | None:
-    """从 chat outcome 的 usage 取 (input, output) token 数；usage 缺失 → None。
-
-    与旧 ``_ExtractComplete``/AB Recorder 口径一致（getattr 容错，缺属性按 0）：
-    恢复核心对每次 generate 累计 token 数（None → 0），见方案 §4 步骤 4。
-    """
-    if usage is None:
-        return None
-    input_tokens = getattr(usage, 'prompt_tokens', 0) or 0
-    output_tokens = getattr(usage, 'completion_tokens', 0) or 0
-    return input_tokens, output_tokens
+# caller 标识 → 具体实现模块路径（新增 provider 在此登记，上层不动）。
+_CALLER_IMPL_MODULES = {
+    'deepseek': 'os_mem.extractor.deepseek_caller',
+}
 
 
 def build_extraction_caller(
-    client: ChatClient, profile: ModelProfile | None = None
-) -> DeepSeekExtractionCaller:
-    """构造 provider 自愈提取 caller（现阶段 single provider；注册表留待扩展）。
+    client: ChatClient,
+    profile: ModelProfile | None = None,
+) -> ExtractionCaller:
+    """构造 provider 自愈提取 caller：按 ``profile.caller`` 分发具体实现。
 
-    ``profile`` 缺省 → settings 现值默认画像（行为与现状等价）；显式画像的
-    max_facts 渲染进 prompt、chunk_caps 由任务层分段取用（见方案 §4 步骤 3）。
-    ``build_extract_complete``（旧 client → complete 回调适配）与
-    ``build_extraction_caller`` 现在返回同一类实例——旧回调用法（outcome/__call__/
-    repair 鸭子）与任务侧新契约（extract）并存，见方案 §4 步骤 1-2。
+    ``profile`` 缺省 → settings 现值默认画像（其 caller='deepseek'）；显式画像的
+    caller 标识决定具体实现模块（注册表见 ``_CALLER_IMPL_MODULES``），未登记标识
+    回退 deepseek 并告警（v1 唯一实现）。具体实现的 max_facts 渲染进 prompt、
+    chunk_caps 由任务层分段取用（见方案 §4 步骤 1-4）。
+
+    ``build_extract_complete``（旧 client → complete 回调适配）与本工厂现在返回
+    同一实现实例——旧回调用法（outcome/__call__/repair 鸭子）与任务侧新契约
+    （extract）并存。
+    具体实现模块须暴露标准工厂 ``build_caller(client, profile)``；新增 provider
+    只需写实现模块并在 ``_CALLER_IMPL_MODULES`` 登记，上层不动。
     """
-    return DeepSeekExtractionCaller(client, profile=profile)
+    if profile is None:
+        from os_mem.extractor.profile import build_default_profile
+
+        profile = build_default_profile()
+    caller_name = profile.caller or 'deepseek'
+    module_path = _CALLER_IMPL_MODULES.get(caller_name)
+    if module_path is None:
+        _logger.warning(
+            f'未登记的 caller 实现（{caller_name}），回退 deepseek caller'
+        )
+        module_path = _CALLER_IMPL_MODULES['deepseek']
+    import importlib
+
+    module = importlib.import_module(module_path)
+    return module.build_caller(client, profile)
