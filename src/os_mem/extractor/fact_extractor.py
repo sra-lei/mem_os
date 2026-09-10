@@ -58,7 +58,7 @@ def _active_categories() -> frozenset[str]:
     """校验白名单：读 fact_category 词表 active 集（词表故障回退内置 10 类）。
 
     替代原硬编码 ALLOWED_CATEGORIES 常量 —— 词表化后停用/增补 category 即时生效，
-    见 docs/方案-事实category与key词表管理.md。每次调用读表（本地 SQLite，廉价），
+    见 docs/方案/方案-事实category与key词表管理.md。每次调用读表（本地 SQLite，廉价），
     不做缓存：管理窗口改词表后校验行为立即一致。
     """
     from os_mem.vocab import list_active_categories
@@ -250,7 +250,7 @@ class FactExtractor:
 
         恢复循环（repair 续写 / 截断对半切段 / 整段重试）自 2026-09-09 起收敛于
         ``os_mem.extractor.callers.ExtractionCore``（等价迁移：不优化不改行为，
-        日志文案逐字一致，见 docs/方案-提取任务与LLM模型画像解耦.md §2 v2 / §4
+        日志文案逐字一致，见 docs/方案/方案-提取任务与LLM模型画像解耦.md §2 v2 / §4
         步骤 1-2）。本方法保留旧签名作为兼容层：把 ``complete`` 的鸭子能力
         （``outcome`` / ``__call__`` / ``repair``，缺哪个退哪个）包成低层
         ``generate`` 喂给核心，并把核心返回的遥测累加进实例计数
@@ -321,7 +321,7 @@ class FactExtractor:
         分段上限改由 profile.chunk_caps 供给任务层）。
 
         提取回调二选一（2026-09-09 起 caller 优先；恢复策略=provider 内部代码，
-        见 docs/方案-提取任务与LLM模型画像解耦.md §2 v2）：
+        见 docs/方案/方案-提取任务与LLM模型画像解耦.md §2 v2）：
         - ``caller``：provider 自愈提取 caller（满足 ``extract(dialog_text, *,
           validate, retries) -> CallResult`` 契约）——每段走 caller.extract，
           validate 由本任务注入（= validate_response），并把每段返回的 stats

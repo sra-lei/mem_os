@@ -4,7 +4,7 @@
 本模块不接触 engine / ORM / 向量库，只做 参数校验 → 调窗口 → 组响应模型。
 投影一致性（SQLite 权威 + 尽力同步 + 失败警示 + 重建兜底）由窗口封装。
 
-方案见 docs/方案-EvalView记忆管理.md。
+方案见 docs/方案/方案-EvalView记忆管理.md。
 """
 from __future__ import annotations
 

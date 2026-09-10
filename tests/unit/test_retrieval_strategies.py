@@ -7,7 +7,7 @@
 覆盖：
 - 组件级：每个策略只做一件事（噪声剔除/结构化去重/verbatim 冗余剔除/双配额）
 - 链级（apply_retrieval_strategies）：端到端语义 = v1 验证过的区分准入行为
-  （见 docs/方案-检索注入verbatim区分策略.md §八：11/20 → 14/20）
+  （见 docs/方案/方案-检索注入verbatim区分策略.md §八：11/20 → 14/20）
 
 不依赖真实 Milvus / LLM / 存储 —— 纯函数输入输出。
 """

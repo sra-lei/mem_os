@@ -1,6 +1,6 @@
 """对话元数据表（conv_meta）+ 不可逆状态机 单测。
 
-覆盖 docs/方案-会话处理状态机与原子入库.md：
+覆盖 docs/方案/方案-会话处理状态机与原子入库.md：
 - §3.2 状态机：合法链通过，回退/跳级/终止态外出全部拒绝，FAILED 从任一活跃态可达，
   同态 no-op 允许
 - §3.3 claim 门禁：新会话登记即认领(EXTRACTING)；COMPLETED 跳过；FAILED/PENDING/

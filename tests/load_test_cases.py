@@ -30,7 +30,7 @@ from testing.db.models import TestCaseDefinition  # noqa: E402
 TEST_CASES_DIR = ROOT / "tests" / "test_cases"
 
 # layer (YAML `category`) -> (dashboard phase, version_target)
-# Mirrors the roadmap in docs/MemOs需求文档.md: v0.1 base recall,
+# Mirrors the roadmap in docs/需求/MemOs需求文档.md: v0.1 base recall,
 # v0.2 multi-session, v0.3 proactive service.
 LAYER_MAP = {
     "layer1": ("base", "v0.1"),

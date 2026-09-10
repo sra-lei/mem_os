@@ -17,8 +17,8 @@
 >
 > 以下正文为 v2 设计推理（历史快照），路径与字段名以本注记为准。
 
-关联：docs/实验记录-提取prompt精简AB-2026-09-09.md（prompt 迭代暴露：prompt 优化与模型强绑定）；
-docs/方案-事实提取鲁棒性与成本优化.md（截断/成本修复已完成）；layer2 评测 run_98df5b6320 / run_7a2a539541。
+关联：docs/实验/实验记录-提取prompt精简AB-2026-09-09.md（prompt 迭代暴露：prompt 优化与模型强绑定）；
+docs/方案/方案-事实提取鲁棒性与成本优化.md（截断/成本修复已完成）；layer2 评测 run_98df5b6320 / run_7a2a539541。
 涉及：`os_mem.extractor`（fact_extractor / prompt / callers）+ `os_mem.infra.llm`（base_client / deepseek_client / factory）
 + `configs/mem_settings`（提取 knobs）。
 

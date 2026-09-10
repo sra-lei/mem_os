@@ -5,7 +5,7 @@
 > `core/services/memory_versioning.py` 的 `plan_versioning`）；投影只镜像 SQLite 回读的
 > lifecycle=current 赢家、投影 key=canonical attribute；旧的批内 `_converge_by_key` 已删除
 > （2026-09-10，commit 8f82058）。D4-2 实体解析仍为 SELF 占位，D4-5 全量复测待跑。
-> 关联：layer2=5/20 最大结构性瓶颈；`docs/方案-记忆更新收敛与Milvus投影一致性.md`（批内收敛已做，跨会话裁决=本方案）
+> 关联：layer2=5/20 最大结构性瓶颈；`docs/方案/方案-记忆更新收敛与Milvus投影一致性.md`（批内收敛已做，跨会话裁决=本方案）
 > 红线：**裁决逻辑必须是确定性系统代码，不依赖 LLM 思考能力**（用户 2026-09-09 明确要求）
 
 ---

@@ -1,6 +1,6 @@
 """投影写入单测：delete_memories filter 语义 + verbatim 兜底句 key 内容指纹。
 
-覆盖 docs/方案-记忆更新收敛与Milvus投影一致性.md：
+覆盖 docs/方案/方案-记忆更新收敛与Milvus投影一致性.md：
 - §4.2/§9-1：``delete_memories`` 按 (user_id, category, keys) 构造批量 filter，
   filter 只作用于该 user + 该 category + key in (...)，不会波及其它 user/key。
 - B 批：verbatim 兜底句 key 用内容指纹（同句幂等、异句不互踩）。

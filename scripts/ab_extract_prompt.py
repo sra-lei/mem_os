@@ -270,7 +270,7 @@ def main() -> None:
     with open(out_path, "w") as fh:
         json.dump(results, fh, ensure_ascii=False, indent=1)
     print(f"[saved] {out_path} ({len(results)} rows)")
-    print("基线/历史见 docs/实验记录-提取prompt精简AB-2026-09-09.md")
+    print("基线/历史见 docs/实验/实验记录-提取prompt精简AB-2026-09-09.md")
 
 
 if __name__ == "__main__":

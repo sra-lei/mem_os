@@ -1,6 +1,6 @@
 """D4：as-of 版本裁决（纯决策，不含 DB 写入）。
 
-设计见 ``docs/方案-D4-实体归属与as-of版本裁决.md`` §3.3。
+设计见 ``docs/方案/方案-D4-实体归属与as-of版本裁决.md`` §3.3。
 
 同 ``(user_id, entity_ref, attribute, lifecycle)`` 的事实跨会话裁决：
 - **current**：按「对话内时间」``source_started_at`` latest-wins。新事实更新 →

@@ -76,7 +76,7 @@ class StructuredMemory(SQLModel, table=True):
     created_at: datetime = Field(index=True, default_factory=datetime.utcnow) # ✅ 创建索引 (idx_memories_created_at)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
-    # ========== D4：实体归属与版本裁决（方案 docs/方案-D4-实体归属与as-of版本裁决.md）==========
+    # ========== D4：实体归属与版本裁决（方案 docs/方案/方案-D4-实体归属与as-of版本裁决.md）==========
     # D4-0 仅加列+迁移回填，入库/检索行为零变化（收敛签名仍为 (user_id, category, key)）。
     # D4-1 起写入侧才使用这些列。
     # 实体标识：缺省 SELF=用户本人；非本人实体（PERSON:xxx / CASE:xxx ...）由归一器解析
@@ -95,7 +95,7 @@ class StructuredMemory(SQLModel, table=True):
 
 
 # ========== 对话元数据表（conv_meta）：会话元数据 + 处理状态 ==========
-# 设计见 docs/方案-会话处理状态机与原子入库.md；命名定位为「对话元数据表」，
+# 设计见 docs/方案/方案-会话处理状态机与原子入库.md；命名定位为「对话元数据表」，
 # 处理状态是顺带管理字段（非独立处理账本）。会话原文(messages)不落本表，
 # 逐条消息存于 conv_messages（超长对话不入元数据行，避免膨胀/读放大风险）。
 class ConversationMeta(SQLModel, table=True):
@@ -134,7 +134,7 @@ class ConversationMeta(SQLModel, table=True):
 
 
 # ========== 事实 category 词表（fact_category）：提取侧 allowed category 受控词表 ==========
-# 设计见 docs/方案-事实category与key词表管理.md：
+# 设计见 docs/方案/方案-事实category与key词表管理.md：
 # - 英文规范 id（category）为内部稳定标识；name_zh/name_en 双语名供 prompt 渲染与展示；
 # - active=0 停用：不进 prompt 渲染；提取校验（validate_response）视其为非法 category
 #   （与现状 ALLOWED_CATEGORIES 硬白名单语义一致，只是来源表化）；

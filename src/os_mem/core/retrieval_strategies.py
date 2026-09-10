@@ -7,7 +7,7 @@
   （case 18/20 的关键数值只存在于 verbatim 句，压掉 verbatim 会直接丢答案）；
 - v1 区分准入验证（2026-09-07）：layer1 struct/assert/top_k=15 通过率 11/20 → 14/20
   （run_c887cb12 → run_c087f9ee），覆盖漏 30 → 18 期望点，恢复 17/18/20 且零新增失败。
-  详见 docs/方案-检索注入verbatim区分策略.md。
+  详见 docs/方案/方案-检索注入verbatim区分策略.md。
 
 设计（v2 重构，2026-09-07）：
 - **单一职责**：每个策略类只做一件事；注册为固定顺序策略链 ``STRATEGY_CHAIN``，

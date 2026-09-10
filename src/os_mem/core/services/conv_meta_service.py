@@ -3,7 +3,7 @@
 定位：对话元数据表 —— 存会话元数据（来源、条数、起止时间），处理状态是顺带管理的
 字段；会话原文(messages)不存本表，逐条消息走 conv_messages。
 
-门禁语义（claim，见 docs/方案-会话处理状态机与原子入库.md §3.3）：
+门禁语义（claim，见 docs/方案/方案-会话处理状态机与原子入库.md §3.3）：
 - 该会话尚不存在        → 插入一行（初始 PENDING + 元数据），本调用负责处理
 - 已存在且 COMPLETED    → 跳过（唯一真正"已入库完成"的终止态）
 - 已存在但非完成态      → 「接着处理」：
@@ -34,7 +34,7 @@ from os_mem.infra.storage import get_session
 
 _logger = get_logger('os_mem.conv_meta')
 
-# ---- 状态常量（单一事实源：与 docs/方案-会话处理状态机与原子入库.md §3.2 一致） ----
+# ---- 状态常量（单一事实源：与 docs/方案/方案-会话处理状态机与原子入库.md §3.2 一致） ----
 STATUS_PENDING = 'PENDING'  # 初始：已登记，尚未进入任何阶段
 STATUS_EXTRACTING = 'EXTRACTING'  # 阶段1：LLM 结构化提取（含数字兜底）
 STATUS_SAVING_SQLITE = 'SAVING_SQLITE'  # 阶段2：struct_memories 落库

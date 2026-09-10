@@ -5,7 +5,7 @@ grading rubric in the test-case YAML), NOT `expected_answer` — 41/60 YAMLs hav
 no expected_behavior field, and the rubric is the authoritative scoring input.
 
 Score convention: 0.0 ~ 1.0; passed = score >= threshold (default 0.7, matches
-EvalView需求文档.md phase-4 design).
+docs/需求/EvalView需求文档.md phase-4 design).
 """
 from __future__ import annotations
 

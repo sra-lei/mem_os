@@ -5,7 +5,7 @@ A/B 各可为：
 - 本机 evals/runs/ 下的 json 文件路径或文件名
 
 输出：双方通过率 + 失败集 + 对称差（一侧过一侧挂的 case，即 B 相对 A 修复/回退）。
-设计见 docs/方案-评测记录跨机同步.md。本工具 stdlib-only。
+设计见 docs/方案/方案-评测记录跨机同步.md。本工具 stdlib-only。
 
 用法：
     uv run python tests/compare_runs.py run_80f3624109 run_64f82a0d1b

@@ -2,7 +2,7 @@
 
 背景：memos.db 纯本地（*.db 不入 git），跨机对照靠本工具把一轮 run 导出为不可变
 JSON 随 repo push/pull 流动，对侧用 tests/import_run.py 收敛进本地库。
-设计见 docs/方案-评测记录跨机同步.md。本工具 stdlib-only，不 import os_mem/eval。
+设计见 docs/方案/方案-评测记录跨机同步.md。本工具 stdlib-only，不 import os_mem/eval。
 
 用法：
     uv run python tests/export_run.py                 # 最新 run（rowid 序）

@@ -29,7 +29,7 @@ class StructProvider():
         - 每个流程阶段开始前把状态沿状态机合法边推进（EXTRACTING → SAVING_SQLITE
           → SAVING_VECTOR）；任一异常 → FAILED（记录 last_error）后 re-raise，
           下次 ingest 会重启接着处理。
-        设计见 docs/方案-会话处理状态机与原子入库.md
+        设计见 docs/方案/方案-会话处理状态机与原子入库.md
         """
         t0 = time.perf_counter()
         session_id = conversation.source_session_id or conversation.id or ""

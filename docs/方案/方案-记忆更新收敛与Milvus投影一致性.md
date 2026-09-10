@@ -2,7 +2,7 @@
 
 日期：2026-09-05 · 状态：**A/B/C 批已实施**（c958be9 / b634bf7 / 40e2258）；
 §10 遗留待办（事实来源锚定）后续解决
-关联：评测 run_1615d8fb4d 失败分析（docs/调试记录-2026-09-05.md §2）；
+关联：评测 run_1615d8fb4d 失败分析（docs/调试记录/调试记录-2026-09-05.md §2）；
 本仓库 struct provider 双写管线（conv_meta / struct_memories / Milvus mem_os）。
 
 ## 1. 目标（本次改动范围）

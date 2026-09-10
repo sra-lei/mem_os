@@ -128,7 +128,7 @@ v0.1 建议顺序：① `Memory` 数据模型 + `memories` 表（1.2，参考 `o
 | **v0.1（当前）** | base 20 条单会话回忆；框架 + mock 跑通；记忆系统由你实现 | 你完成 ingest/retrieve |
 | v0.2 | multi_session 20 条跨会话检索（`--phase multi_session`） | 记忆系统支持多会话累积 + 冲突检测 |
 | v0.3 | proactive 20 条主动服务（`--phase proactive`） | 记忆系统支持合成检索 + 时间加权 |
-| 后续 | 真实 LLM provider（Ollama/OpenAI 兼容）、真实 Judge、judge 缓存与审计、进度 SSE、报告导出 | 见 EvalView需求文档.md 第十一章 |
+| 后续 | 真实 LLM provider（Ollama/OpenAI 兼容）、真实 Judge、judge 缓存与审计、进度 SSE、报告导出 | 见 docs/需求/EvalView需求文档.md 第十一章 |
 
 ## 六、评测数据模型（沿用现有表）
 

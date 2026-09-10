@@ -4,8 +4,8 @@ MemOS 是一个从零构建的 Agent 用户记忆系统：**跨会话记住用�
 项目采用"评测驱动"的渐进式演进——`tests/test_cases/` 下有 60 个多领域评测用例（layer1/2/3 各 20：银行、保险、医疗、航空、旅行协调等），
 通过真实 LLM 链路（会话原文落库 → LLM 事实提取 → SQLite + 向量双写 → 混合检索 → 策略链注入 → DeepSeek 回答 → assert/Moonshot 判分）验证每个版本。
 
-> 需求与版本路线：v0.1 基础回忆 → v0.2 结构化与向量检索 → v0.3 高级检索与双轨编排 → v0.4 系统化自主化（详见 [docs/MemOs需求文档.md](docs/MemOs需求文档.md)）；
-> 实现方案与工程决策见 `docs/方案-*.md`（[状态机与双轨编排](docs/方案-会话处理状态机与原子入库.md)、[检索注入 verbatim 区分策略](docs/方案-检索注入verbatim区分策略.md)）。
+> 需求与版本路线：v0.1 基础回忆 → v0.2 结构化与向量检索 → v0.3 高级检索与双轨编排 → v0.4 系统化自主化（详见 [docs/需求/MemOs需求文档.md](docs/需求/MemOs需求文档.md)）；
+> 实现方案与工程决策见 `docs/方案/方案-*.md`（[状态机与双轨编排](docs/方案/方案-会话处理状态机与原子入库.md)、[检索注入 verbatim 区分策略](docs/方案/方案-检索注入verbatim区分策略.md)）。
 
 **当前进度（2026-09）**：v0.1 base 已完成；**v0.2 struct 为主线上**（struct+layer1 基线 14/20，与开发机跨机复现失败集完全一致）；
 v0.3 双轨 full 编排 A 批已落地（conv_meta 状态机 + 会话原文必落库），B 批（异步 worker）待实现。
@@ -92,7 +92,7 @@ uv run python tests/audit_run_attribution.py --run run_xxx [--case <id>] [--all]
     # 离线三层归因审计（只读 memos.db）：提取漏 / 检索覆盖漏 / 回答漏，无需重跑与 LLM
 ```
 
-**跨机评测记录同步**（memos.db 纯本地、不入 git，见 [docs/方案-评测记录跨机同步.md](docs/方案-评测记录跨机同步.md)）：
+**跨机评测记录同步**（memos.db 纯本地、不入 git，见 [docs/方案/方案-评测记录跨机同步.md](docs/方案/方案-评测记录跨机同步.md)）：
 
 ```bash
 bash scripts/run_eval_record.sh -m layer1 --memory-provider struct --top-k 15

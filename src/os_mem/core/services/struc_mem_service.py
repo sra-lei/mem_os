@@ -172,7 +172,7 @@ class StructuredMemService:
         接入会话处理状态机；为 None 时保持旧行为（不追踪）。
         事实抽取逻辑见 ``os_mem.extractor.fact_extractor.FactExtractor``。
 
-        投影收敛（A 批，见 docs/方案-记忆更新收敛与Milvus投影一致性.md）：
+        投影收敛（A 批，见 docs/方案/方案-记忆更新收敛与Milvus投影一致性.md）：
         Milvus 是投影（SQLite 为权威源）；写入前先把本批 facts 按 (category, key)
         收敛为每键一条（confidence 高者优先），再按 category 批量删旧、插入新值——
         保证 mem_os 恒为"每 (user, key) 一条最新"的干净投影。

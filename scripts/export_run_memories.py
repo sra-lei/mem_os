@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """评测批次记忆本体导出：memos.db 某 run 的 case_ids → memories.db 该批用户 → 镜像 JSON。
 
-跨机记忆同步（见 docs/方案-评测记录跨机同步.md 的姊妹机制；落地细节在
+跨机记忆同步（见 docs/方案/方案-评测记录跨机同步.md 的姊妹机制；落地细节在
 os_mem.admin.MemAdminService.export_user_data / import_memory_batch）：
 - 记忆本体（conv_meta / struct_memories / conv_messages）不进 git 的原因=整库是
   本地运行产物会分叉；本工具按「评测 run 涉及的用户」导出为不可变 JSON 镜像

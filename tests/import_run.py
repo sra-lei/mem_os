@@ -2,7 +2,7 @@
 
 对侧机器 export 的 run 镜像，pull 到本地后执行本工具即并入本地评测库，
 重复导入同一 run 不产生重复行（run 行 INSERT OR REPLACE，case 行整 run 重放）。
-设计见 docs/方案-评测记录跨机同步.md。本工具 stdlib-only。
+设计见 docs/方案/方案-评测记录跨机同步.md。本工具 stdlib-only。
 
 用法：
     uv run python tests/import_run.py [路径/目录/glob ...]   # 缺省= evals/runs/*.json

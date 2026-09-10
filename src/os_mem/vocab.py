@@ -5,7 +5,7 @@
   ``validate_response`` 校验的数据源；
 - **兜底**：词表表缺失/查询异常时回退内置种子（保证校验/渲染永不因词表故障全拒，
   宁可回到旧白名单行为）。词表演进走 ``os_mem.admin`` 窗口，见
-  docs/方案-事实category与key词表管理.md。
+  docs/方案/方案-事实category与key词表管理.md。
 
 本模块顶层 import 无副作用（仅常量）；DB 访问函数内 lazy。
 """

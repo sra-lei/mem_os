@@ -81,7 +81,7 @@ docs/               中文设计文档（方案/需求/调试记录）；重要�
 - Conversation 在测试代码中由 JSON 字符串消息列表构造；`source_session_id` = conversation_id（**幂等键**）。
 
 ### 4.2 struct 入库管线 + conv_meta 状态机
-会话级原子入库（设计文档：`docs/方案-会话处理状态机与原子入库.md`）：
+会话级原子入库（设计文档：`docs/方案/方案-会话处理状态机与原子入库.md`）：
 
 ```
 StructProvider.ingest
@@ -155,7 +155,7 @@ uv run python tests/test_vec_storage.py
 - **提交前**：`git status` 确认只含本任务文件；临时分析脚本（_tmp_*.py 等）删除或放 .tmp，**不提交**。
 - **禁止提交**：`.env`、`*.db`（唯一例外 `src/os_mem/data/memories.db` 因跨机同步被 `!` 白名单追踪）、日志、缓存。
 - **分支**：单人工作流，直接提交 main；不建临时分支/worktree。push 到 `remotes/github/main`。
-- 改大机制（如入库流程/状态机/表结构）→ 先在 `docs/` 写方案（参考 `docs/方案-会话处理状态机与原子入库.md`），用户确认后再改代码，并配离线单测。
+- 改大机制（如入库流程/状态机/表结构）→ 先在 `docs/` 写方案（参考 `docs/方案/方案-会话处理状态机与原子入库.md`），用户确认后再改代码，并配离线单测。
 
 ## 8. 数据库规范
 
