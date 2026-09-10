@@ -16,8 +16,8 @@ fact_extractor.py，见 AGENTS.md 目录地图）。定位：被编排的**领�
   docs/方案-提取任务与LLM模型画像解耦.md）
 - ``extract_structured_facts``：分段编排（短对话单次 / 长对话并行）+ 全失败降级
   （可注入 provider 自愈 caller：每段走 ``caller.extract(dialog_text, *, validate)``）
-- ``dedup_facts``         ：按 (category, key, value) 跨段去重（实现收拢于
-  ``os_mem.extractor.common.dedup_facts``，单一实现源）
+- 去重等共享纯函数收敛在 ``os_mem.extractor.common``（``dedup_facts`` 为
+  模块级纯函数，不经本类/单例调用）
 
 不依赖 LLM 的正则提取（verbatim 数字句兜底 / R1 覆盖剪枝 / 数值 token 口径）
 整合在 ``regular_extractor.py`` 的 ``RegularExtractor``（2026-09-10 自本类静态
@@ -44,7 +44,7 @@ from os_mem.extractor.callers import ExtractionCore
 from os_mem.extractor.common import (
     EXTRACTION_STATS_KEYS,
     MAX_TRUNC_SPLIT_DEPTH,
-    dedup_facts as _dedup_facts_by_signature,
+    dedup_facts,
     split_text_midpoint as _split_text_midpoint,
 )
 from os_mem.extractor.models import ChunkCaps
@@ -243,6 +243,11 @@ class FactExtractor:
     ) -> list[MemoryFact]:
         """对单个分段提取结构化事实（薄委托兼容层——恢复策略已迁至 caller 核心）。
 
+        .. warning::
+            本方法与 ``complete`` 旧回调路径**仅供评测/测试工具使用**（单测
+            fake complete、scripts/ab_extract_prompt.py），不是正式 provider
+            扩展点——新 provider 实现 ``callers.ExtractionCore`` caller 契约。
+
         恢复循环（repair 续写 / 截断对半切段 / 整段重试）自 2026-09-09 起收敛于
         ``os_mem.extractor.callers.ExtractionCore``（等价迁移：不优化不改行为，
         日志文案逐字一致，见 docs/方案-提取任务与LLM模型画像解耦.md §2 v2 / §4
@@ -257,7 +262,7 @@ class FactExtractor:
         core = ExtractionCore(
             generate=_complete_to_generate(complete_fn),
             repair_fn=getattr(complete_fn, 'repair', None),
-            dedup_fn=self.dedup_facts,
+            dedup_fn=dedup_facts,
             split_fn=self._split_text,
             max_split_depth=MAX_TRUNC_SPLIT_DEPTH,
         )
@@ -321,7 +326,9 @@ class FactExtractor:
           validate, retries) -> CallResult`` 契约）——每段走 caller.extract，
           validate 由本任务注入（= validate_response），并把每段返回的 stats
           累加进实例计数（stats_snapshot/delta 口径不变，含 in/out token 记账）；
-        - ``complete``：旧回调路径（薄委托 extract_chunk，测试 / AB 脚本兼容）。
+        - ``complete``：旧回调路径（薄委托 extract_chunk）。**仅供评测/测试
+          工具使用（单测 fake complete、scripts/ab_extract_prompt.py），不是
+          正式 provider 扩展点**——新 provider 一律实现 caller 契约。
         """
         # 分段上限：入参优先，None → settings 现值（默认路径与现状逐字节等价）
         chunk_caps = chunk_caps or ChunkCaps.from_settings()
@@ -368,7 +375,7 @@ class FactExtractor:
                 chunk_index = future_map[future]
                 _logger.info(f'提取分段 {chunk_index}/{len(chunks)} 完成')
                 all_facts.extend(future.result())
-        deduped = self.dedup_facts(all_facts)
+        deduped = dedup_facts(all_facts)
         if not deduped:
             _logger.error('全部分段提取失败，降级存储原始对话')
             degraded = self._degrade_fact(dialog_text)
@@ -417,15 +424,3 @@ class FactExtractor:
                 )
             )
         return facts
-
-    # ------------------------------------------------------------------ #
-    #  去重
-    # ------------------------------------------------------------------ #
-    @staticmethod
-    def dedup_facts(facts: list[MemoryFact]) -> list[MemoryFact]:
-        """按 (category, key, value) 去重（分段重叠会导致重复提取）。
-
-        实现收拢于 ``os_mem.extractor.common.dedup_facts``（caller 切段合并与
-        任务侧跨段去重共用同一实现，单一实现防漂移）。
-        """
-        return _dedup_facts_by_signature(facts)

@@ -19,6 +19,7 @@ import json
 
 import pytest
 
+from os_mem.extractor.common import dedup_facts
 from os_mem.extractor.fact_extractor import FactExtractor
 from os_mem.extractor.regular_extractor import RegularExtractor
 from os_mem.models.mem_models import MemoryFact
@@ -87,13 +88,13 @@ class TestDedupFacts:
         a = _fact("事实", "finance", "account", "4429853327")
         b = _fact("事实", "finance", "account", "4429853327")  # 与 a 完全相同
         c = _fact("事实", "finance", "account", "8847293001")  # 同 key 不同 value 保留
-        out = FactExtractor.dedup_facts([a, b, c])
+        out = dedup_facts([a, b, c])
         assert len(out) == 2
 
     def test_keeps_different_category_same_value(self) -> None:
         a = _fact("事实", "finance", "amount", "$2,400")
         b = _fact("事实", "contact", "amount", "$2,400")
-        assert len(FactExtractor.dedup_facts([a, b])) == 2
+        assert len(dedup_facts([a, b])) == 2
 
 
 # ------------------------------------------------------------------ #
