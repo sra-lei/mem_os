@@ -19,9 +19,9 @@ import json
 
 import pytest
 
-from os_mem.extractor.common import dedup_facts
 from os_mem.extractor.fact_extractor import FactExtractor
 from os_mem.extractor.regular_extractor import RegularExtractor
+from os_mem.extractor.utils.extract_utils import dedup_facts
 from os_mem.models.mem_models import MemoryFact
 
 

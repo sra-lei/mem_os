@@ -11,8 +11,11 @@ import pytest
 from sqlmodel import Session, func, select
 
 from os_mem.entries.mem_models import FactCategory
+from os_mem.extractor.callers.deepseek_caller import (
+    SYSTEM_PROMPT,
+    build_extract_messages,
+)
 from os_mem.extractor.fact_extractor import FactExtractor
-from os_mem.extractor.deepseek_caller import SYSTEM_PROMPT, build_extract_messages
 from os_mem.infra.storage.mem_storage import MemoryDatabase
 from os_mem.vocab import (
     CATEGORY_SEED,

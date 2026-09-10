@@ -49,7 +49,7 @@ def _prompt_fingerprints() -> dict[str, str]:
     """
     import eval.judge as judge_mod
     import eval.llm as llm_mod
-    import os_mem.extractor.deepseek_caller as extract_mod
+    import os_mem.extractor.callers.deepseek_caller as extract_mod
 
     return {
         'extract.system': extract_mod.SYSTEM_PROMPT_FINGERPRINT,
@@ -301,8 +301,8 @@ def _flush_eval_case(holder: dict[str, Any]) -> None:
                 'top_k': cfg.getoption('--top-k'),
                 'threshold': cfg.getoption('--threshold'),
                 'prompt_fingerprints': _prompt_fingerprints(),
-                # 提取模型画像（provider:model）——与 os_mem.extractor.profile 的
-                # 注册表 key 同口径，跑分可回溯当时提取画像/模型（方案 §4 步骤 4）
+                # 提取模型画像（provider:model）——与 os_mem.extractor.llm_util 的
+                # 默认画像口径同源，跑分可回溯当时提取画像/模型（方案 §4 步骤 4）
                 'extraction_profile': f'deepseek:{memory_settings.DEEPSEEK_MODEL}',
             },
             ensure_ascii=False,

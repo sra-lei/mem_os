@@ -19,12 +19,14 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 from os_mem.configs.mem_settings import memory_settings
-from os_mem.extractor.callers import ExtractionCore
-from os_mem.extractor.deepseek_caller import DeepSeekExtractionCaller
+from os_mem.extractor.callers.deepseek_caller import (
+    DeepSeekExtractionCaller,
+    build_extract_messages,
+)
+from os_mem.extractor.extraction_core import ExtractionCore
 from os_mem.extractor.fact_extractor import FactExtractor
-from os_mem.extractor.models import ChunkCaps
-from os_mem.extractor.profile import build_default_profile
-from os_mem.extractor.deepseek_caller import build_extract_messages
+from os_mem.extractor.llm_util import build_default_profile
+from os_mem.extractor.model.models import ChunkCaps
 from os_mem.infra.llm.base_client import ChatOutcome
 
 _VALID_FACTS = (
@@ -274,7 +276,7 @@ class TestCallerUsageLedger:
         """extract_structured_facts caller 路径把 token 记入实例计数（提取账口径）。"""
         usage = SimpleNamespace(prompt_tokens=40, completion_tokens=9)
         client = CapturingChatClient(usage=usage)
-        from os_mem.extractor.callers import build_extraction_caller
+        from os_mem.extractor.callers.framework import build_extraction_caller
 
         caller = build_extraction_caller(client)
         fx = FactExtractor()

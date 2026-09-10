@@ -6,8 +6,8 @@
   实现：client 创建 + 通用 ``chat`` / ``chat_outcome``。
 - 任务侧内容（如事实提取的 ``SYSTEM_PROMPT``、消息拼装、业务级重试/解析）
   一律不在本模块内 —— 事实提取的 prompt 与适配见
-  ``os_mem.extractor.deepseek_caller``（把任意满足 ``ChatClient`` 的实例适配成
-  提取链路需要的 ``complete(dialog_text)`` 回调）。
+  ``os_mem.extractor.callers.deepseek_caller``（把任意满足 ``ChatClient`` 的实例
+  适配成提取链路需要的 ``complete(dialog_text)`` 回调）。
 
 截断语义（2026-09-09 方案：事实提取鲁棒性与成本优化）：
 - ``chat_outcome`` 区分两种空返回：

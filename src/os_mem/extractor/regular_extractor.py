@@ -2,18 +2,16 @@
 
 归属：``os_mem.extractor`` 记忆提取域。职责：
 
-- ``fallback_numeric_facts`` / ``prune_redundant_verbatim``（原挂在
-  FactExtractor 上的静态方法）：含金额/编号/日期/百分比等精确 token 的原文
-  句子 verbatim 兜底（layer1 精确回忆防线：结构化提取改写会丢数字），以及
-  「token 全被结构化覆盖的兜底句不存」的 R1 剪枝。
+- ``fallback_numeric_facts`` / ``prune_redundant_verbatim``：含金额/编号/日期/
+  百分比等精确 token 的原文句子 verbatim 兜底（精确回忆防线：结构化提取改写会
+  丢数字），以及「token 全被结构化覆盖的兜底句不存」的 R1 剪枝。
 
 数值 token 抽取口径（``fact_tokens`` / ``norm_token``）的唯一实现源在
-``common.py``——它同时被检索侧 ``core.retrieval_strategies`` 共享；本模块只 import
-使用，不再持有副本。
+``utils/token_utils.py``——它同时被检索侧 ``core.retrieval_strategies`` 共享；
+本模块只 import 使用，不再持有副本。
 
 边界：本模块无 DB / LLM / 网络依赖；结构化（LLM）提取链路仍在
-``fact_extractor.py``。判分侧与审计工具各保留独立副本（分属 tests / 工具，
-注明同步义务）。
+``fact_extractor.py``。
 """
 
 from __future__ import annotations
@@ -22,7 +20,7 @@ import hashlib
 import json
 import re
 
-from os_mem.extractor.common import fact_tokens
+from os_mem.extractor.utils.token_utils import fact_tokens
 from os_mem.models.mem_models import MemoryFact
 
 __all__ = ['RegularExtractor', 'MAX_FALLBACK_FACTS']

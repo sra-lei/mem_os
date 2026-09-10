@@ -1,8 +1,9 @@
 """DeepSeek 提供方 extraction caller —— deepseek 专属逻辑全部内聚于此。
 
 归属：``os_mem.extractor`` 记忆提取域。通用上层（provider 无关的恢复循环
-``ExtractionCore`` / 干净契约 / 工厂）在 ``callers.py``；本文件承载
-「怎么跟 deepseek 要到合法结果」的全部具体实现（2026-09-10 prompt.py 并入）：
+``ExtractionCore`` 在 ``extraction_core.py``；干净契约 / 工厂在
+``callers/framework.py``）；本文件承载「怎么跟 deepseek 要到合法结果」的全部
+具体实现：
 
 - **任务 prompt**：SYSTEM_PROMPT / REPAIR_PROMPT 模板（中文指令、json_object、
   {max_facts}/{categories_section} 占位均为当前模型调参形态）、``build_extract_messages``
@@ -10,17 +11,18 @@
   ``build_extract_complete`` 旧 client → complete 回调薄兼容（经工厂返回本 caller）；
 - generate 走 ``client.chat_outcome``（json_object 响应格式）；
 - 恢复策略（截断检测、repair、对半切段、整段重试）不在本类重写——组合
-  ``callers.ExtractionCore``，本文件只负责注入 deepseek 的低层能力
+  ``extraction_core.ExtractionCore``，本文件只负责注入 deepseek 的低层能力
   （generate / repair_fn / dedup_fn / split_fn）；
 - ``DeepSeekExtractionCaller`` 保留 ``outcome()`` / ``__call__()`` / ``repair()``
-  鸭子接口（与历史 ``prompt._ExtractComplete`` 同构）——AB 脚本 Recorder 依赖
-  ``.outcome(...)`` 返回带 ``.usage`` 的 ChatOutcome，且逐字读
-  ``__call__ = outcome().content``、``repair(partial)`` 走 ``client.chat``；
-  旧调用方（build_extract_complete / complete 注入）同样经此接口工作。
+  鸭子接口——AB 脚本 Recorder 依赖 ``.outcome(...)`` 返回带 ``.usage`` 的
+  ChatOutcome，且逐字读 ``__call__ = outcome().content``、``repair(partial)``
+  走 ``client.chat``；旧调用方（build_extract_complete / complete 注入）同样
+  经此接口工作。
 
-依赖方向（无环）：deepseek_caller → callers（通用恢复循环）→ common / models；
-→ configs / infra.llm.base_client / utils.prompt_fp / vocab（函数内延迟 import）。
-具体实现不被 callers 顶层 import——工厂按 ``profile.caller`` 在函数体内 lazy import。
+依赖方向（无环）：deepseek_caller → extraction_core / callers.framework →
+utils.extract_utils / utils.token_utils / model.models；→ configs /
+infra.llm.base_client / utils.prompt_fp / vocab（函数内延迟 import）。具体实现
+不被 callers 包顶层 import——工厂按 ``profile.caller`` 在函数体内 lazy import。
 """
 
 from __future__ import annotations
@@ -28,19 +30,19 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from os_mem.configs.mem_settings import memory_settings
-from os_mem.extractor.callers import ExtractionCore
-from os_mem.extractor.common import (
+from os_mem.extractor.extraction_core import ExtractionCore
+from os_mem.extractor.llm_util import build_default_profile
+from os_mem.extractor.model.models import CallResult, ModelProfile
+from os_mem.extractor.utils.extract_utils import (
     MAX_TRUNC_SPLIT_DEPTH,
     dedup_facts,
     split_text_midpoint,
 )
-from os_mem.extractor.models import CallResult, ModelProfile
-from os_mem.extractor.profile import build_default_profile
 from os_mem.infra.llm.base_client import ChatClient, ChatOutcome
 from os_mem.infra.logger import get_logger
 from os_mem.utils.prompt_fp import fingerprint
 
-_logger = get_logger('os_mem.extractor.deepseek_caller')
+_logger = get_logger('os_mem.extractor.callers.deepseek_caller')
 
 
 # --------------------------------------------------------------------------- #
@@ -103,8 +105,7 @@ class DeepSeekExtractionCaller:
     - ``extract(dialog_text, *, validate, retries=2)``：任务侧唯一入口
       → CallResult{facts|None, stats}；validate 由任务注入；
     - ``outcome(dialog_text)`` / ``__call__(dialog_text)`` / ``repair(partial_json)``：
-      旧鸭子接口保留（与迁出前 ``prompt._ExtractComplete`` 同构，供 AB 脚本 Recorder
-      与旧 complete 调用方兼容）。
+      鸭子接口保留（供 AB 脚本 Recorder 与旧 complete 调用方兼容）。
     """
 
     def __init__(

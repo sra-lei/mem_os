@@ -14,7 +14,7 @@ from os_mem.core.services.memory_versioning import (
     IncomingFact,
     plan_versioning,
 )
-from os_mem.extractor.normalize import (
+from os_mem.extractor.utils.normalize import (
     LIFECYCLE_CURRENT,
     LIFECYCLE_HISTORICAL,
     normalize_key,

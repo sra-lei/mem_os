@@ -12,10 +12,11 @@ from os_mem.core.services.conv_meta_service import (
 )
 from os_mem.core.services.memory_versioning import current_attribute_touches
 from os_mem.entries.mem_models import StructuredMemory
-from os_mem.extractor import FactExtractor, build_extraction_caller
-from os_mem.extractor.common import dedup_facts
-from os_mem.extractor.profile import build_default_profile
+from os_mem.extractor.callers.framework import build_extraction_caller
+from os_mem.extractor.fact_extractor import FactExtractor
+from os_mem.extractor.llm_util import build_default_profile
 from os_mem.extractor.regular_extractor import RegularExtractor
+from os_mem.extractor.utils.extract_utils import dedup_facts
 from os_mem.infra.llm import ChatClient, get_llm_client
 from os_mem.infra.logger import get_logger
 from os_mem.infra.storage import (

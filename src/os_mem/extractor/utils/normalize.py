@@ -1,6 +1,6 @@
 """D4：key 规范化与实体解析（纯函数，无 DB / LLM 依赖）。
 
-设计见 ``docs/方案-D4-实体归属与as-of版本裁决.md`` §3.1-3.2、§4。
+设计见 ``docs/方案/方案-D4-实体归属与as-of版本裁决.md`` §3.1-3.2、§4。
 
 收敛签名从 ``(user_id, category, key)`` 升级为
 ``(user_id, entity_ref, attribute, lifecycle)``：
@@ -12,12 +12,12 @@
 三层归一防线中的 L2（确定性入库归一）。alias 词表刻意保守——只收已实测确认的
 同义簇，拿不准的不归一（保留独立行=旧行为，不会更差）；泛化交 L3 离线聚类。
 
-归一结果数据类 ``NormalizedKey`` 统一放 ``extractor/models.py``（提取域数据类
-单一存放点）；本模块只放归一函数/词表/生命周期常量。
+归一结果数据类 ``NormalizedKey`` 统一放 ``extractor/model/models.py``（提取域
+数据类单一存放点）；本模块只放归一函数/词表/生命周期常量。
 """
 from __future__ import annotations
 
-from os_mem.extractor.models import NormalizedKey
+from os_mem.extractor.model.models import NormalizedKey
 
 # 缺省实体：用户本人（D4-2 前所有事实归 SELF）
 SELF_ENTITY = "SELF"

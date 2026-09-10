@@ -1,32 +1,29 @@
 """事实提取执行器（FactExtractor）—— 结构化记忆提取链路的确定性内聚封装。
 
-归属：``os_mem.extractor`` 记忆提取域（2026-09-08 由 os_mem.utils 迁入
-extraction/，2026-09-09 包更名 extraction→extractor 且 extractor.py 更名
-fact_extractor.py，见 AGENTS.md 目录地图）。定位：被编排的**领域执行器**——不属 utils 小工具
-（它是提取链路核心），也不属 core 业务编排（编排在 core/services/struc_mem_service，
-存储/网络副作用为零，LLM 通过注入的 ``complete(text) -> raw_json`` 回调（旧路径，
-测试/AB 脚本用）或 provider 自愈 caller（``extract(dialog_text, *, validate)``
-干净契约，见 callers.py；恢复策略=provider 内部代码）使用，便于单测与替换）：
+归属：``os_mem.extractor`` 记忆提取域。定位：被编排的**领域执行器**——不属
+utils 小工具（它是提取链路核心），也不属 core 业务编排（编排在
+core/services/struc_mem_service，存储/网络副作用为零，LLM 通过注入的
+``complete(text) -> raw_json`` 回调（旧路径，测试/AB 脚本用）或 provider 自愈
+caller（``extract(dialog_text, *, validate)`` 干净契约，见 callers/framework.py；
+恢复策略=provider 内部代码）使用，便于单测与替换）：
 
 - ``validate_response``   ：LLM 原始输出清洗（markdown 围栏/包装格式）与校验
   （分类白名单、confidence 边界、非法 JSON → 空列表触发重试）
 - ``chunk_dialog``        ：长对话按消息分段 + 段间冗余重叠（边界信息不切丢）
-- ``extract_chunk``       ：单段提取（薄委托兼容层——repair 续写/截断切段/整段重试等
-  恢复策略已收敛于 ``callers.ExtractionCore``，语义等价迁移见
-  docs/方案-提取任务与LLM模型画像解耦.md）
+- ``extract_chunk``       ：单段提取（薄委托兼容层——repair 续写/截断切段/整段
+  重试等恢复策略收敛于 ``extraction_core.ExtractionCore``）
 - ``extract_structured_facts``：分段编排（短对话单次 / 长对话并行）+ 全失败降级
   （可注入 provider 自愈 caller：每段走 ``caller.extract(dialog_text, *, validate)``）
-- 去重等共享纯函数收敛在 ``os_mem.extractor.common``（``dedup_facts`` 为
-  模块级纯函数，不经本类/单例调用）
+- 去重等共享纯函数收敛在 ``utils.extract_utils``（``dedup_facts`` 为模块级
+  纯函数，不经本类/单例调用）
 
 不依赖 LLM 的正则提取（verbatim 数字句兜底 / R1 覆盖剪枝 / 数值 token 口径）
-整合在 ``regular_extractor.py`` 的 ``RegularExtractor``（2026-09-10 自本类静态
-方法与 tokens.py 收拢）。
+整合在 ``regular_extractor.py`` 的 ``RegularExtractor``。
 
 命名规范：本包遵守"变量不用纯缩写"硬规则（snake_case 全称，如 signature /
 tokens / kept_facts），新增代码保持同水准。常量与默认值来自 memory_settings 或
 显式参数；与 caller 共享的纯函数/常量（split_text_midpoint / dedup_facts /
-MAX_TRUNC_SPLIT_DEPTH / 统计 keys）见 ``os_mem.extractor.common``。
+MAX_TRUNC_SPLIT_DEPTH / 统计 keys）见 ``utils.extract_utils``。
 """
 
 from __future__ import annotations
@@ -40,14 +37,16 @@ from typing import Any
 from pydantic import ValidationError
 
 from os_mem.configs.mem_settings import memory_settings
-from os_mem.extractor.callers import ExtractionCore
-from os_mem.extractor.common import (
+from os_mem.extractor.extraction_core import ExtractionCore
+from os_mem.extractor.model.models import ChunkCaps
+from os_mem.extractor.utils.extract_utils import (
     EXTRACTION_STATS_KEYS,
     MAX_TRUNC_SPLIT_DEPTH,
     dedup_facts,
+)
+from os_mem.extractor.utils.extract_utils import (
     split_text_midpoint as _split_text_midpoint,
 )
-from os_mem.extractor.models import ChunkCaps
 from os_mem.infra.logger import get_logger
 from os_mem.models.mem_models import MemoryFact, MemoryFacts
 
@@ -106,7 +105,7 @@ class FactExtractor:
         self._complete = complete
         # 提取过程统计（线程安全；供编排方按「调用前后快照差」记账，见
         # StrucMemService 提取账日志 —— 校准分段参数/成本记账用）。
-        # keys：恢复循环遥测共享自 os_mem.extractor.common.EXTRACTION_STATS_KEYS
+        # keys：恢复循环遥测共享自 os_mem.extractor.utils.extract_utils.EXTRACTION_STATS_KEYS
         # （llm_calls/trunc_empties/split_recursions/repair_calls/repair_ok +
         # in_tokens/out_tokens token 记账），degrade_rows 属任务层语义由本实例追加
         self._stats_lock = threading.Lock()
@@ -230,8 +229,8 @@ class FactExtractor:
         """消息中点对半切（截断空返回的切段递归用）。
 
         少于 2 条消息或任一侧为空 → None（不可切）。
-        实现收拢于 ``os_mem.extractor.common.split_text_midpoint``（caller
-        切段递归与任务侧共用同一实现，单一实现防漂移）。
+        实现收拢于 ``os_mem.extractor.utils.extract_utils.split_text_midpoint``
+        （caller 切段递归与任务侧共用同一实现，单一实现防漂移）。
         """
         return _split_text_midpoint(text)
 
@@ -246,14 +245,13 @@ class FactExtractor:
         .. warning::
             本方法与 ``complete`` 旧回调路径**仅供评测/测试工具使用**（单测
             fake complete、scripts/ab_extract_prompt.py），不是正式 provider
-            扩展点——新 provider 实现 ``callers.ExtractionCore`` caller 契约。
+            扩展点——新 provider 实现 ``callers.framework.ExtractionCaller``
+            caller 契约。
 
-        恢复循环（repair 续写 / 截断对半切段 / 整段重试）自 2026-09-09 起收敛于
-        ``os_mem.extractor.callers.ExtractionCore``（等价迁移：不优化不改行为，
-        日志文案逐字一致，见 docs/方案/方案-提取任务与LLM模型画像解耦.md §2 v2 / §4
-        步骤 1-2）。本方法保留旧签名作为兼容层：把 ``complete`` 的鸭子能力
-        （``outcome`` / ``__call__`` / ``repair``，缺哪个退哪个）包成低层
-        ``generate`` 喂给核心，并把核心返回的遥测累加进实例计数
+        恢复循环（repair 续写 / 截断对半切段 / 整段重试）收敛于
+        ``os_mem.extractor.extraction_core.ExtractionCore``。本方法保留旧签名作为兼容层：
+        把 ``complete`` 的鸭子能力（``outcome`` / ``__call__`` / ``repair``，缺哪个
+        退哪个）包成低层 ``generate`` 喂给核心，并把核心返回的遥测累加进实例计数
         （stats_snapshot/stats_delta 口径不变）。纯 ``__call__`` 无 outcome/repair
         的 complete → generate 返回 (content, None, None)、repair_fn=None
         → 整段重试语义。
@@ -320,8 +318,8 @@ class FactExtractor:
         caller 与 complete 两条路径共用同一分段调用点（方案 §4 步骤 3：
         分段上限改由 profile.chunk_caps 供给任务层）。
 
-        提取回调二选一（2026-09-09 起 caller 优先；恢复策略=provider 内部代码，
-        见 docs/方案/方案-提取任务与LLM模型画像解耦.md §2 v2）：
+        提取回调二选一（caller 优先；恢复策略=provider 内部代码，见
+        docs/方案/方案-提取任务与LLM模型画像解耦.md）：
         - ``caller``：provider 自愈提取 caller（满足 ``extract(dialog_text, *,
           validate, retries) -> CallResult`` 契约）——每段走 caller.extract，
           validate 由本任务注入（= validate_response），并把每段返回的 stats
