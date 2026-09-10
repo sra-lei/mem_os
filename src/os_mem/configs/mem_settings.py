@@ -60,6 +60,16 @@ class MemorySetting(BaseSettings):
     EMBEDDING_MODEL: str = "text-embedding-v4"
     # embedding 向量维度（text-embedding-v4 输出 1024；与 vec_storage 建 collection 用）
     embedding_dim: int = Field(default=1024, description="embedding 向量维度")
+    # 混合检索融合模式（2026-09-10 layer1 探针/端到端实测）：
+    # - rrf（默认）：Milvus RRFRanker 稠密/稀疏等权融合。
+    # - dense_lead（可选，env 切）：稠密语义路为骨架，BM25 仅补「dense 全深度未命中」
+    #   的真盲区（配额 ceil(top_k/3)，纯函数 vec_storage.fuse_dense_lead）。
+    # 实测结论（run_95ae755f95 vs run_e58d9a7def，同库复跑单变量）：dense_lead 修好
+    # 「dense#3/11/14 被 BM25 词面噪音反压」（04座位/15课程/19婚礼提分），但
+    # 「dense钝、BM25准」例反向受害（11房贷 $45k dense#32/BM25#5 失去 RRF 拉升，−.25），
+    # 端到端总分持平（15.03→15.04），故默认保留 rrf；待规则细化（dense 前 N 保护 +
+    # sparse 高名次插入）验证净正向后再切。切法：.env 设 RETRIEVAL_FUSION_MODE=dense_lead。
+    RETRIEVAL_FUSION_MODE: str = "rrf"
 
     MILVUS_API_KEY: str | None = None
     MILVUS_URI: str = "https://in03-668dd52c256b1d8.serverless.aws-eu-central-1.cloud.zilliz.com"

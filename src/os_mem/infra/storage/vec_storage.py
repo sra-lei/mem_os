@@ -7,6 +7,7 @@ fact 向量化，category/key/value/user_id/updated_at 作为元数据。
 """
 from __future__ import annotations
 
+import math
 import time
 from typing import Any
 
@@ -24,7 +25,34 @@ from os_mem.configs.mem_settings import memory_settings
 from os_mem.infra.logger import get_logger
 
 _logger = get_logger("os_mem.storage")
+
+
+def fuse_dense_lead(
+    dense_hits: list[dict],
+    sparse_hits: list[dict],
+    top_k: int,
+    blind_ratio: float = 1 / 3,
+) -> list[dict]:
+    """dense 主导 + sparse 补盲融合（2026-09-10，替代等权 RRF 的新默认）。
+
+    规则（输入均已按各自相关性排序）：
+    - dense 为骨架，顺序不动——语义命中永不被词面命中反压；
+    - sparse 仅补「dense 在整条召回深度内都没有」的 id（真盲区，如问题词不含
+      答案词时 BM25 的精确词面命中），按 sparse 名次取，配额 = ceil(top_k*ratio)；
+    - 补盲项追加在 dense 之后，占用尾部配额（dense 取前 top_k-n），总数恒为 top_k。
+
+    取舍：补盲会挤掉等量 dense 尾部；因补盲只收 sparse 高名次且 dense 完全没召回到
+    的项，属高置信词面证据。配额上限 1/3 防词面噪音倒灌。
+    """
+    dense_ids = {h.get("id") for h in dense_hits}
+    blind = [h for h in sparse_hits if h.get("id") not in dense_ids]
+    quota = math.ceil(top_k * blind_ratio)
+    take_blind = blind[: min(quota, len(blind), top_k)]
+    take_dense = dense_hits[: max(0, top_k - len(take_blind))]
+    return take_dense + take_blind
+
 # =========================================================================== #
+
 #  MemOS：mem_os collection —— StructuredMemory 向量化存储
 #
 #  fact 字段向量化（embedding）写入 vector；
@@ -271,31 +299,56 @@ class MemoryVectorStore:
             "id", "fact", "category", "key", "value", "user_id", "updated_at",
         ]
 
-        # 稠密路：fact embedding → vector 字段（COSINE）；filter 作用在该路召回
+        # 稠密路：fact embedding → vector 字段（COSINE）；filter 作用在该路召回。
+        # 各路取数深度 = top_k*2（与原 RRF 每路 limit 一致），补盲需足够候选。
+        per_route = top_k * 2
         dense_req = AnnSearchRequest(
             data=[query_vector],
             anns_field="vector",
             param={"metric_type": "COSINE"},
-            limit=top_k * 2,
+            limit=per_route,
             filter=expr,
         )
-        reqs: list[AnnSearchRequest] = [dense_req]
 
-        # 稀疏路：query_text → sparse 字段（BM25 full-text search）
-        if query_text:
-            sparse_req = AnnSearchRequest(
+        def _sparse_req() -> AnnSearchRequest:
+            return AnnSearchRequest(
                 data=[query_text],
                 anns_field="sparse",
                 param={"metric_type": "BM25"},
-                limit=top_k * 2,
+                limit=per_route,
                 filter=expr,
             )
-            reqs.append(sparse_req)
 
+        def _run_route(req: AnnSearchRequest) -> list[dict]:
+            r = self.client.hybrid_search(
+                collection_name=self.collection_name,
+                reqs=[req],
+                ranker=None,
+                limit=per_route,
+                output_fields=output_fields,
+            )
+            return [
+                {**{k: row.get(k) for k in output_fields},
+                 "distance": row.get("distance")}
+                for row in (r[0] if isinstance(r, list) and r else [])
+            ]
+
+        # 无 BM25 查询文本：仅稠密路
+        if not query_text:
+            return _run_route(dense_req)[:top_k]
+
+        fusion_mode = memory_settings.RETRIEVAL_FUSION_MODE
+        if fusion_mode == "dense_lead":
+            # 新默认：dense/sparse 各自取全序 → 应用层「dense 主导 + sparse 补盲」
+            dense_hits = _run_route(dense_req)
+            sparse_hits = _run_route(_sparse_req())
+            return fuse_dense_lead(dense_hits, sparse_hits, top_k)
+
+        # rrf 模式（原方案保留）：双路交 Milvus RRFRanker 等权融合
         res = self.client.hybrid_search(
             collection_name=self.collection_name,
-            reqs=reqs,
-            ranker=RRFRanker() if len(reqs) > 1 else None,
+            reqs=[dense_req, _sparse_req()],
+            ranker=RRFRanker(),
             limit=top_k,
             output_fields=output_fields,
         )
