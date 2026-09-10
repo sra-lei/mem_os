@@ -3,7 +3,7 @@
 日期：2026-09-09（v2 修正：恢复策略收敛于 provider 内部，v1 于同日废弃）· 状态：**已实施（2026-09-09/10）**
 
 > **实施落地与本文档的偏差（以代码为准，2026-09-10 重构后终态）**：
-> - 文件结构：`callers.py`=provider 无关上层（`ExtractionCaller` Protocol + `_ExtractionCore`
+> - 文件结构：`callers.py`=provider 无关上层（`ExtractionCaller` Protocol + `ExtractionCore`
 >   通用恢复循环 + `build_extraction_caller` 工厂，按 `profile.caller` 经 `_CALLER_IMPL_MODULES`
 >   分发）；`deepseek_caller.py`=DeepSeek 全部专属实现，**含原 prompt.py 的 SYSTEM_PROMPT/
 >   REPAIR_PROMPT 模板与渲染/指纹**（prompt 已并入，prompt.py 删除）；`fact_extractor.py`=

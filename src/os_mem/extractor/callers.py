@@ -5,7 +5,7 @@ repair、对半切段、整段重试）是「怎么跟某个模型要到合法�
 provider/model 各不同。本模块只承载 **provider 无关** 的部分，具体实现内聚在
 各自模块（deepseek 专属逻辑见 ``deepseek_caller.py``），不与任何 provider 耦合：
 
-- ``_ExtractionCore``：单一恢复循环。语义 = 迁出前的 ``FactExtractor.extract_chunk``
+- ``ExtractionCore``：单一恢复循环。语义 = 迁出前的 ``FactExtractor.extract_chunk``
   现行实现逐行等价复刻（不优化不改行为，日志文案与旧实现逐字一致）；低层能力
   （generate / repair_fn / dedup_fn / split_fn / max_split_depth）由构造注入，
   供各 provider 内部策略拼装。
@@ -59,7 +59,7 @@ class ExtractionCaller(Protocol):
 # ------------------------------------------------------------------ #
 #  单一恢复循环（provider 无关；低层能力由具体 caller 注入）
 # ------------------------------------------------------------------ #
-class _ExtractionCore:
+class ExtractionCore:
     """单段提取的模型恢复循环（语义逐条等价于旧 FactExtractor.extract_chunk）。
 
     构造收低层能力（provider 内部策略拼装点）：

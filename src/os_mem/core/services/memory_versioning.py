@@ -21,7 +21,9 @@ from os_mem.extractor.models import NormalizedKey
 from os_mem.extractor.normalize import (
     LIFECYCLE_CURRENT,
     LIFECYCLE_HISTORICAL,
+    normalize_key,
 )
+from os_mem.models.mem_models import MemoryFact
 
 
 @dataclass(frozen=True)
@@ -147,3 +149,45 @@ def plan_versioning(
             plan.ignored_older += 1
 
     return plan
+
+
+# --------------------------------------------------------------------------- #
+#  高层装配 helper：把归一（normalize_key）收在版本域内，编排层不直接碰归一细节
+# --------------------------------------------------------------------------- #
+def build_incoming_fact(
+    fact: MemoryFact,
+    *,
+    source_conversation_id: str,
+    source_started_at: datetime | None,
+) -> IncomingFact:
+    """把一条 MemoryFact 归一并装配成裁决输入 IncomingFact。
+
+    归一签名（entity_ref/attribute/lifecycle）是版本域内部细节，调用方只需给
+    原始 fact 与来源元数据；normalize_key 单点在此调用，防编排层各自调漂移。
+    """
+    return IncomingFact(
+        fact=fact.fact,
+        category=fact.category,
+        key=fact.key,
+        value=fact.value,
+        confidence=fact.confidence,
+        nk=normalize_key(fact.category, fact.key),
+        source_conversation_id=source_conversation_id,
+        source_started_at=source_started_at,
+    )
+
+
+def current_attribute_touches(
+    facts: list[MemoryFact],
+) -> dict[str, set[str]]:
+    """统计本批事实触及的 current 规范属性：{category: {attribute, ...}}。
+
+    只含 lifecycle=current（historical 不投影）。供投影删旧插新圈定范围；
+    归一签名经 normalize_key 单点计算，编排层不直接接触 entity/attribute/lifecycle。
+    """
+    touched: dict[str, set[str]] = {}
+    for f in facts:
+        nk = normalize_key(f.category, f.key)
+        if nk.lifecycle == LIFECYCLE_CURRENT:
+            touched.setdefault(f.category, set()).add(nk.attribute)
+    return touched

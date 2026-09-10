@@ -12,7 +12,7 @@ fact_extractor.py，见 AGENTS.md 目录地图）。定位：被编排的**领�
   （分类白名单、confidence 边界、非法 JSON → 空列表触发重试）
 - ``chunk_dialog``        ：长对话按消息分段 + 段间冗余重叠（边界信息不切丢）
 - ``extract_chunk``       ：单段提取（薄委托兼容层——repair 续写/截断切段/整段重试等
-  恢复策略已收敛于 ``callers._ExtractionCore``，语义等价迁移见
+  恢复策略已收敛于 ``callers.ExtractionCore``，语义等价迁移见
   docs/方案-提取任务与LLM模型画像解耦.md）
 - ``extract_structured_facts``：分段编排（短对话单次 / 长对话并行）+ 全失败降级
   （可注入 provider 自愈 caller：每段走 ``caller.extract(dialog_text, *, validate)``）
@@ -40,7 +40,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from os_mem.configs.mem_settings import memory_settings
-from os_mem.extractor.callers import _ExtractionCore
+from os_mem.extractor.callers import ExtractionCore
 from os_mem.extractor.common import (
     EXTRACTION_STATS_KEYS,
     MAX_TRUNC_SPLIT_DEPTH,
@@ -244,7 +244,7 @@ class FactExtractor:
         """对单个分段提取结构化事实（薄委托兼容层——恢复策略已迁至 caller 核心）。
 
         恢复循环（repair 续写 / 截断对半切段 / 整段重试）自 2026-09-09 起收敛于
-        ``os_mem.extractor.callers._ExtractionCore``（等价迁移：不优化不改行为，
+        ``os_mem.extractor.callers.ExtractionCore``（等价迁移：不优化不改行为，
         日志文案逐字一致，见 docs/方案-提取任务与LLM模型画像解耦.md §2 v2 / §4
         步骤 1-2）。本方法保留旧签名作为兼容层：把 ``complete`` 的鸭子能力
         （``outcome`` / ``__call__`` / ``repair``，缺哪个退哪个）包成低层
@@ -254,7 +254,7 @@ class FactExtractor:
         → 整段重试语义。
         """
         complete_fn = self._resolve_complete(complete)
-        core = _ExtractionCore(
+        core = ExtractionCore(
             generate=_complete_to_generate(complete_fn),
             repair_fn=getattr(complete_fn, 'repair', None),
             dedup_fn=self.dedup_facts,

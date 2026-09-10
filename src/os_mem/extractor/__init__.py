@@ -5,18 +5,18 @@
 定位：被编排的**领域执行器**——不属 utils 小工具，也不属 core 业务编排：
 - ``fact_extractor.py``：FactExtractor（校验/分段/LLM 提取委托/并行编排/全败降级/
   去重，LLM 结构化链路任务语义；正则兜底/R1 剪枝已移 RegularExtractor）
-- ``callers.py``      ：provider 无关的上层（ExtractionCaller 协议 / _ExtractionCore
+- ``callers.py``      ：provider 无关的上层（ExtractionCaller 协议 / ExtractionCore
   单一恢复循环 / build_extraction_caller 按 profile.caller 分发，
   见 docs/方案-提取任务与LLM模型画像解耦.md §2 v2）
 - ``deepseek_caller.py``：DeepSeek 具体实现（2026-09-10 吸收原 prompt.py）——
   SYSTEM_PROMPT/REPAIR_PROMPT 模板与渲染、build_extract_complete 薄兼容、指纹；
   DeepSeekExtractionCaller + build_caller；chat_outcome/json_object/usage 口径
 - ``regular_extractor.py``：不依赖 LLM 的确定性正则提取（RegularExtractor）——
-  verbatim 数字句兜底 / R1 覆盖剪枝 / fact_tokens 数值 token 口径
-  （提取 R1 与检索冗余过滤共享，原 tokens.py + FactExtractor 静态方法整合于此）
+  verbatim 数字句兜底 / R1 覆盖剪枝（fact_tokens 口径在 common，本模块只消费）
 - ``common.py``      ：共享纯函数/常量（split_text_midpoint / dedup_facts /
-  MAX_TRUNC_SPLIT_DEPTH / 统计 keys / empty_extraction_stats）——单一实现源，
-  fact_extractor 与 callers 共用
+  fact_tokens·norm_token 数值 token 口径 / MAX_TRUNC_SPLIT_DEPTH / 统计 keys /
+  empty_extraction_stats）——单一实现源，fact_extractor / callers / regular_extractor
+  与检索侧 core.retrieval_strategies 共用
 - ``models.py``      ：提取域数据类单一存放点（NormalizedKey / CallResult /
   ChunkCaps / ModelProfile，纯数据无策略）
 
@@ -30,7 +30,7 @@ core/services/struc_mem_service 负责；纯数据变换、无存储/网络副�
 
 from __future__ import annotations
 
-from os_mem.extractor.callers import build_extraction_caller
+from os_mem.extractor.callers import ExtractionCore, build_extraction_caller
 from os_mem.extractor.deepseek_caller import (
     build_extract_complete,
     build_extract_messages,
@@ -39,6 +39,7 @@ from os_mem.extractor.deepseek_caller import (
 from os_mem.extractor.fact_extractor import FactExtractor
 
 __all__ = [
+    'ExtractionCore',
     'FactExtractor',
     'build_extract_complete',
     'build_extract_messages',

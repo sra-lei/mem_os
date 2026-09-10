@@ -1,7 +1,7 @@
 """DeepSeek 提供方 extraction caller —— deepseek 专属逻辑全部内聚于此。
 
 归属：``os_mem.extractor`` 记忆提取域。通用上层（provider 无关的恢复循环
-``_ExtractionCore`` / 干净契约 / 工厂）在 ``callers.py``；本文件承载
+``ExtractionCore`` / 干净契约 / 工厂）在 ``callers.py``；本文件承载
 「怎么跟 deepseek 要到合法结果」的全部具体实现（2026-09-10 prompt.py 并入）：
 
 - **任务 prompt**：SYSTEM_PROMPT / REPAIR_PROMPT 模板（中文指令、json_object、
@@ -10,7 +10,7 @@
   ``build_extract_complete`` 旧 client → complete 回调薄兼容（经工厂返回本 caller）；
 - generate 走 ``client.chat_outcome``（json_object 响应格式）；
 - 恢复策略（截断检测、repair、对半切段、整段重试）不在本类重写——组合
-  ``callers._ExtractionCore``，本文件只负责注入 deepseek 的低层能力
+  ``callers.ExtractionCore``，本文件只负责注入 deepseek 的低层能力
   （generate / repair_fn / dedup_fn / split_fn）；
 - ``DeepSeekExtractionCaller`` 保留 ``outcome()`` / ``__call__()`` / ``repair()``
   鸭子接口（与历史 ``prompt._ExtractComplete`` 同构）——AB 脚本 Recorder 依赖
@@ -28,7 +28,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from os_mem.configs.mem_settings import memory_settings
-from os_mem.extractor.callers import _ExtractionCore
+from os_mem.extractor.callers import ExtractionCore
 from os_mem.extractor.common import (
     MAX_TRUNC_SPLIT_DEPTH,
     dedup_facts,
@@ -115,7 +115,7 @@ class DeepSeekExtractionCaller:
         self._profile = profile or build_default_profile()
         self._client = client
         self._response_format = {'type': 'json_object'}
-        self._core = _ExtractionCore(
+        self._core = ExtractionCore(
             generate=self._generate,
             repair_fn=self.repair,
             dedup_fn=dedup_facts,

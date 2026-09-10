@@ -10,9 +10,9 @@ from os_mem.core.services.conv_meta_service import (
     STATUS_SAVING_SQLITE,
     STATUS_SAVING_VECTOR,
 )
+from os_mem.core.services.memory_versioning import current_attribute_touches
 from os_mem.entries.mem_models import StructuredMemory
 from os_mem.extractor import FactExtractor, build_extraction_caller
-from os_mem.extractor.normalize import normalize_key
 from os_mem.extractor.profile import build_default_profile
 from os_mem.extractor.regular_extractor import RegularExtractor
 from os_mem.infra.llm import ChatClient, get_llm_client
@@ -72,23 +72,17 @@ class StructuredMemService:
         """
         from os_mem.core.services.memory_versioning import (
             ExistingVersion,
-            IncomingFact,
+            build_incoming_fact,
             plan_versioning,
         )
-        from os_mem.extractor.normalize import normalize_key
 
         if not facts:
             return 0
         now = datetime.utcnow()
 
         incoming = [
-            IncomingFact(
-                fact=f.fact,
-                category=f.category,
-                key=f.key,
-                value=f.value,
-                confidence=f.confidence,
-                nk=normalize_key(f.category, f.key),
+            build_incoming_fact(
+                f,
                 source_conversation_id=source_conversation_id,
                 source_started_at=started_at,
             )
@@ -252,12 +246,8 @@ class StructuredMemService:
             on_stage(STATUS_SAVING_VECTOR)
         user_id = conversation.user_id
 
-        # 本批触及的 current 签名（historical 不进投影）
-        touched_attrs: dict[str, set[str]] = {}
-        for cf in conv_facts:
-            nk = normalize_key(cf.category, cf.key)
-            if nk.lifecycle == 'current':
-                touched_attrs.setdefault(cf.category, set()).add(nk.attribute)
+        # 本批触及的 current 签名（historical 不进投影）；归一收在版本域 helper
+        touched_attrs = current_attribute_touches(conv_facts)
 
         # 从权威 SQLite 回读这些签名的 current 行
         projected: list[StructuredMemory] = []

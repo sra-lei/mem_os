@@ -19,7 +19,7 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 from os_mem.configs.mem_settings import memory_settings
-from os_mem.extractor.callers import _ExtractionCore
+from os_mem.extractor.callers import ExtractionCore
 from os_mem.extractor.deepseek_caller import DeepSeekExtractionCaller
 from os_mem.extractor.fact_extractor import FactExtractor
 from os_mem.extractor.models import ChunkCaps
@@ -198,7 +198,7 @@ class TestCoreTokenLedger:
         def fake_generate(text: str) -> tuple[str, str | None, tuple[int, int] | None]:
             return _VALID_FACTS, 'stop', (100, 200)
 
-        core = _ExtractionCore(generate=fake_generate)
+        core = ExtractionCore(generate=fake_generate)
         facts, stats = core.extract(
             '对话文本', validate=FactExtractor.validate_response, retries=2
         )
@@ -218,7 +218,7 @@ class TestCoreTokenLedger:
         def never_split(text: str) -> tuple[str, str] | None:
             return None  # 单行/不可切 → trunc_empties 计数后放弃该段
 
-        core = _ExtractionCore(generate=empty_generate, split_fn=never_split)
+        core = ExtractionCore(generate=empty_generate, split_fn=never_split)
         facts, stats = core.extract(
             '对话文本', validate=FactExtractor.validate_response, retries=2
         )
@@ -236,7 +236,7 @@ class TestCoreTokenLedger:
         ) -> tuple[str, str | None, tuple[int, int] | None]:
             return _VALID_FACTS, None, None
 
-        core = _ExtractionCore(generate=plain_generate)
+        core = ExtractionCore(generate=plain_generate)
         facts, stats = core.extract(
             '对话文本', validate=FactExtractor.validate_response, retries=1
         )

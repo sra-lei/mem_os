@@ -19,7 +19,8 @@ from os_mem.extractor.deepseek_caller import (
     build_extract_complete,
     build_repair_messages,
 )
-from os_mem.extractor.regular_extractor import _NUMERIC_TOKENS, fact_tokens
+from os_mem.extractor.common import fact_tokens
+from os_mem.extractor.regular_extractor import _NUMERIC_TOKENS
 from os_mem.infra.llm import get_llm_client
 from os_mem.vocab import render_categories_section
 
