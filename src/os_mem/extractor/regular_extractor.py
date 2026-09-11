@@ -22,20 +22,25 @@ import hashlib
 import json
 import re
 
-from os_mem.extractor.common import fact_tokens
+from os_mem.extractor.common import _MONTH_ALIASES, fact_tokens
 from os_mem.models.mem_models import MemoryFact
 
 __all__ = ['RegularExtractor', 'MAX_FALLBACK_FACTS']
 
+# 英文月份别名（复用 common 日期口径，不在此持有第二份词表）
+_MONTH_NAMES = '|'.join(sorted(_MONTH_ALIASES, key=len, reverse=True))
+
 # --------------------------------------------------------------------------- #
-#  兜底句识别正则（verbatim 提取专属；共享数值 token 口径见 common.fact_tokens）
+#  兜底句识别正则（verbatim 提取专属；共享精确 token 口径见 common.fact_tokens）
 # --------------------------------------------------------------------------- #
-# 精确信息兜底：即便 LLM 提取遗漏，也要把含金额/编号/日期/百分比的原文句子捞进库。
-# 这些 token 正是 layer1 精确回忆类问题的答案核心（金额、编号、时间等）。
+# 精确信息兜底：即便 LLM 提取遗漏，也要把含金额/编号/日期/时刻/百分比的原文句子
+# 捞进库。宽进原则——入库不看判分器需要什么；是否进注入窗口由检索侧策略链裁决。
 _NUMERIC_TOKENS = re.compile(
     r'\$\s?\d[\d,]*(?:\.\d+)?|'  # $2,400 / $1,017.50
     r'\d{1,2}%|'  # 20%
-    r'\b\d{1,2}/\d{1,2}/\d{2,4}\b|'  # 11/21/2024
+    r'\b\d{1,2}/\d{1,2}(?:/\d{2,4})?\b|'  # 11/21 或 11/21/2024
+    rf'\b(?:{_MONTH_NAMES})\.?\s+\d{{1,2}}(?:st|nd|rd|th)?\b|'  # November 21st
+    r'\d{1,2}\s*月\s*\d{1,2}\s*日?|'  # 11月21日
     r'\b\d{1,2}[:：]\d{2}\s*[APap]\.?[Mm]\.?|'  # 2:30 PM
     r'\b\d{1,2}[:：]\d{2}\b|'  # 14:35
     r'\b[A-Z]{2,}-\d{2,}[A-Z0-9-]*\b|'  # CLM-2024-894327 / PAC-778K4M
@@ -123,19 +128,15 @@ class RegularExtractor:
         fallback_facts: list[MemoryFact],
         llm_facts: list[MemoryFact],
     ) -> list[MemoryFact]:
-        """R1 兜底剪枝：结构化已覆盖的重复句 / 无判分口径数值的句子 → 不存。
+        """R1 覆盖去重：verbatim 精确信息 token 全被结构化事实覆盖 → 不存。
 
-        兜底是"结构化漏提数字"的保险——只应保结构化**没覆盖**的信息。若一句兜底
-        句里的数值全部已由结构化事实表达（同一 token 集合），该句不提供新信息，
-        丢弃（安全：删的只是重复信息，唯一载体不受影响，无负收益）。
+        兜底是"结构化漏提信息"的保险——只应保结构化**没覆盖**的信息。若一句兜底
+        句里的精确 token 全部已由结构化事实表达（同一 token 集合），该句不提供新
+        信息，丢弃（安全：删的只是重复信息，唯一载体不受影响，无负收益）。
 
-        剪枝规则（满足任一即不存）：
-        1. 数值 token 全被 LLM 结构化事实覆盖——该句不提供新信息；
-        2. **无判分口径数值 token**（``fact_tokens`` 为空）——入库门 ``_NUMERIC_TOKENS``
-           比判分/检索口径宽，会收入纯百分比（``3%``）、纯时刻（``2:30 PM``）句；
-           但 assert 判分不核验百分比/时刻，检索侧 RedundantVerbatimFilter 也必剔
-           无数值句（layer1 实测 69/195 条属此，零条进入注入窗口）。在提取端提前
-           裁掉，避免无效 verbatim 占候选池与向量位（2026-09-11）。
+        口径为通用精确信息（金额/编号/百分比/时刻/日期……，见 common.fact_tokens），
+        不向评测判分器看齐：判分器当前不核验 %/时间/日期，不等于这些信息无价值，
+        存储层一律宽进；是否进注入窗口由检索侧策略链裁决（2026-09-11 纠偏）。
 
         降级保护：LLM 提取整体失败时 llm_facts 是 ``raw_conversation`` 原文降级
         （value=整段对话，token 覆盖一切）——此时不做剪枝，兜底照存（保险语义）；
@@ -151,7 +152,7 @@ class RegularExtractor:
         kept_facts: list[MemoryFact] = []
         for fact in fallback_facts:
             tokens = fact_tokens(f'{fact.fact} {fact.value or ""}')
-            if not tokens or tokens <= structured_tokens:
+            if tokens and tokens <= structured_tokens:
                 continue
             kept_facts.append(fact)
         return kept_facts

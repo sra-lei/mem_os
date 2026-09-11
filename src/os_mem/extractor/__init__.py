@@ -12,9 +12,10 @@
   SYSTEM_PROMPT/REPAIR_PROMPT 模板与渲染、build_extract_complete 薄兼容、指纹；
   DeepSeekExtractionCaller + build_caller；chat_outcome/json_object/usage 口径
 - ``regular_extractor.py``：不依赖 LLM 的确定性正则提取（RegularExtractor）——
-  verbatim 数字句兜底 / R1 覆盖剪枝（fact_tokens 口径在 common，本模块只消费）
+  verbatim 精确信息句兜底（金额/编号/%/时刻/日期，宽进）/ R1 覆盖剪枝
+  （fact_tokens 口径在 common，本模块只消费）
 - ``common.py``      ：共享纯函数/常量（split_text_midpoint / dedup_facts /
-  fact_tokens·norm_token 数值 token 口径 / MAX_TRUNC_SPLIT_DEPTH / 统计 keys /
+  fact_tokens·norm_token 精确信息 token 口径 / MAX_TRUNC_SPLIT_DEPTH / 统计 keys /
   empty_extraction_stats）——单一实现源，fact_extractor / callers / regular_extractor
   与检索侧 core.retrieval_strategies 共用
 - ``models.py``      ：提取域数据类单一存放点（NormalizedKey / CallResult /
