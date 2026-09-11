@@ -497,6 +497,54 @@ class TestPruneRedundantVerbatim:
         out = RegularExtractor.prune_redundant_verbatim(fallback, llm)
         assert len(out) == 2
 
+    def test_pure_percentage_sentence_dropped(self) -> None:
+        """纯百分比句（无金额/编号/≥4位数字）→ 剪枝：判分不核验百分比，
+        检索侧 RedundantVerbatimFilter 也必剔（layer1 实测 37 条此类无效 verbatim）。"""
+        llm = [_fact("User's card gives cash back", key="cashback", value="x")]
+        fallback = [
+            _fact(
+                "You'll earn 3% cash back on dining and 1% on everything else.",
+                key="verbatim_pct",
+                value="x",
+            )
+        ]
+        out = RegularExtractor.prune_redundant_verbatim(fallback, llm)
+        assert out == []
+
+    def test_pure_clock_time_sentence_dropped(self) -> None:
+        """纯时刻句（2:30 PM）→ 剪枝：时刻非判分信息点（layer1 实测 32 条）。"""
+        llm = [_fact("User has a medical appointment", key="appt", value="x")]
+        fallback = [
+            _fact(
+                "Chen can see you next Thursday at 2:30 PM.",
+                key="verbatim_time",
+                value="x",
+            )
+        ]
+        out = RegularExtractor.prune_redundant_verbatim(fallback, llm)
+        assert out == []
+
+    def test_percentage_with_amount_kept(self) -> None:
+        """百分比 + 判分口径金额同句 → 整句保留（金额是唯一载体时不受误伤）。"""
+        llm = [_fact("User's card gives cash back", key="cashback", value="x")]
+        fallback = [
+            _fact(
+                "The fee is 3% or $12 minimum per transfer.",
+                key="verbatim_mix",
+                value="x",
+            )
+        ]
+        out = RegularExtractor.prune_redundant_verbatim(fallback, llm)
+        assert len(out) == 1
+
+    def test_no_token_sentence_kept_when_llm_empty(self) -> None:
+        """llm_facts 为空（零事实提取）→ 不剪枝，纯百分比句也照存（宁可多存保护）。"""
+        fallback = [
+            _fact("You'll earn 3% cash back.", key="verbatim_pct", value="x")
+        ]
+        out = RegularExtractor.prune_redundant_verbatim(fallback, [])
+        assert len(out) == 1
+
 
 # ------------------------------------------------------------------ #
 #  兜底正则盲区：裸年份/产品代号（Freedom 2045）补抓
