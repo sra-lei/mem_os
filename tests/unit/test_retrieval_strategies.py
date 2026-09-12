@@ -1,13 +1,15 @@
-"""检索注入策略链单测（os_mem/core/retrieve/strategies/，v2 单一职责策略链）。
+"""检索注入单测（os_mem/core/retrieve/strategies/）。
 
-策略链（固定顺序、全部默认加载、无 Enable 开关）：
-  VerbatimNoiseFilter → StructuredKeyDedup → RedundantVerbatimFilter
-  → VerbatimQuota → StructuredQuota → 终装配（结构化在前、verbatim 补位）
+注入链（2026-09-12 简化后）：**链已清空** —— 宽窗取回（RETRIEVAL_WIDE_FETCH_K）
++ 终装配（结构化在前、verbatim 补位）+ 字符预算截断（INJECTION_CHAR_BUDGET）。
+
+1/2/3/4/5 号已全部移出链（实测 no-op / 配额失去对象 / 删整句有害，见
+docs/方案/方案-检索注入简化-宽窗替代策略链.md §1.4 与 §六-续），类与组件单测
+暂留，待 ≥2 轮确认后随模块删除。
 
 覆盖：
-- 组件级：每个策略只做一件事（噪声剔除/结构化去重/verbatim 冗余剔除/双配额）
-- 链级（apply_retrieval_strategies）：端到端语义 = v1 验证过的区分准入行为
-  （见 docs/方案/方案-检索注入verbatim区分策略.md §八：11/20 → 14/20）
+- 组件级：1/2/3/4/5 号各自单一职责仍成立（噪声判定/去重/冗余剔除/双配额）
+- 链级（apply_retrieval_strategies）：零闸门 + 结构化优先 + 预算内全入
 
 不依赖真实 Milvus / LLM / 存储 —— 纯函数输入输出。
 """
@@ -164,32 +166,35 @@ class TestStructuredQuota:
 
 
 # ------------------------------------------------------------------ #
-#  策略链语义（端到端 = v1 验证行为）
+#  注入链语义（2026-09-12 简化后：单一噪声闸门 + 预算内全入）
 # ------------------------------------------------------------------ #
 class TestStrategyChain:
-    def test_chain_has_five_single_purpose_strategies(self) -> None:
-        names = [type(s).__name__ for s in STRATEGY_CHAIN]
-        assert names == [
-            'VerbatimNoiseFilter',
-            'StructuredKeyDedup',
-            'RedundantVerbatimFilter',
-            'VerbatimQuota',
-            'StructuredQuota',
-        ]
+    def test_chain_is_empty(self) -> None:
+        """链已清空（2026-09-12 A/B/C 端到端结论：宽窗 + 零闸门最优）。
 
-    def test_dedup_and_structured_first(self) -> None:
+        2/3/4/5 号实测 no-op / 配额失去对象；1 号按形式删整句会连带删掉合法内容
+        （B 16/20 < C 19/20）→ 一并移出。见方案 §六-续。
+        """
+        assert STRATEGY_CHAIN == []
+
+    def test_same_key_rows_no_longer_merged_in_retrieval(self) -> None:
+        """同 (category, key) 行不再在检索侧合并——身份由入库侧签名保证。
+
+        实测：投影键空间的 (category, 投影键) 重复组 = 0（签名唯一性不变量 +
+        投影按 D4 收敛键删旧插新），故该层去重已无对象。
+        """
         hits = [
             _hit('电话 916-555-2234', 'contact', 'phone'),
             _hit('电话 916-555-8899', 'contact', 'phone'),
             _hit('地址 Maple St', 'contact', 'address'),
         ]
         out = apply_retrieval_strategies('query', hits, top_k=3)
-        assert len(out) == 2
+        assert len(out) == 3
         assert out[0]['key'] == 'phone'
 
-    def test_structured_beat_verbatim_dominance(self) -> None:
-        """回归（run_835b24aeb5 教训）：verbatim 不得霸榜——噪声/无 token 句被剔除，
-        结构化事实全部入选且排前。"""
+    def test_structured_first_then_verbatim(self) -> None:
+        """终装配顺序不变：结构化在前、verbatim 补位；无 token 句不再被检索侧剔除
+        （那是入库侧 R1 的职责）。"""
         hits = (
             [_vb(f'English verbatim {i}') for i in range(6)]
             + [_hit('用户返程座位 14C', 'travel', 'return_seat')]
@@ -199,8 +204,9 @@ class TestStrategyChain:
         out = apply_retrieval_strategies('q', hits, top_k=5)
         structured = [h for h in out if not h['key'].startswith('verbatim_')]
         verbatim = [h for h in out if h['key'].startswith('verbatim_')]
-        assert len(structured) == 3  # 无 token 的 verbatim 全被剔除
-        assert verbatim == []
+        assert len(structured) == 3
+        assert len(verbatim) == 6
+        assert all(not h['key'].startswith('verbatim_') for h in out[:3])
 
     def test_unique_carrier_admitted(self) -> None:
         """余额只存在于 verbatim 句时应入窗（case 18 场景）。"""
@@ -215,28 +221,34 @@ class TestStrategyChain:
         assert out[0]['key'] == 'balance'
         assert out[1]['key'] == 'address'
 
-    def test_redundant_verbatim_skipped(self) -> None:
+    def test_redundant_verbatim_no_longer_dropped_in_retrieval(self) -> None:
+        """同值 verbatim 不再在检索侧剔除：入库侧 R1 已前置（实测残留 0/157）。"""
         hits = [
             _hit('用户 IRA 余额为 $248,500', 'finance', 'balance'),
             _vb('The rollover IRA has $248,500.'),
         ]
         out = apply_retrieval_strategies('q', hits, top_k=3)
-        assert len(out) == 1
-        assert not out[0]['key'].startswith('verbatim_')
+        assert len(out) == 2
 
-    def test_adjust_noise_filtered(self) -> None:
-        """case 20 过程性中间值不入窗。"""
+    def test_noise_sentence_no_longer_dropped_by_chain(self) -> None:
+        """链不再删整句：比较句原样入窗（判定本身仍由组件级 TestNoiseFilter 覆盖）。
+
+        端到端实测：C 组把 18 条形式干扰句全部放进上下文，20 例无一因此变差；
+        而 B 组删句导致 15/16/04 掉分 → 故删句动作从链上移除。
+        """
         hits = [
             _hit('用户每周学费为 $617.50', 'finance', 'weekly_tuition'),
             _vb('$308.75 instead of $617.50 for that week.'),
         ]
         out = apply_retrieval_strategies('q', hits, top_k=3)
         texts = [h['fact'] for h in out]
-        assert len(out) == 1
-        assert '308.75' not in ' '.join(texts)
+        assert len(out) == 2
+        assert any('308.75' in t for t in texts)
+        # 组件级判定仍成立（保留作为"标注/降权"将来复用）
+        assert len(VerbatimNoiseFilter().apply('q', hits, top_k=3)) == 1
 
     def test_carriers_fill_when_structured_scarce(self) -> None:
-        """结构化稀缺时 carrier 突破 1/3 上限填满剩余（case 18 修复点）。"""
+        """结构化稀缺时 carrier 全部入窗（case 18 修复点）。"""
         hits = [_hit('用户 IRA 余额为 $248,500', 'finance', 'balance')] + [
             _vb(f'Account {i} balance is $1{i}0.')
             for i in range(1, 9)
@@ -246,14 +258,29 @@ class TestStrategyChain:
         assert len(verbatim) == 8
         assert len(out) == 9
 
-    def test_reserved_slots_when_structured_plenty(self) -> None:
-        """结构化充足时给 carrier 预留 1/3 槽位；结构化在前。"""
+    def test_no_reserved_slots_no_truncation(self) -> None:
+        """结构化充足时不再预留槽位、不再按条数截断（配额机制已移除）。"""
         structured = [_hit(f'条目{i}: $1{i}0', 'finance', f'key{i}') for i in range(15)]
         carriers = [_vb(f'Confirmation REF-9{i}0.') for i in range(10)]
         out = apply_retrieval_strategies('q', structured + carriers, top_k=15)
         verbatim = [h for h in out if h['key'].startswith('verbatim_')]
         structured_out = [h for h in out if not h['key'].startswith('verbatim_')]
-        assert len(out) == 15
-        assert len(structured_out) == 10
-        assert len(verbatim) == 5
-        assert all(not h['key'].startswith('verbatim_') for h in out[:10])
+        assert len(structured_out) == 15
+        assert len(verbatim) == 10
+        assert all(not h['key'].startswith('verbatim_') for h in out[:15])
+
+    def test_char_budget_trims_only_when_exceeded(self) -> None:
+        """预算只在超出时生效；结构化在前，先保住结构化事实。"""
+        hits = [
+            _hit('A' * 100, 'finance', 'k1'),
+            _hit('B' * 100, 'finance', 'k2'),
+            _vb('C' * 100),
+        ]
+        # 预算 250：结构化两条（fact+value 各 200 字符）→ 第二条即超预算
+        out = apply_retrieval_strategies('q', hits, top_k=3, budget_chars=250)
+        assert len(out) == 1
+        assert out[0]['key'] == 'k1'
+        # 预算充裕：全入
+        out2 = apply_retrieval_strategies('q', hits, top_k=3, budget_chars=10_000)
+        assert len(out2) == 3
+

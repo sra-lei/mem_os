@@ -341,22 +341,21 @@ class StructuredMemService:
     ) -> list[StructuredMemory]:
         """根据 query 检索结构化记忆（混合检索 + 元数据过滤）。
 
-        检索策略层（可插拔，见 os_mem.core.retrieve.strategies）：
-        - 固定顺序的单一职责策略链（噪声剔除/结构化去重/verbatim 冗余剔除/
-          双配额），全部默认加载，无 Enable 开关；
-        - 策略层需要放大取回候选（top_k × RETRIEVAL_FETCH_MULTIPLIER）再收敛，
-          保证去重/配额后有足够不同 key 填满 top_k；
-        - 策略只作用于候选列表 → 注入列表，不改搜索本身 → §10 来源锚定落地后可
-          原样复用并复测收益。
+        检索注入层（见 os_mem.core.retrieve.strategies，2026-09-12 简化）：
+        - 宽窗取回：候选直接放到覆盖全库（RETRIEVAL_WIDE_FETCH_K），不再
+          「放大再收敛」——旧的 top_k × 3 放大系数已废除；
+        - 注入窗口由**字符预算**（INJECTION_CHAR_BUDGET）控制，不再是 top_k 条数；
+        - 链上只剩 1 号噪声闸门（形式干扰句），2/3/4/5 号已移出链（实测 no-op /
+          配额失去对象），详见 docs/方案/方案-检索注入简化-宽窗替代策略链.md。
         """
         from os_mem.core.retrieve import (
-            RETRIEVAL_FETCH_MULTIPLIER,
+            RETRIEVAL_WIDE_FETCH_K,
             apply_retrieval_strategies,
         )
         from os_mem.infra.p2check import mask_pii
 
-        # 放大取回：去重/配额收敛后仍需足够不同 key 填满 top_k（无条件生效）
-        fetch_k = top_k * RETRIEVAL_FETCH_MULTIPLIER
+        # 宽窗取回：单 case 库内约 46 行，256 足以覆盖全库
+        fetch_k = max(top_k, RETRIEVAL_WIDE_FETCH_K)
         masked_query = mask_pii(query)
         query_embedding: list[float] = []
         try:
@@ -376,12 +375,12 @@ class StructuredMemService:
         if not hits:
             _logger.warning(f'struct 检索无命中 user={user_id} query={masked_query}')
 
-        # 检索策略后处理（全关时直出前 top_k = 基线）
+        # 检索注入后处理：噪声闸门 + 结构化优先 + 字符预算截断
         hits = apply_retrieval_strategies(query, hits, top_k)
 
         _logger.info(
             f'  获取结构化记忆: {len(hits)} 条'
-            f'（fetch={fetch_k} top_k={top_k}）'
+            f'（fetch={fetch_k} 预算制）'
         )
         memories: list[StructuredMemory] = []
         allowed = {'id', 'fact', 'category', 'key', 'value', 'user_id', 'updated_at'}
@@ -402,17 +401,19 @@ def get_structured_mem_service() -> StructuredMemService:
     global _structured_mem_service
     if _structured_mem_service is None:
         _structured_mem_service = StructuredMemService(
-            get_llm_client(), _vectorizer, _vector_store
+            _llm_client, _vectorizer, _vector_store
         )
     return _structured_mem_service
 
 
 # ========================================================================= #
-#  检索策略链（固定加载，无开关）—— 实现唯一控制点在
-#  os_mem/core/retrieve/strategies/base_strategy.py 的 STRATEGY_CHAIN：
-#  VerbatimNoiseFilter → StructuredKeyDedup → RedundantVerbatimFilter
-#  → VerbatimQuota → StructuredQuota → 终装配（结构化在前、verbatim 补位）。
-#  验证（2026-09-07，layer1 struct/assert/top_k=15）：
-#  v1 区分准入 11/20 → 14/20（run_c887cb12 → run_c087f9ee），覆盖漏 30→18。
-#  基线对比不再靠运行时开关：用旧版本代码跑同 run，或对 run 落库结果对照。
+#  检索注入链（固定加载，无开关）—— 实现唯一控制点在
+#  os_mem/core/retrieve/strategies/base_strategy.py 的 STRATEGY_CHAIN。
+#  2026-09-12 简化：链上只剩 1 号 VerbatimNoiseFilter（形式干扰句闸门）；
+#  StructuredKeyDedup / RedundantVerbatimFilter / VerbatimQuota / StructuredQuota
+#  已移出链（实测 no-op / 配额失去对象），类暂留待对照确认后删除。
+#  历史验证（2026-09-07，layer1 struct/assert/top_k=15）：
+#  5 段链 v1 区分准入 11/20 → 14/20（run_c887cb12 → run_c087f9ee），覆盖漏 30→18 ——
+#  该收益来自「固定窄窗内把 verbatim 载体放进窗口」，宽窗后自动兑现。
+#  基线对比不靠运行时开关：用旧版本代码跑同 run，或对 run 落库结果对照。
 # ========================================================================= #
