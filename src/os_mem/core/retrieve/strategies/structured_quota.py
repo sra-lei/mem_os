@@ -1,4 +1,9 @@
-"""检索注入策略链 —— 把「检索候选 hits → 最终注入列表」拆成固定顺序、单一职责的小策略。
+"""检索注入策略链（历史） —— 固定顺序、单一职责的小策略集合。
+
+> ⚠️ **2026-09-12 起本模块不在生产链路中**（`STRATEGY_CHAIN` 已清空，检索执行与
+> 装配迁至 `os_mem/core/retrieve/strategies_retriever.py`）。保留原因：类实现与组件
+> 单测仍是"若将来要做标注/降权"的参考实现，待更多轮次或 layer2 验证后随模块删除。
+> 端到端依据见 docs/方案/方案-检索注入简化-宽窗替代策略链.md §1.4 与 §六-续。
 
 背景（2026-09-05/06/07）：
 - struct 检索（混合搜索）返回 top_k 条相关 fact，但 70-127 条/case 只注入 top-15
@@ -8,16 +13,15 @@
 - v1 区分准入验证（2026-09-07）：layer1 struct/assert/top_k=15 通过率 11/20 → 14/20
   （run_c887cb12 → run_c087f9ee），覆盖漏 30 → 18 期望点，恢复 17/18/20 且零新增失败。
   详见 docs/方案/方案-检索注入verbatim区分策略.md。
+  注：该收益来自「固定窄窗内把 verbatim 载体放进窗口」，宽窗（2026-09-12）后自动兑现。
 
-设计（v2 重构，2026-09-07）：
-- **单一职责**：每个策略类只做一件事；注册为固定顺序策略链 ``STRATEGY_CHAIN``，
-  **默认全部加载，无 Enable 开关**（基线对比不再靠运行时开关，靠 git/代码版本 +
-  run 落库对照）；
+设计（v2 重构，2026-09-07，已被简化取代）：
+- **单一职责**：每个策略类只做一件事；原注册为固定顺序策略链 ``STRATEGY_CHAIN``；
 - 策略只消费「search 返回的 dict 列表」→ 产出注入列表，不触碰存储/提取；
-- 顺序即语义：噪声剔除 → 结构化 (cat,key) 去重 → verbatim 冗余剔除 → verbatim 配额
-  → 结构化配额 → 终装配（结构化在前、verbatim 补位，截断 top_k）；
-- fetch 放大取回（top_k × RETRIEVAL_FETCH_MULTIPLIER）由调用方无条件执行，不再依赖开关
-  （见 struc_mem_service.get_structured_memories）。
+- 原顺序：噪声剔除 → 结构化 (cat,key) 去重 → verbatim 冗余剔除 → verbatim 配额
+  → 结构化配额 → 终装配；
+- 原 fetch 放大取回（`top_k × RETRIEVAL_FETCH_MULTIPLIER`）**已废除**，改为宽窗取回
+  （见 strategies_retriever.RETRIEVAL_WIDE_FETCH_K）。
 """
 
 from __future__ import annotations
@@ -26,10 +30,10 @@ from typing import Any
 
 from .verbatim_utils import _is_verbatim
 
-# fetch 放大取回系数：候选 = top_k * N，再经策略链收敛回 top_k（无条件生效）
+# ⚠️ 已废弃（保留仅为历史对照）：放大取回系数，已被宽窗取回取代，无任何生产消费者。
 RETRIEVAL_FETCH_MULTIPLIER = 3
 
-# verbatim 预留槽位占比下限（结构化充足时 carrier 至少占 top_k 的这么多）
+# ⚠️ 未使用（历史预留）：verbatim 预留槽位占比下限；配额机制已移出链路。
 VERBATIM_MIN_RATIO = 1 / 3
 
 

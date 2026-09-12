@@ -3,7 +3,9 @@
 > 状态：**v1 已实现并验证（11/20 → 14/20）；v2 重构为单一职责策略链、去除 Enable 开关，
 > 行为不变并已复测**（2026-09-07，layer1 struct/assert/top_k=15）
 > 对应代码：`src/os_mem/core/retrieve/strategies/`（2026-09-12 由单体
-> `core/retrieval_strategies.py` 拆为单一职责包）
+> `core/retrieval_strategies.py` 拆为单一职责包；**同日晚些时候该链整体退出生产链路**
+> ——`STRATEGY_CHAIN` 清空，检索执行与装配迁至 `retrieve/strategies_retriever.py`，
+> 策略类仅作组件留存）
 > **已被取代（2026-09-12）**：本方案的策略链在宽窗前提下失去对象（2/3 号实测 no-op、
 > 4/5 号配额失去定义）→ 见 [`方案-检索注入简化-宽窗替代策略链.md`](方案-检索注入简化-宽窗替代策略链.md)。
 > 本文保留为历史决策记录与 1 号 闸门的依据。

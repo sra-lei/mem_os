@@ -10,8 +10,9 @@ Package layout:
     ├── extractor/    记忆提取域（2026-09-08 自 utils 迁入 extraction/，2026-09-09 包
     │                 更名 extraction→extractor）：fact_extractor（FactExtractor）/
     │                 callers（provider 自愈 caller）/ prompt / tokens / common（共享纯函数）
-    ├── core/         核心实现：provider（provider 实现）/ retrieve/strategies（检索注入策略链）/
+    ├── core/         核心实现：provider / retrieve（检索执行 + 注入装配）/
     │                 services（业务服务）/ state_machine
+    │                 策略组件在 retrieve/strategies/（当前不在链路中）
     ├── entries/      SQLModel 表定义（mem_models / conv 表）
     ├── infra/        底层 IO：storage（SQLite/Milvus）/ llm / logger / p2check
     ├── models/       运行时模型（Conversation / MemoryFact 等）

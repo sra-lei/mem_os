@@ -37,7 +37,9 @@ src/os_mem/         记忆系统核心（import 前缀 os_mem.）——不依赖
 │   ├── provider/              Provider 实现：base_provider / struct_provider / full_provider
 │   ├── services/              业务服务：struc_mem_service / conv_meta_service / note_mem_service
 │   ├── state_machine.py       不可逆线性状态机（PENDING→…→COMPLETED / FAILED）
-│   ├── retrieve/strategies/   检索注入策略链（单一职责策略、无 Enable 开关）
+│   ├── retrieve/              检索侧：strategies_retriever.py（检索执行 + 注入装配，
+│   │                          宽窗取回 / 结构化优先 / 字符预算；STRATEGY_CHAIN 已清空）
+│   │                          strategies/（策略协议与各策略组件，当前不在生产链路中）
 │   ├── guide/                 实现指南骨架：sanitizer（日志脱敏）
 ├── entries/mem_models.py      SQLModel 表：Message(conv_messages) / StructuredMemory(struct_memories) / ConversationMeta(conv_meta)
 ├── extraction/                记忆提取域（2026-09-08 迁自 utils）：
