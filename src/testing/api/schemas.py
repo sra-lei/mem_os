@@ -291,7 +291,7 @@ class DashboardStats(BaseModel):
     by_category: list[CategoryStat]
 
 
-# ---------- Memory admin schemas (memories.db 管理, 见 docs/方案/方案-EvalView记忆管理.md) ----------
+# ---------- Memory admin schemas (memories.db 管理, 见 docs/需求/EvalView需求文档.md 第十三章) ----------
 class MemoryUserSummary(BaseModel):
     """用户级记忆摘要（struct_memories / conv_messages / conv_meta 三表聚合）。"""
 
