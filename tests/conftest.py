@@ -283,18 +283,25 @@ def _struct_retrieval_regime() -> dict[str, Any]:
     链上组件也只剩（或清空）若干。只记 `top_k` 会让日后回看 run 时无法判断当时口径，
     直接削弱"同配置才可比"的判读纪律。详见
     docs/方案/方案-检索注入简化-宽窗替代策略链.md §13.5-C1。
-    """
-    from os_mem.core.retrieve import (
-        INJECTION_CHAR_BUDGET,
-        RETRIEVAL_WIDE_FETCH_K,
-        STRATEGY_CHAIN,
-    )
 
+    健壮性：检索侧 API 会随实验/重构变化（如临时切回"窄窗 + 策略链"对照），
+    因此这里一律用 `getattr` 取名字并允许缺失——**元数据缺失可以接受，
+    因为元数据采集让整轮评测 INTERNALERROR 不可接受**（2026-09-12 实测教训）。
+    """
+    import os_mem.core.retrieve as retrieve
+
+    chain = getattr(retrieve, 'STRATEGY_CHAIN', None) or []
     return {
-        'wide_fetch_k': RETRIEVAL_WIDE_FETCH_K,
-        'injection_char_budget': INJECTION_CHAR_BUDGET,
-        'strategy_chain': [type(s).__name__ for s in STRATEGY_CHAIN],
-        'top_k_role': 'compat only（仅作宽窗下限，不再是注入条数上限）',
+        'wide_fetch_k': getattr(retrieve, 'RETRIEVAL_WIDE_FETCH_K', None),
+        'injection_char_budget': getattr(retrieve, 'INJECTION_CHAR_BUDGET', None),
+        'strategy_chain': [type(s).__name__ for s in chain],
+        # 窄窗态（2026-09-12 前）才有：放大取回系数；宽窗态为 None 表示已废除
+        'legacy_fetch_multiplier': getattr(
+            retrieve, 'RETRIEVAL_FETCH_MULTIPLIER', None
+        ),
+        'top_k_role': 'compat only（仅作宽窗下限，不再是注入条数上限）'
+        if getattr(retrieve, 'RETRIEVAL_WIDE_FETCH_K', None)
+        else '窗口条数上限（窄窗态）',
     }
 
 
