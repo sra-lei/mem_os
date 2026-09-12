@@ -26,6 +26,9 @@ from os_mem.extractor.utils.normalize import (
 )
 from os_mem.models.mem_models import MemoryFact
 
+# 批内收敛样本的日志上限（放开到 20 便于复测时逐条对照，区分合法去重与真丢失）
+_COLLAPSED_SAMPLE_LIMIT = 20
+
 
 @dataclass(frozen=True)
 class IncomingFact:
@@ -69,7 +72,8 @@ class VersioningPlan:
     historical_kept: int = 0
     # 批内同签名收敛丢弃的条数（Fix C：此前完全静默，静默丢事实不可观测）
     batch_collapsed: int = 0
-    # 被丢弃事实的样本（≤3 条），供 WARNING 日志定位
+    # 被丢弃事实的样本，供 WARNING 日志定位；上限放开到 20 是为了复测时
+    # **逐条对照库中存活行**，区分「同事实换个说法的合法去重」与「真丢失」。
     collapsed_samples: list[str] = field(default_factory=list)
 
 
@@ -144,7 +148,7 @@ def plan_versioning(
             dropped = f
         # Fix C：静默丢弃必须可观测（此前无 superseded 行、无 previous_fact、无日志）
         plan.batch_collapsed += 1
-        if len(plan.collapsed_samples) < 3:
+        if len(plan.collapsed_samples) < _COLLAPSED_SAMPLE_LIMIT:
             plan.collapsed_samples.append(dropped.fact)
 
     for sig in batch_order:

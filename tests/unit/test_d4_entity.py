@@ -87,7 +87,12 @@ def test_falls_back_to_self_without_clue(fact, category, key, value):
 @pytest.mark.parametrize("key", ["verbatim_d6adc85805ee", "raw_conversation", "raw_conversation_2"])
 def test_verbatim_and_degrade_rows_stay_self(key):
     """兜底/降级行的 key 本身即内容哈希（唯一），不参与实体切分。"""
-    assert resolve_entity("Your new account number is VEL-89923476.", "other", key, "") == SELF_ENTITY
+    assert (
+        resolve_entity(
+            "Your new account number is VEL-89923476.", "other", "", key, ""
+        )
+        == SELF_ENTITY
+    )
 
 
 def test_normalize_key_defaults_to_self_without_fact_text():

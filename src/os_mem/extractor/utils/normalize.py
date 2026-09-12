@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import re
+from typing import Optional
 
 from os_mem.extractor.model.models import NormalizedKey
 
@@ -45,6 +46,117 @@ _ENTITY_KIND_ID = "ID"
 _ENTITY_KIND_PRODUCT = "PROD"
 
 # --------------------------------------------------------------------------- #
+#  D4-2 v2 属性策略：functional（单值）/ multi_valued（多值）
+#  —— 决定「值是否承担实例标识职责」。缺省 functional = 与现状逐字节一致。
+# --------------------------------------------------------------------------- #
+POLICY_FUNCTIONAL = "functional"
+POLICY_MULTI_VALUED = "multi_valued"
+
+# 多值属性白名单：(category, attribute)。
+# 只收**实证确认**「同属性下多实例并存」的项——判错的代价不对称：
+# 把"并列"误判为 functional → 丢失；把"更新"误判为 multi_valued → 冗余。
+# 宁可冗余不可丢失，但也不预先扩张（按用例逐步补）。
+_MULTI_VALUED_PAIRS: frozenset[tuple[str, str]] = frozenset({
+    # 03 医疗：lisinopril 与 atorvastatin 是两种药（实证：atorvastatin 被批内收敛丢弃）
+    ("health", "medication"),
+    # 15 选课：多门课并列
+    ("education", "course"),
+    ("education", "course_schedule"),
+    ("education", "course_registration"),
+    # 11 房贷：多张卡 / 多个投资账户并列
+    ("finance", "credit_card"),
+    ("finance", "investment_account"),
+    ("finance", "bank_account"),
+})
+
+# 实例名 → 实体种类前缀（决定 entity_ref 的 <KIND>）
+_INSTANCE_KIND_BY_ATTRIBUTE: dict[str, str] = {
+    "medication": "DRUG",
+    "course": "COURSE",
+    "course_schedule": "COURSE",
+    "course_registration": "COURSE",
+    "credit_card": "CARD",
+    "investment_account": "ACCT",
+    "bank_account": "ACCT",
+}
+_ENTITY_KIND_INSTANCE_FALLBACK = "INST"
+
+# P2 专名抽取：首字母大写词（词长 ≥3，避免 I/A 等噪声）
+_PROPER_NOUN_RE = re.compile(r"\b[A-Z][a-zA-Z]{2,}(?:\s+[A-Z][a-zA-Z]{2,})*\b")
+# 停用词（小写比较）：句首词/代词/月份/星期/常见礼貌用语——都不是实例名
+_PROPER_NOUN_STOPWORDS = frozenset({
+    "user", "the", "your", "our", "their", "his", "her", "its", "this", "that",
+    "these", "those", "there", "then", "they", "yes", "no", "okay", "sure",
+    "thanks", "thank", "please", "well", "also", "and", "but", "plus", "with",
+    "what", "when", "where", "which", "while", "would", "could", "should",
+    "professor", "doctor", "section", "sections", "plan", "plans",
+    "january", "february", "march", "april", "may", "june", "july", "august",
+    "september", "october", "november", "december",
+    "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+    "customer", "client", "agent", "account", "total", "monthly", "annual",
+})
+
+
+def attribute_policy(category: str, attribute: str) -> str:
+    """查属性策略：``multi_valued`` 才允许按实例切分实体（缺省 functional）。"""
+    if (category, attribute) in _MULTI_VALUED_PAIRS:
+        return POLICY_MULTI_VALUED
+    return POLICY_FUNCTIONAL
+
+
+# 按 category 分组的**长前缀优先**列表（防 `course_` 吞掉 `course_schedule_xxx`）
+_MULTI_VALUED_ATTRS_BY_CATEGORY: dict[str, tuple[str, ...]] = {
+    cat: tuple(sorted((a for c, a in _MULTI_VALUED_PAIRS if c == cat), key=len, reverse=True))
+    for cat in {c for c, _ in _MULTI_VALUED_PAIRS}
+}
+
+
+def _norm_instance(text: str) -> str:
+    """实例名归一：小写、去标点（保留中日韩）、空白折叠、限长。"""
+    cleaned = re.sub(r"[^\w\u4e00-\u9fff]+", " ", str(text or "").lower()).strip()
+    cleaned = " ".join(cleaned.split())
+    return cleaned[:40]
+
+
+def _instance_from_key(key: str, attribute: str) -> Optional[str]:
+    """P3：key 形如 ``<attribute>_<实例名>`` → 剥出实例名（中文场景的关键路径）。
+
+    LLM 只提供字符串，**系统决定它放在实体维度**（裁决仍是确定性代码）。
+    剩余部分为空、或本身是生命周期词 → 不剥离（防误吞）。
+    """
+    prefix = f"{attribute}_"
+    if not key.startswith(prefix):
+        return None
+    rest = key[len(prefix):]
+    if not rest or rest in _LIFECYCLE_WORDS:
+        return None
+    norm = _norm_instance(rest)
+    return norm or None
+
+
+def _instance_from_text(text: str) -> Optional[str]:
+    """P2：从事实文本抽专名当实例名；**恰好命中一个**才采用（保守）。
+
+    按词剔除停用词（`The Visa` → `Visa`；`The User` → 空 → 跳过），
+    因此句首冠词/代词不会污染实例名。
+    """
+    cands: set[str] = set()
+    for phrase in _PROPER_NOUN_RE.findall(text or ""):
+        words = [w for w in phrase.split() if w.lower() not in _PROPER_NOUN_STOPWORDS]
+        if words:
+            cands.add(" ".join(words))
+    if len(cands) != 1:
+        return None
+    norm = _norm_instance(cands.pop())
+    return norm or None
+
+
+def _instance_entity(attribute: str, instance: str) -> str:
+    kind = _INSTANCE_KIND_BY_ATTRIBUTE.get(attribute, _ENTITY_KIND_INSTANCE_FALLBACK)
+    return f"{kind}:{instance}"
+
+
+# --------------------------------------------------------------------------- #
 #  生命周期修饰词（通用前缀规则，跨 category）
 # --------------------------------------------------------------------------- #
 # 历史快照：original_wire_amount / previous_address / old_policy_number ……
@@ -54,6 +166,11 @@ _HISTORICAL_PREFIXES = ("original_", "previous_", "former_", "old_")
 # 当前值强化前缀：new_flight_cost / current_balance / latest_offer ……
 # 去前缀视为 current（新词面收敛到本体）。
 _CURRENT_PREFIXES = ("current_", "latest_", "updated_", "new_")
+
+# 生命周期词集合（P3 剥离时防误吞：`medication_current_` 这类不当作实例名）
+_LIFECYCLE_WORDS = frozenset(
+    p.rstrip("_") for p in (_HISTORICAL_PREFIXES + _CURRENT_PREFIXES)
+)
 
 # --------------------------------------------------------------------------- #
 #  L1/L2 规范属性别名表：(category, 原始漂移 key) -> canonical attribute
@@ -107,13 +224,24 @@ def normalize_key(
     else:
         bare, _ = _strip_one_of(_CURRENT_PREFIXES, bare)
 
+    # D4-2 v2 P3：key 形如 `<多值属性>_<实例名>` → 剥出实例名，属性归到 `<多值属性>`
+    # （必须先于 alias 查询：alias 表不认识带实例后缀的 key；长前缀优先防误吞）
+    instance_hint: Optional[str] = None
+    for _attr in _MULTI_VALUED_ATTRS_BY_CATEGORY.get(category, ()):
+        inst = _instance_from_key(bare, _attr)
+        if inst:
+            bare, instance_hint = _attr, inst
+            break
+
     canonical = _CANONICAL_ALIASES.get((category, bare))
     if canonical is None:
         # 别名表也查原始 key（未去前缀的直接登记项）
         canonical = _CANONICAL_ALIASES.get((category, key), bare)
 
     return NormalizedKey(
-        entity_ref=resolve_entity(fact, category, key, value),
+        entity_ref=resolve_entity(
+            fact, category, canonical, key, value, instance=instance_hint
+        ),
         attribute=canonical,
         lifecycle=lifecycle,
     )
@@ -122,38 +250,49 @@ def normalize_key(
 def resolve_entity(
     fact: str = "",
     category: str = "",
+    attribute: str = "",
     key: str = "",
     value: str = "",
+    *,
+    instance: Optional[str] = None,
 ) -> str:
-    """D4-2 确定性实体解析：形式化线索命中 → 非 SELF 实体；否则 SELF（保守）。
+    """D4-2 确定性实体解析：按优先级取第一条命中的线索，否则 `SELF`（保守）。
 
-    设计（``docs/方案/方案-D4-2-实体解析器.md`` §3）：
+    优先级（见 ``docs/方案/方案-D4-2-实体解析器.md`` §3）：
 
-    - E1 编号前缀：``VEL-89923476`` → ``ID:VEL``；``ENT-7739482`` → ``ID:ENT``；
-    - E4 产品/课程码：``MAT-151``（category 属产品类）→ ``PROD:MAT-151``；
-    - 无线索 → ``SELF``；兜底/降级行（verbatim_*/raw_conversation*）恒 ``SELF``。
+    - **P0 形式化编号**：``VEL-89923476`` → ``ID:VEL``；
+    - **P1 产品/课程码**：``MAT-151``（category 属产品类）→ ``PROD:MAT-151``；
+    - **P3 key 内实例名**：``medication_atorvastatin`` → ``DRUG:atorvastatin``
+      （**显式优于推断**，故排在 P2 之前——LLM 明确写了实例名比从文本猜更可靠）；
+    - **P2 专名抽取**：仅对 ``multi_valued`` 属性，且文本中**恰好命中一个**专名；
+    - 无线索 → ``SELF``。
 
-    **红线**：绝不用「值」本身做实体键——``$85k→$100k→$95k`` 是同一实体的版本
-    演进，必须留在同一签名上交给 as-of 裁决；只有事实文本里**显式出现的形式化
-    标识**才允许触发切分。
-
-    尚未启用的线索（E2 机构名 / E3 人名）：需要注册表词表证据，且存在把本人事实
-    误切的风险（如把用户自己的姓名切出去），留待后续迭代按用例补。
+    **作用的边界**：P2/P3 只对属性策略为 ``multi_valued`` 的属性生效；
+    单值属性（金额/日期/电话…）**永不按值切分**，其版本演进（``$85k→$100k→$95k``）
+    必须留在同一签名上交给 as-of 裁决——这是本方案的安全阀。
+    兜底/降级行（``verbatim_*`` / ``raw_conversation*``）恒 ``SELF``。
     """
     if str(key or "").startswith(_NON_ENTITY_KEY_PREFIXES):
         return SELF_ENTITY
-    text = f"{fact or ''} {value or ''}"
-    if not text.strip():
+    text = f"{fact or ''} {value or ''}".strip()
+    if not text:
         return SELF_ENTITY
 
+    # P1 / P0：形式化代码线索（零误伤，优先级最高）
     if category in _PRODUCT_CATEGORIES:
         m = _PRODUCT_CODE_RE.search(text)
         if m:
             return f"{_ENTITY_KIND_PRODUCT}:{m.group(0)}"
-
     m = _CODE_RE.search(text)
     if m:
         return f"{_ENTITY_KIND_ID}:{m.group(1)}"
+
+    # P3 / P2：仅多值属性允许按实例切分（安全阀）
+    if attribute and attribute_policy(category, attribute) == POLICY_MULTI_VALUED:
+        inst = instance or _instance_from_text(text)
+        if inst:
+            return _instance_entity(attribute, inst)
+
     return SELF_ENTITY
 
 
