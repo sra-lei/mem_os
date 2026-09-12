@@ -275,6 +275,29 @@ def eval_case(request: pytest.FixtureRequest) -> dict[str, Any]:
     return holder
 
 
+def _struct_retrieval_regime() -> dict[str, Any]:
+    """struct provider 的**实际检索口径**（写进 run 元数据，供跨 run 判可比性）。
+
+    背景（2026-09-12）：`--top-k` 已不再代表注入窗口大小——窗口由
+    `INJECTION_CHAR_BUDGET`（字符预算）+ `RETRIEVAL_WIDE_FETCH_K`（宽窗取回）决定，
+    链上组件也只剩（或清空）若干。只记 `top_k` 会让日后回看 run 时无法判断当时口径，
+    直接削弱"同配置才可比"的判读纪律。详见
+    docs/方案/方案-检索注入简化-宽窗替代策略链.md §13.5-C1。
+    """
+    from os_mem.core.retrieve import (
+        INJECTION_CHAR_BUDGET,
+        RETRIEVAL_WIDE_FETCH_K,
+        STRATEGY_CHAIN,
+    )
+
+    return {
+        'wide_fetch_k': RETRIEVAL_WIDE_FETCH_K,
+        'injection_char_budget': INJECTION_CHAR_BUDGET,
+        'strategy_chain': [type(s).__name__ for s in STRATEGY_CHAIN],
+        'top_k_role': 'compat only（仅作宽窗下限，不再是注入条数上限）',
+    }
+
+
 def _flush_eval_case(holder: dict[str, Any]) -> None:
     """把单个评测用例结果写入 memos.db（首次调用时创建 run 记录）。"""
     cfg = holder['config']
@@ -293,20 +316,22 @@ def _flush_eval_case(holder: dict[str, Any]) -> None:
             phase=holder['phase'],
             version=holder['version'],
         )
-        snapshot = json.dumps(
-            {
-                'memory_provider': cfg.getoption('--memory-provider'),
-                'llm': cfg.getoption('--llm'),
-                'judge': cfg.getoption('--judge'),
-                'top_k': cfg.getoption('--top-k'),
-                'threshold': cfg.getoption('--threshold'),
-                'prompt_fingerprints': _prompt_fingerprints(),
-                # 提取模型画像（provider:model）——与 os_mem.extractor.llm_util 的
-                # 默认画像口径同源，跑分可回溯当时提取画像/模型（方案 §4 步骤 4）
-                'extraction_profile': f'deepseek:{memory_settings.DEEPSEEK_MODEL}',
-            },
-            ensure_ascii=False,
-        )
+        provider = cfg.getoption('--memory-provider')
+        snapshot = {
+            'memory_provider': provider,
+            'llm': cfg.getoption('--llm'),
+            'judge': cfg.getoption('--judge'),
+            'top_k': cfg.getoption('--top-k'),
+            'threshold': cfg.getoption('--threshold'),
+            'prompt_fingerprints': _prompt_fingerprints(),
+            # 提取模型画像（provider:model）——与 os_mem.extractor.llm_util 的
+            # 默认画像口径同源，跑分可回溯当时提取画像/模型（方案 §4 步骤 4）
+            'extraction_profile': f'deepseek:{memory_settings.DEEPSEEK_MODEL}',
+        }
+        if provider == 'struct':
+            # 结构化的检索口径（宽窗/预算/链状态）——base provider 不走该路径，故不记
+            snapshot['struct_retrieval'] = _struct_retrieval_regime()
+        snapshot = json.dumps(snapshot, ensure_ascii=False)
         total = max(int(getattr(cfg, '_eval_total', 0) or 0), 1)
         svc.record_test_run(
             [None] * total,
