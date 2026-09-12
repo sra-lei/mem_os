@@ -6,7 +6,7 @@ eval judge 在 tests/ 下持有自己的独立窄口径副本（分属测试，�
 两边互不依赖：判分器可以只硬核验金额编号，存储/检索不能因此丢弃 %/时间/日期。
 
 本模块是唯一实现源；``regular_extractor`` 入库门复用 ``_MONTH_ALIASES``，
-检索侧 ``core.retrieval_strategies`` 复用 ``fact_tokens``。
+检索侧 ``core.retrieve.strategies`` 复用 ``fact_tokens``。
 """
 
 from __future__ import annotations

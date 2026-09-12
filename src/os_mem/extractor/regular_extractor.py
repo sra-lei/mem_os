@@ -8,7 +8,7 @@
   结构化覆盖的兜底句不存」的 R1 覆盖剪枝。
 
 精确信息 token 抽取口径（``fact_tokens`` / ``norm_token``）的唯一实现源在
-``utils/token_utils.py``——它同时被检索侧 ``core.retrieval_strategies`` 共享；
+``utils/token_utils.py``——它同时被检索侧 ``core.retrieve.strategies`` 共享；
 本模块只 import 使用（``_MONTH_ALIASES`` 词表复用同一源），不再持有副本。
 
 边界：本模块无 DB / LLM / 网络依赖；结构化（LLM）提取链路仍在

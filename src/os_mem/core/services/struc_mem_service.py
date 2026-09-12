@@ -341,7 +341,7 @@ class StructuredMemService:
     ) -> list[StructuredMemory]:
         """根据 query 检索结构化记忆（混合检索 + 元数据过滤）。
 
-        检索策略层（可插拔，见 os_mem.core.retrieval_strategies）：
+        检索策略层（可插拔，见 os_mem.core.retrieve.strategies）：
         - 固定顺序的单一职责策略链（噪声剔除/结构化去重/verbatim 冗余剔除/
           双配额），全部默认加载，无 Enable 开关；
         - 策略层需要放大取回候选（top_k × RETRIEVAL_FETCH_MULTIPLIER）再收敛，
@@ -349,14 +349,13 @@ class StructuredMemService:
         - 策略只作用于候选列表 → 注入列表，不改搜索本身 → §10 来源锚定落地后可
           原样复用并复测收益。
         """
-        from os_mem.core.retrieval_strategies import (
-            RETRIEVAL_FETCH_MULTIPLIER,
+        from os_mem.core.retrieve import (
             apply_retrieval_strategies,
         )
         from os_mem.infra.p2check import mask_pii
 
         # 放大取回：去重/配额收敛后仍需足够不同 key 填满 top_k（无条件生效）
-        fetch_k = top_k * RETRIEVAL_FETCH_MULTIPLIER
+        fetch_k = top_k * 3
         masked_query = mask_pii(query)
         query_embedding: list[float] = []
         try:
@@ -409,7 +408,7 @@ def get_structured_mem_service() -> StructuredMemService:
 
 # ========================================================================= #
 #  检索策略链（固定加载，无开关）—— 实现唯一控制点在
-#  os_mem/core/retrieval_strategies.py 的 STRATEGY_CHAIN：
+#  os_mem/core/retrieve/strategies/base_strategy.py 的 STRATEGY_CHAIN：
 #  VerbatimNoiseFilter → StructuredKeyDedup → RedundantVerbatimFilter
 #  → VerbatimQuota → StructuredQuota → 终装配（结构化在前、verbatim 补位）。
 #  验证（2026-09-07，layer1 struct/assert/top_k=15）：

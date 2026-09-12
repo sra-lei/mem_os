@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 if TYPE_CHECKING:
-    from os_mem.core.mem_provider.struct_provider import StructProvider
+    from os_mem.core.provider.struct_provider import StructProvider
     from os_mem.core.services.conv_meta_service import ConversationMetaService
     from os_mem.entries.mem_models import ConversationMeta
     from os_mem.models import Conversation
@@ -105,7 +105,7 @@ def _provider_with_dummy_service(
     fail_on_ingest: bool = False,
 ) -> StructProvider:
     """用假 service 替换真实（LLM/Milvus）链路，只验证编排逻辑。"""
-    from os_mem.core.mem_provider.struct_provider import StructProvider
+    from os_mem.core.provider.struct_provider import StructProvider
 
     class DummyService:
         def __init__(self) -> None:
@@ -413,7 +413,7 @@ def test_base_ingest_registers_and_writes_messages_then_rerun_skips(
     tmp_memory_db: Path,
 ) -> None:
     """base provider：登记 conv_meta(PENDING) + 原文落库；重复 ingest 跳过不重写。"""
-    from os_mem.core.mem_provider.base_provider import BaseProvider
+    from os_mem.core.provider.base_provider import BaseProvider
 
     p = BaseProvider('bu1')
     conv = _conversation('bu1', 'bc1')
@@ -453,7 +453,7 @@ def test_base_ingest_after_struct_completed_adds_missing_messages(
     """struct 先 COMPLETED（未存原文）→ base 后 ingest：补消息、不改 struct 状态。"""
     from sqlmodel import select
 
-    from os_mem.core.mem_provider.base_provider import BaseProvider
+    from os_mem.core.provider.base_provider import BaseProvider
     from os_mem.entries.mem_models import Message
     from os_mem.infra.storage import get_session
 

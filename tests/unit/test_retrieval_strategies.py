@@ -1,4 +1,4 @@
-"""检索注入策略链单测（os_mem/core/retrieval_strategies.py，v2 单一职责策略链）。
+"""检索注入策略链单测（os_mem/core/retrieve/strategies/，v2 单一职责策略链）。
 
 策略链（固定顺序、全部默认加载、无 Enable 开关）：
   VerbatimNoiseFilter → StructuredKeyDedup → RedundantVerbatimFilter
@@ -13,7 +13,7 @@
 """
 from __future__ import annotations
 
-from os_mem.core.retrieval_strategies import (
+from os_mem.core.retrieve.strategies import (
     STRATEGY_CHAIN,
     RedundantVerbatimFilter,
     StructuredKeyDedup,
