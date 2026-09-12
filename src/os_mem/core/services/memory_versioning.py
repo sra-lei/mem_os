@@ -22,6 +22,7 @@ from os_mem.extractor.utils.normalize import (
     LIFECYCLE_CURRENT,
     LIFECYCLE_HISTORICAL,
     normalize_key,
+    projection_key,
 )
 from os_mem.models.mem_models import MemoryFact
 
@@ -171,7 +172,8 @@ def build_incoming_fact(
         key=fact.key,
         value=fact.value,
         confidence=fact.confidence,
-        nk=normalize_key(fact.category, fact.key),
+        # D4-2：实体解析的线索要带上 fact/value（编号前缀/产品码形态）
+        nk=normalize_key(fact.category, fact.key, fact=fact.fact, value=fact.value),
         source_conversation_id=source_conversation_id,
         source_started_at=source_started_at,
     )
@@ -180,14 +182,18 @@ def build_incoming_fact(
 def current_attribute_touches(
     facts: list[MemoryFact],
 ) -> dict[str, set[str]]:
-    """统计本批事实触及的 current 规范属性：{category: {attribute, ...}}。
+    """统计本批事实触及的 current 收敛键：``{category: {projection_key, ...}}``。
 
-    只含 lifecycle=current（historical 不投影）。供投影删旧插新圈定范围；
-    归一签名经 normalize_key 单点计算，编排层不直接接触 entity/attribute/lifecycle。
+    只含 lifecycle=current（historical 不投影）。返回的是**投影键**而非裸
+    attribute（D4-2 起非 SELF 实体带 ``<entity>|<attribute>`` 前缀），供投影
+    删旧插新圈定范围；归一签名经 normalize_key 单点计算，编排层不直接接触
+    entity/attribute/lifecycle。
     """
     touched: dict[str, set[str]] = {}
     for f in facts:
-        nk = normalize_key(f.category, f.key)
+        nk = normalize_key(f.category, f.key, fact=f.fact, value=f.value)
         if nk.lifecycle == LIFECYCLE_CURRENT:
-            touched.setdefault(f.category, set()).add(nk.attribute)
+            touched.setdefault(f.category, set()).add(
+                projection_key(nk.entity_ref, nk.attribute)
+            )
     return touched

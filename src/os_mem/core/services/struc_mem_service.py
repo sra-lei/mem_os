@@ -17,6 +17,7 @@ from os_mem.extractor.fact_extractor import FactExtractor
 from os_mem.extractor.llm_util import build_default_profile
 from os_mem.extractor.regular_extractor import RegularExtractor
 from os_mem.extractor.utils.extract_utils import dedup_facts
+from os_mem.extractor.utils.normalize import projection_key
 from os_mem.infra.llm import ChatClient, get_llm_client
 from os_mem.infra.logger import get_logger
 from os_mem.infra.storage import (
@@ -263,10 +264,11 @@ class StructuredMemService:
                     )
                 ).all()
             wanted = {
-                (cat, attr) for cat, attrs in touched_attrs.items() for attr in attrs
+                (cat, pkey) for cat, pkeys in touched_attrs.items() for pkey in pkeys
             }
             for r in all_rows:
-                if (r.category, r.attribute) in wanted:
+                # D4-2：收敛键带实体（SELF 保持裸 attribute，与既有投影一致）
+                if (r.category, projection_key(r.entity_ref, r.attribute)) in wanted:
                     projected.append(r)
 
         # 删旧插新：按 category + canonical attribute 批量删旧向量（含被取代的旧版）
@@ -292,8 +294,9 @@ class StructuredMemService:
                     'id': uuid.uuid4().hex,
                     'fact': r.fact,
                     'category': r.category,
-                    # 投影 key=canonical attribute：保证同属性漂移 key 收敛为一条向量
-                    'key': r.attribute,
+                    # 投影 key=收敛键（D4-2：非 SELF 实体带 <entity>|attr 前缀）：
+                    # 既让同属性的漂移 key 收敛为一条向量，又让不同实体互不覆盖
+                    'key': projection_key(r.entity_ref, r.attribute),
                     'value': r.value,
                     'user_id': user_id,
                     'updated_at': datetime.utcnow().isoformat(),
