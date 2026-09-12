@@ -13,7 +13,7 @@ v0.3 双轨 full 编排 A 批已落地（conv_meta 状态机 + 会话原文必�
 ## 系列文章（公众号「一文·AI账」）
 
 项目演进过程以《MemOS》系列同步记录在公众号「一文·AI账」，用真实评测数据复盘每一轮"改了什么、为什么、代价是什么"。
-合集入口：[MemOS 系列合集](https://mp.weixin.qq.com/mp/appmsgalbum?__biz=Mzg3MzE4MjMxNw==&action=getalbum&album_id=4659590571668488194)（共 6 篇，建议按序阅读）：
+合集入口：[MemOS 系列合集](https://mp.weixin.qq.com/mp/appmsgalbum?__biz=Mzg3MzE4MjMxNw==&action=getalbum&album_id=4659590571668488194)（共 8 篇，建议按序阅读）：
 
 1. [MemOS01-纯净版](https://mp.weixin.qq.com/s?__biz=Mzg3MzE4MjMxNw==&mid=2247483697&idx=1&sn=5053f0db7219a63e3469b1ae400ea1d3&chksm=cee2a433f9952d25081e50d07a8688b8cd3c2d09a732288205bcd694ae19b66abb3cc408f29f)
 2. [MemOS 02，我换了混合检索，反而比 BM25 低 10 个点](https://mp.weixin.qq.com/s?__biz=Mzg3MzE4MjMxNw==&mid=2247483711&idx=1&sn=89e9a3021a7003c69d122d13abedd172&chksm=cee2a43df9952d2b31e6d2d8de741db847b74404142db7d83d50bdd17149e0db8eb61eaafbd6)
@@ -21,6 +21,8 @@ v0.3 双轨 full 编排 A 批已落地（conv_meta 状态机 + 会话原文必�
 4. [MemOS 04，新旧信息傻傻分不清，因为存的是流水账不是档案卡](https://mp.weixin.qq.com/s?__biz=Mzg3MzE4MjMxNw==&mid=2247483735&idx=1&sn=3185444643a0ec873b39aac09cb01334&chksm=cee2a455f9952d434802dbe61cfe7f1e1b84b3f8cf0ca33a9e97d6f6727b652c5b7cb02e595d)
 5. [MemOS 05，记忆更新终于做成，分数却没涨反降](https://mp.weixin.qq.com/s?__biz=Mzg3MzE4MjMxNw==&mid=2247483747&idx=1&sn=230a3397cda3135d6fa2b886193c9e05&chksm=cee2a461f9952d77b3cf68ec3a933564b7b5333824e7765475920c074367892c79224fbc643e)
 6. [MemOS 06，检索不是捞得越多越好——窗开大了一倍，答全率反而掉了](https://mp.weixin.qq.com/s/KJ6qSR9n92VvBYa_SBpHdw)
+7. [MemOS 07，库形态全达标的那一轮——通过率反而从 70% 掉到 50%](https://mp.weixin.qq.com/s/PF3vf0BwaZ_Kiwv1Pfi_Vg)
+8. [MemOS 08，分数没涨，跑一趟从两个半小时变成二十来分钟](https://mp.weixin.qq.com/s/At_txa5kMDYs0nUb-953ug)
 
 ## 特性
 
@@ -136,7 +138,7 @@ src/
 │   │   ├── retrieval_strategies.py   # 检索注入策略链（verbatim 区分准入，固定链 v2）
 │   │   └── guide/              # sanitizer（日志脱敏）
 │   ├── entries/                # SQLModel 表：conv_messages / struct_memories / conv_meta（conv_memories 已退役）
-│   ├── extractor/              # 记忆提取域：fact_extractor（LLM 结构化任务执行器）/ callers（provider 无关：协议+恢复循环+分发工厂）/ deepseek_caller（DeepSeek caller + prompt 模板/渲染/指纹）/ regular_extractor（正则兜底+R1 剪枝）/ common（共享纯函数：fact_tokens 数值口径等）/ models（数据类）/ profile（默认画像）/ normalize（D4 key 归一）
+│   ├── extractor/              # 记忆提取域：fact_extractor（LLM 结构化任务执行器）/ regular_extractor（正则兜底+R1 覆盖剪枝）/ extraction_core（provider 无关恢复循环）/ llm_util（默认模型画像）/ callers/（framework：ExtractionCaller 协议+分发工厂；deepseek_caller：DeepSeek 实现 + prompt 模板/渲染/指纹）/ model/models（数据类）/ utils/（extract_utils 共享纯函数 · token_utils 精确信息 token 口径 · normalize D4 key 归一）
 │   ├── models/                 # 领域数据模型
 │   ├── infra/                  # llm（base_client/deepseek_client/factory/failover）· storage（mem/vec/vectorizer）· retriever（BM25）· logger · p2check
 │   └── utils/                  # prompt_fp（通用 prompt 指纹；提取域已迁至 extractor/）
