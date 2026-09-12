@@ -497,6 +497,46 @@ class TestPruneRedundantVerbatim:
         out = RegularExtractor.prune_redundant_verbatim(fallback, llm)
         assert len(out) == 2
 
+    def test_percentage_carrier_kept(self) -> None:
+        """纯百分比句是通用精确信息：结构化未覆盖 → 保留
+        （判分器不核验 % 不影响存储）。"""
+        llm = [_fact("User holds a Travel Rewards card", key="card", value="x")]
+        fallback = [
+            _fact(
+                "You'll earn 3% cash back on dining and 1% on everything else.",
+                key="verbatim_pct",
+                value="x",
+            )
+        ]
+        out = RegularExtractor.prune_redundant_verbatim(fallback, llm)
+        assert len(out) == 1
+
+    def test_percentage_covered_dropped(self) -> None:
+        """百分比已被结构化事实覆盖 → 同覆盖规则剪枝（% 与金额走同一套语义）。"""
+        llm = [_fact("信用卡境外交易手续费 3%", key="fx_fee", value="3%")]
+        fallback = [
+            _fact(
+                "We charge a 3% foreign transaction fee.",
+                key="verbatim_pct",
+                value="x",
+            )
+        ]
+        out = RegularExtractor.prune_redundant_verbatim(fallback, llm)
+        assert out == []
+
+    def test_clock_and_date_carrier_kept(self) -> None:
+        """时刻 + 英文日期是通用精确信息：结构化未覆盖 → 整句保留。"""
+        llm = [_fact("User has an appointment with Dr. Chen", key="appt", value="x")]
+        fallback = [
+            _fact(
+                "Chen can see you next Thursday, November 21st at 2:30 PM.",
+                key="verbatim_time",
+                value="x",
+            )
+        ]
+        out = RegularExtractor.prune_redundant_verbatim(fallback, llm)
+        assert len(out) == 1
+
 
 # ------------------------------------------------------------------ #
 #  兜底正则盲区：裸年份/产品代号（Freedom 2045）补抓

@@ -13,12 +13,13 @@
 - ``EXTRACTION_STATS_KEYS``：恢复循环遥测 keys（``empty_extraction_stats`` 与
   任务层实例计数共用；任务层计数另含任务语义的 ``degrade_rows``，见 fact_extractor）。
 
-数值 token 抽取口径（``fact_tokens`` / ``norm_token``）在 ``token_utils.py``
-（金额/编号/卡号/≥4 位数字）——提取侧 R1 覆盖剪枝（regular_extractor）与检索侧
-verbatim 冗余过滤（core.retrieval_strategies）共享同一口径，以该模块为唯一源。
+精确信息 token 抽取口径（``fact_tokens`` / ``norm_token``）在 ``token_utils.py``
+（金额/编号/卡号/≥4 位数字/百分比/时刻/日期；通用口径不看齐判分器）——提取侧 R1
+覆盖剪枝（regular_extractor）与检索侧 verbatim 冗余过滤
+（core.retrieval_strategies）共享同一口径，以该模块为唯一源。
 
-依赖方向（无环）：本模块不 import 包内其他模块（亦不 import 本包任何模块，
-仅用 stdlib re），可被 fact_extractor / callers / regular_extractor，乃至检索侧
+依赖方向（无环）：本模块不 import 包内其他模块，仅用 stdlib，可被
+fact_extractor / callers / regular_extractor，乃至检索侧
 core.retrieval_strategies 任意引用。
 """
 

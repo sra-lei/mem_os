@@ -210,8 +210,9 @@ class StructuredMemService:
         # LLM 提取兜底：从原文把含金额/编号/日期/百分比等精确 token 的句子原样入库，
         # 避免结构化提取改写/省略精确数值（如 $2,400、CLM-2024-894327、2:30 PM）。
         fallback_facts = RegularExtractor.fallback_numeric_facts(dialog_text)
-        # R1 覆盖去重：数值 token 全被结构化覆盖的兜底句不存（只保唯一信息，
-        # 无负收益——删的是重复；详见 RegularExtractor.prune_redundant_verbatim）。
+        # R1 覆盖去重：精确信息 token 全被结构化覆盖的兜底句不存（只保唯一信息，
+        # 无负收益——删的是重复；口径通用不看判分器，详见
+        # RegularExtractor.prune_redundant_verbatim）。
         raw_fallback = len(fallback_facts)
         fallback_facts = RegularExtractor.prune_redundant_verbatim(
             fallback_facts, llm_facts

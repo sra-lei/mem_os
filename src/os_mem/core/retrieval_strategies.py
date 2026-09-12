@@ -34,9 +34,9 @@ RETRIEVAL_FETCH_MULTIPLIER = 3
 VERBATIM_MIN_RATIO = 1 / 3
 
 # ---------------------------------------------------------------------- #
-#  噪声判定（verbatim 专属，留本文件）；数值 token 口径见
-#  os_mem.extractor.utils.token_utils.fact_tokens（共享，提取侧 R1 与检索
-#  冗余过滤同源）
+#  噪声判定（verbatim 专属，留本文件）；精确信息 token 口径见
+#  os_mem.extractor.utils.token_utils.fact_tokens（金额/编号/卡号/百分比/
+#  时刻/日期；提取侧 R1 与本侧冗余过滤同源，通用口径不看齐判分器）
 # ---------------------------------------------------------------------- #
 # 疑问句/口语碎片（如 "So it would be $30 instead of $35?" / "okay" 等）
 _VERBATIM_NOISE = re.compile(
