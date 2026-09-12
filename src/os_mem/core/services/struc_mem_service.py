@@ -10,7 +10,10 @@ from os_mem.core.services.conv_meta_service import (
     STATUS_SAVING_SQLITE,
     STATUS_SAVING_VECTOR,
 )
-from os_mem.core.services.memory_versioning import current_attribute_touches
+from os_mem.core.services.memory_versioning import (
+    collapse_same_signature,
+    current_attribute_touches,
+)
 from os_mem.entries.mem_models import StructuredMemory
 from os_mem.extractor.callers.framework import build_extraction_caller
 from os_mem.extractor.fact_extractor import FactExtractor
@@ -130,6 +133,16 @@ class StructuredMemService:
 
             plan = plan_versioning(incoming, existing_by_sig)
 
+            # Fix C：批内同签名收敛此前完全静默（无 superseded 行、无 previous_fact、
+            # 无日志）——显式告警，让「多主体撞同一签名」这类丢失可观测
+            # （D4-2 实体解析覆盖不到的场景，如纯版本冲突/一句多实体）。
+            if plan.batch_collapsed:
+                _logger.warning(
+                    f'  批内同签名收敛丢弃 {plan.batch_collapsed} 条'
+                    f'（user={user_id} conv={source_conversation_id}）'
+                    f' 样本={plan.collapsed_samples}'
+                )
+
             # 旧 current 置 superseded（保留行；旧 fact 镜像进新行 previous_fact）
             superseded_fact_by_id: dict[str, str] = {}
             for sid in plan.supersede_ids:
@@ -214,9 +227,14 @@ class StructuredMemService:
         # R1 覆盖去重：精确信息 token 全被结构化覆盖的兜底句不存（只保唯一信息，
         # 无负收益——删的是重复；口径通用不看判分器，详见
         # RegularExtractor.prune_redundant_verbatim）。
+        # ⚠️ Fix B（2026-09-12）：判据必须是「**实际会落库**的结构化事实集」——
+        # 批内同签名收敛会丢弃一部分 llm_facts，若仍拿 LLM 原始输出当覆盖依据，
+        # 被丢事实的 token 会被误判为"已覆盖"，连带剪掉兜底句 → 结构化与兜底
+        # 双保险同时失效（审计实证 17 条静默丢失）。
         raw_fallback = len(fallback_facts)
+        persisted_llm_facts = collapse_same_signature(llm_facts)
         fallback_facts = RegularExtractor.prune_redundant_verbatim(
-            fallback_facts, llm_facts
+            fallback_facts, persisted_llm_facts
         )
         conv_facts = dedup_facts(llm_facts + fallback_facts)
         if raw_fallback:

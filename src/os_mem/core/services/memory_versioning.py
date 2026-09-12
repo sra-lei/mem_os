@@ -67,6 +67,34 @@ class VersioningPlan:
     ignored_older: int = 0
     skipped_same: int = 0
     historical_kept: int = 0
+    # 批内同签名收敛丢弃的条数（Fix C：此前完全静默，静默丢事实不可观测）
+    batch_collapsed: int = 0
+    # 被丢弃事实的样本（≤3 条），供 WARNING 日志定位
+    collapsed_samples: list[str] = field(default_factory=list)
+
+
+def collapse_same_signature(facts: list[MemoryFact]) -> list[MemoryFact]:
+    """批内同签名收敛：同签名只保留**先出现**的一条（Fix B 的判据视图）。
+
+    单次 ingest 的全部事实共享同一 ``source_started_at``（会话级），
+    ``_is_newer(x, x)`` 恒为 False → :func:`plan_versioning` 的批内收敛
+    等价于「保留先出现者」。本函数是那个等价规则的**显式视图**，供 R1 剪枝
+    使用（见 ``RegularExtractor.prune_redundant_verbatim`` 的覆盖判据）。
+
+    为什么需要它（2026-09-12 审计 17 条静默丢失）：R1 原先拿「LLM 原始输出」
+    当覆盖判据，但其中一部分事实会被批内收敛丢弃 → 兜底句被误判为"已被覆盖"
+    而剪掉 → 结构化与兜底**双保险同时失效**，信息凭空消失。
+    R1 的判据必须与「实际会落库的事实集」一致。
+    """
+    seen: set[tuple[str, str, str]] = set()
+    kept: list[MemoryFact] = []
+    for f in facts:
+        nk = normalize_key(f.category, f.key, fact=f.fact, value=f.value)
+        if nk.signature in seen:
+            continue
+        seen.add(nk.signature)
+        kept.append(f)
+    return kept
 
 
 def _is_newer(incoming: datetime | None, existing: datetime | None) -> bool:
@@ -110,7 +138,14 @@ def plan_versioning(
             continue
         cur = batch_latest[sig]
         if _is_newer(f.source_started_at, cur.source_started_at):
+            dropped = cur
             batch_latest[sig] = f
+        else:
+            dropped = f
+        # Fix C：静默丢弃必须可观测（此前无 superseded 行、无 previous_fact、无日志）
+        plan.batch_collapsed += 1
+        if len(plan.collapsed_samples) < 3:
+            plan.collapsed_samples.append(dropped.fact)
 
     for sig in batch_order:
         f = batch_latest[sig]
