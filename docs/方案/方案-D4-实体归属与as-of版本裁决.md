@@ -8,8 +8,99 @@
 > lifecycle=current 赢家、投影 key=`projection_key(entity, attribute)`；旧的批内 `_converge_by_key`
 > 已删除（2026-09-10，commit 8f82058）。
 > **本文只负责「签名模型 / as-of 裁决 / 投影」主干；实体解析的细则一律进 D4-2 分册，避免重复。**
+> **建议先读 §0「机制分解」**——三层十环节的调用链地图 + 逐环节状态（D4 的全貌图）。
 > 关联：layer2=5/20 最大结构性瓶颈；`docs/方案/方案-记忆更新收敛与Milvus投影一致性.md`（批内收敛已做，跨会话裁决=本方案）
 > 红线：**裁决逻辑必须是确定性系统代码，不依赖 LLM 思考能力**（用户 2026-09-09 明确要求）
+
+---
+
+## 0. 机制分解（读这篇文档的地图）
+
+> D4 常被简化成「版本裁决 + 切实体」两块，实际是**三层十环节**。
+> 分层依据是**一条事实从产生到被用要连续回答的问题**：
+> **归位**（把 LLM 的自由文本映射到确定性坐标）→ **裁决**（比时间、定动作）
+> → **传导**（把裁决结果一路传到注入窗口，三层不打架）。
+
+### 0.1 调用链（函数级）
+
+```
+LLM 提取输出 (category, key, fact, value)
+    │
+    ▼
+normalize_key()  ─── 归位 ──────────────────────────────────────────
+    ├─ ① lifecycle 前缀解析   original_/previous_/former_/old_ → historical
+    │                        current_/new_/latest_/updated_  → current
+    ├─ ② 属性归一             _CANONICAL_ALIASES 别名表 → canonical attribute
+    └─ ③ 实体解析             resolve_entity: P0 编号 → P1 产品码
+                              → P3 key 内实例名 → P3a 专名 → SELF
+    ▼  NormalizedKey(entity_ref, attribute, lifecycle) ≡ 签名
+collapse_same_signature()  ─── 批内收敛（Fix B 的判据视图）──────────
+    ▼
+plan_versioning()  ─── 裁决 ────────────────────────────────────────
+    ├─ 批内二次收敛   同签名取时间最新 → batch_collapsed
+    ├─ historical 分支 同值跳过 / 否则插入（**永不取代、也不被取代**）
+    ├─ 无 existing    → INSERT v1
+    ├─ 同值           → skipped_same
+    ├─ 更新           → INSERT v+1 + supersede_ids
+    └─ 更早           → ignored_older
+    ▼  VersioningPlan
+SQLite 落库  ─── 传导① 权威源 + 版本链（version / supersedes_id）───
+    ▼
+Milvus 投影  ─── 传导② 只镜像 lifecycle=current；删旧插新；
+                 投影键 = projection_key(entity_ref, attribute)
+    ▼
+检索/注入    ─── 传导③ StructuredKeyDedup → struct_provider 渲染
+    ▼
+answer
+```
+
+### 0.2 逐环节与状态
+
+| 层 | 环节 | 回答的问题 | 载体 | 状态 |
+|---|---|---|---|---|
+| 归位 | ① 生命周期判定 | 这是**现在**的还是**过去**的？ | `_HISTORICAL/_CURRENT_PREFIXES` | ✅ D4-1 |
+| 归位 | ② **属性归一** | 这是**什么性质**的？ | `_CANONICAL_ALIASES` | ⚠️ **唯一未解决**（D4-1.5） |
+| 归位 | ③ 实体解析（切实体） | 这是**谁**的事？ | `resolve_entity` | ✅ D4-2 v1/v2 |
+| 裁决 | ④ 签名比对 | 和库里已有的**是不是同一件事**？ | `signature` 三元组 | ✅ D4-1 |
+| 裁决 | ⑤ 时间序 as-of | 哪个**更新**？ | `_is_newer` / `source_started_at` | ✅ D4-1 |
+| 裁决 | ⑥ 动作分支 | **该怎么办**（覆盖/忽略/并存）？ | `plan_versioning` | ✅ D4-1 |
+| 裁决 | ⑦ 批内收敛 | **同一批内**怎么办？ | `collapse_same_signature` | ✅ Fix B/C |
+| 传导 | ⑧ 权威落库 | **存哪**、版本链怎么留？ | SQLite `struct_memories` | ✅ D4-3 |
+| 传导 | ⑨ 投影收敛 | 索引**怎么不跟权威源打架**？ | `projection_key` | ✅ D4-3 |
+| 传导 | ⑩ 检索注入 | **怎么取出来**不拿到过期值？ | `StructuredKeyDedup` | ✅ D4-3（已弱化） |
+
+### 0.3 四个关键认识
+
+**① 难度分布极不均匀：难在「归位」，不在「裁决」。**
+
+裁决层是**纯逻辑**（比时间、定动作），已做完且 D4-4 五例回放**全对**。
+难的是归位层——它要把 LLM 的**自由文本**映射到**确定性坐标**，
+而 LLM 每次可以用不同的词表达同一个属性（§8.2 的 `amount` vs `wire_amount`）。
+**归位层三列里，属性列是唯一还没解决的。**
+
+**② 三列不是平等的，是相乘的。**
+
+| 列 | 本质作用 | 归错了会怎样 |
+|---|---|---|
+| `entity_ref` | **防覆盖** | 不同主体互相覆盖（丢事实） |
+| `attribute` | **防漂移** | 本该打架的两条**认不出对方** → 旧值赖着不走 |
+| `lifecycle` | **准入资格** | 历史快照被当成 current 注入 |
+
+任何一列归位错了，裁决层就**永远看不到**它们该打架——
+这也是 §8.2 case12 的病灶：事实是同一桩电汇，但属性列把它们分到了两个命名空间。
+
+**③ 「批内收敛」是裁决的退化情形，本质是归位失败的症状。**
+
+同一 ingest 内所有事实共享同一个 `source_started_at` → `_is_newer` 恒 False
+→ 时间序失效 → 只能退化成「先到先得」（`plan_versioning` L134-152）。
+**若实体/属性归位正确，同一批内同签名本就该只留一条**；
+出现大批量批内折叠，说明归位把不同主体/不同属性挤进了同一个签名。
+
+**④ 传导层有一个反直觉设计：投影键 = 收敛键，不是标识键。**
+
+见 §3.4：`projection_key(entity, attribute)` 让**多版本在 Milvus 里收敛成一条向量**。
+这不是为了去重，而是为了**让注入窗口天然只看到 current**。
+这层不做的后果：SQLite 里版本链完美，注入窗口里 3 个金额照样并存。
 
 ---
 
