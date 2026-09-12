@@ -14,7 +14,9 @@ ORM 表（越权、绕过领域规则）。本模块是 os_mem 对外的**管理
 分层铁律：os_mem 不得 import testing；testing 反向 import os_mem 只经本窗口。
 模块 import 无重副作用：顶层不构造 LLM / Milvus client（投影对象 lazy，
 见 ``MemAdminService._projection``），import 链只经过 os_mem/__init__
-（settings + logger）与 infra.storage（类引用，不建立连接）。
+（settings + logger）、infra.storage（类引用，不建立连接）与
+extractor.utils.normalize（纯函数模块：D4 收敛键单一来源，extractor 包的
+``__init__`` 是纯文档、不 re-export 任何执行器）——三者都不建连。
 """
 from __future__ import annotations
 
@@ -32,6 +34,10 @@ from os_mem.entries.mem_models import (
     FactCategory,
     Message,
     StructuredMemory,
+)
+from os_mem.extractor.utils.normalize import (
+    LIFECYCLE_CURRENT,
+    projection_key,
 )
 
 # ========================================================================== #
@@ -81,6 +87,41 @@ def _message_to_dict(row: Message) -> dict[str, Any]:
         "masked_text": row.masked_text,
         "create_at": row.create_at,
     }
+
+
+# ========================================================================== #
+#  D4 收敛键（与提取/落库管线共用同一实现，禁止在此另造一套口径）
+# ========================================================================== #
+
+
+def _projection_key_of(row: StructuredMemory) -> str:
+    """ORM 行 → 向量投影收敛键（= 管线写入时用的同一个 key）。
+
+    管线写 Milvus 的 key 是 ``projection_key(entity_ref, attribute)``
+    （D4-1/D4-2）：SELF 实体为**裸 canonical attribute**（LLM 漂移 key
+    ``transfer_amount`` 已归一为 ``wire_amount``），非 SELF 带
+    ``<实体>|<属性>`` 前缀（``ID:VEL|account_number``）。
+    手工管理必须用同一收敛键，否则编辑/删除会删不掉管线留下的向量
+    → 新旧值并存注入、检索去重也折叠不掉。
+
+    兜底：``attribute`` 为空的历史行（D4-0 前写入 / 镜像导入的旧行）退回裸
+    ``key``，与 D4 前的投影键逐字节一致，避免收敛键退化成空串。
+    """
+    attr = (row.attribute or "").strip() or row.key
+    return projection_key(row.entity_ref or "", attr)
+
+
+def _projects_to_vector(row: StructuredMemory) -> bool:
+    """该行是否进向量投影（D4-3：投影只镜像 lifecycle=current 的行）。"""
+    return (row.lifecycle or LIFECYCLE_CURRENT) == LIFECYCLE_CURRENT
+
+
+def _non_current_note(row: StructuredMemory) -> str:
+    """非 current 行的「只改 SQLite、未同步投影」说明（回给前端 Toast）。"""
+    return (
+        f"该行 lifecycle={row.lifecycle}（非 current）：D4-3 起只有 current 行"
+        "进向量投影，本次改动只落在 SQLite，未同步投影（不影响检索注入）"
+    )
 
 
 # ========================================================================== #
@@ -305,14 +346,16 @@ class MemAdminService:
     def _row_to_projection_record(row: StructuredMemory) -> dict[str, Any]:
         """ORM 行 → 投影写入记录（字段与 add_structured_memories 对齐）。
 
-        投影行 id 是独立随机 uuid（删除只能按 (user, category, key) 过滤）；
+        投影行 id 是独立随机 uuid（删除只能按 (user, category, 收敛键) 过滤）；
+        ``key`` 用 D4 收敛键 ``projection_key(entity_ref, attribute)``——与管线
+        逐字节一致，否则同属性的两条向量会在注入窗口并存；
         updated_at 用 naive UTC ISO 字符串（与管线写投影格式一致）。
         """
         return {
             "id": uuid.uuid4().hex,
             "fact": row.fact,
             "category": row.category,
-            "key": row.key,
+            "key": _projection_key_of(row),
             "value": row.value,
             "user_id": row.user_id,
             "updated_at": (
@@ -338,15 +381,25 @@ class MemAdminService:
         source_conversation_id: str = "",
         source_chunk_id: str = "",
     ) -> dict[str, Any]:
-        """按 (user, category, key) upsert 一条事实（同键覆盖 + 旧句归档）。"""
+        """按 (user, category, key) upsert 一条事实（同键覆盖 + 旧句归档）。
+
+        D4 版本链下同键可能有多行（current + superseded/historical）：**优先改
+        current 行**——否则会把 superseded 的内容同步进投影、覆盖 current 的向量。
+        新增行显式带上 D4 字段（attribute=key，实体 SELF、lifecycle current）：
+        D4 起 attribute 参与投影收敛键，留空会写出错误的投影键。
+        """
         with _session() as session:
-            existing = session.exec(
+            rows_same_key = session.exec(
                 select(StructuredMemory).where(
                     StructuredMemory.user_id == user_id,
                     StructuredMemory.category == category,
                     StructuredMemory.key == key,
                 )
-            ).first()
+            ).all()
+            existing = next(
+                (r for r in rows_same_key if _projects_to_vector(r)),
+                rows_same_key[0] if rows_same_key else None,
+            )
 
             now = _utcnow()
             if existing is not None:
@@ -375,16 +428,31 @@ class MemAdminService:
                     source_chunk_id=source_chunk_id,
                     created_at=now,
                     updated_at=now,
+                    # D4：手工新增不跑 alias 归一（用户给什么 key 就是什么属性，
+                    # 界面已用既有 key 提示防同义新键），但必须显式落 attribute，
+                    # 否则投影收敛键退化成空串。
+                    entity_ref="SELF",
+                    attribute=key,
+                    lifecycle=LIFECYCLE_CURRENT,
                 )
                 session.add(row)
                 session.commit()
                 session.refresh(row)
                 created = True
 
+        if not _projects_to_vector(row):
+            # 命中的是 superseded/historical 行：内容落 SQLite，但不碰投影
+            return {
+                "fact_id": row.id,
+                "created": created,
+                "projection": "skipped",
+                "warning": _non_current_note(row),
+            }
+
         # 投影尽力同步（commit 后行未 expire（见 _session），会话外访问安全）
         record = self._row_to_projection_record(row)
         projection_status, warning = self._sync_replace(
-            row.user_id, row.category, row.key, record
+            row.user_id, row.category, _projection_key_of(row), record
         )
         return {
             "fact_id": row.id,
@@ -429,13 +497,25 @@ class MemAdminService:
             session.add(row)
             session.commit()
 
-        projection_status, warning = self._sync_replace(
-            row.user_id, row.category, row.key, self._row_to_projection_record(row)
-        )
+        if _projects_to_vector(row):
+            projection_status, warning = self._sync_replace(
+                row.user_id,
+                row.category,
+                _projection_key_of(row),
+                self._row_to_projection_record(row),
+            )
+        else:
+            # 非 current 行不在投影里：只改 SQLite，别把旧值写进 current 的向量
+            projection_status, warning = "skipped", _non_current_note(row)
         return {"fact_id": row.id, "changed": True, "projection": projection_status, "warning": warning}
 
     def delete_fact(self, user_id: str, fact_id: str) -> dict[str, Any]:
-        """删除单条事实（SQLite 删行 → 投影按 (user, category, key) 删向量，幂等）。"""
+        """删除单条事实（SQLite 删行 → 投影按 D4 收敛键删向量，幂等）。
+
+        - 非 current 行（superseded/historical）本就不在投影里 → 只删 SQLite；
+        - current 行：同收敛键若还有存活的 current 行（D4 前的脏数据），以存活行
+          重写该键（避免误删仍有效的向量），否则删掉该键的向量。
+        """
         with _session() as session:
             row = session.exec(
                 select(StructuredMemory).where(
@@ -445,12 +525,38 @@ class MemAdminService:
             ).first()
             if row is None:
                 raise LookupError(f"fact not found: user={user_id} id={fact_id}")
+            projectable = _projects_to_vector(row)
+            category = row.category
+            proj_key = _projection_key_of(row)
             session.delete(row)
             session.commit()
 
-        projection_status, warning = self._sync_delete(
-            row.user_id, category=row.category, keys=[row.key]
-        )
+            survivor: StructuredMemory | None = None
+            if projectable:
+                # 按 (user, category) 取候选后**用同一个收敛键比对**：不能按
+                # attribute 列等值匹配——历史行 attribute 为空（收敛键退化为
+                # row.key），等值匹配会串到别的键上。
+                remaining = session.exec(
+                    select(StructuredMemory).where(
+                        StructuredMemory.user_id == user_id,
+                        StructuredMemory.category == category,
+                        StructuredMemory.lifecycle == LIFECYCLE_CURRENT,
+                    )
+                ).all()
+                survivor = next(
+                    (r for r in remaining if _projection_key_of(r) == proj_key), None
+                )
+
+        if not projectable:
+            projection_status, warning = "skipped", _non_current_note(row)
+        elif survivor is not None:
+            projection_status, warning = self._sync_replace(
+                user_id, category, proj_key, self._row_to_projection_record(survivor)
+            )
+        else:
+            projection_status, warning = self._sync_delete(
+                user_id, category=category, keys=[proj_key]
+            )
         return {
             "fact_id": fact_id,
             "affected": 1,
@@ -492,7 +598,12 @@ class MemAdminService:
         }
 
     def rebuild_projection(self, user_id: str) -> dict[str, Any]:
-        """重建用户投影：SQLite 全量 → 删用户全部向量 → 批量 embed → 重插。"""
+        """重建用户投影：SQLite 的 **current 行** → 删用户全部向量 → 批量 embed → 重插。
+
+        D4-3 起投影只镜像 ``lifecycle=current``（superseded 是版本链留痕、
+        historical 是原始快照），重建必须加同一过滤，否则会把历史版本投回
+        检索窗口、撤销 D4 的收敛；投影键用 D4 收敛键（与管线一致）。
+        """
         projection = self._projection()
         if projection is None:
             return {
@@ -504,7 +615,10 @@ class MemAdminService:
             rows = list(
                 session.exec(
                     select(StructuredMemory)
-                    .where(StructuredMemory.user_id == user_id)
+                    .where(
+                        StructuredMemory.user_id == user_id,
+                        StructuredMemory.lifecycle == LIFECYCLE_CURRENT,
+                    )
                     .order_by(StructuredMemory.created_at.asc())
                 ).all()
             )

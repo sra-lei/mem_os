@@ -430,3 +430,207 @@ def test_admin_deactivate_category(tmp_memory_db: Path) -> None:
     # 重新启用
     admin.set_category_active("finance", True)
     assert "finance" in list_active_categories()
+
+
+# ---------------------------------------------------------------------------
+# D4 收敛键一致性（管理窗口 ↔ 落库/投影管线；见需求文档 13.9-7 修复）
+#
+# 修复前：手工编辑/删除按**原始 key 列**删投影响量，而管线写的投影 key 是
+# projection_key(entity_ref, attribute)（canonical attribute / 带实体前缀）
+# → 删不掉管线留下的向量（新旧值并存注入）；「重建投影」还不过滤 lifecycle，
+# 会把 superseded/historical 行投回检索窗口。以下用例锁定修复后的行为。
+# ---------------------------------------------------------------------------
+
+
+def _add_fact(
+    *,
+    key: str,
+    fact: str = "手工事实",
+    value: str = "v",
+    category: str = "finance",
+    attribute: str = "",
+    entity_ref: str = "SELF",
+    lifecycle: str = "current",
+) -> str:
+    """插一条可指定 D4 字段的行（模拟管线写入/历史脏数据），返回 fact id。"""
+    from os_mem.infra.storage.mem_storage import MemoryDatabase
+
+    row = StructuredMemory(
+        user_id=USER,
+        fact=fact,
+        category=category,
+        key=key,
+        value=value,
+        confidence=0.9,
+        source_conversation_id=CONV,
+        entity_ref=entity_ref,
+        attribute=attribute,
+        lifecycle=lifecycle,
+        created_at=_now(),
+        updated_at=_now(),
+    )
+    with Session(MemoryDatabase().get_engine()) as session:
+        session.add(row)
+        session.commit()
+        return row.id
+
+
+def test_projection_key_uses_canonical_attribute(tmp_memory_db: Path) -> None:
+    """编辑漂移 key 的行：投影删改必须用 canonical attribute（wire_amount）。"""
+    fake = FakeProjection()
+    fid = _add_fact(key="transfer_amount", attribute="wire_amount", value="$100,000")
+    admin = MemAdminService(projection=fake)
+    res = admin.update_fact(USER, fid, value="$95,000")
+    assert res["projection"] == "synced"
+    assert fake.delete_calls[-1] == {
+        "user_id": USER,
+        "category": "finance",
+        "keys": ["wire_amount"],
+    }
+    assert fake.upsert_calls[-1][0]["key"] == "wire_amount"
+    assert fake.upsert_calls[-1][0]["value"] == "$95,000"
+
+
+def test_projection_key_prefixes_non_self_entity(tmp_memory_db: Path) -> None:
+    """非 SELF 实体：投影键带 <实体>|<属性> 前缀，两个实体的同名属性互不覆盖。"""
+    fake = FakeProjection()
+    fid = _add_fact(
+        key="account_number",
+        attribute="account_number",
+        entity_ref="ID:VEL",
+        value="VEL-89923476",
+    )
+    admin = MemAdminService(projection=fake)
+    admin.update_fact(USER, fid, value="VEL-89923476-patched")
+    assert fake.delete_calls[-1]["keys"] == ["ID:VEL|account_number"]
+    assert fake.upsert_calls[-1][0]["key"] == "ID:VEL|account_number"
+
+
+def test_projection_key_falls_back_to_raw_key_for_legacy_row(
+    tmp_memory_db: Path,
+) -> None:
+    """attribute 为空的历史行（D4-0 前写入）：退回裸 key，不写出空收敛键。"""
+    fake = FakeProjection()
+    fid = _add_fact(key="legacy_key", attribute="")
+    admin = MemAdminService(projection=fake)
+    admin.update_fact(USER, fid, value="patched")
+    assert fake.delete_calls[-1]["keys"] == ["legacy_key"]
+    assert fake.upsert_calls[-1][0]["key"] == "legacy_key"
+
+
+def test_update_non_current_row_skips_projection(tmp_memory_db: Path) -> None:
+    """superseded/historical 行不在投影里：只改 SQLite，且明确警示。"""
+    fake = FakeProjection()
+    fid = _add_fact(key="wire_amount", attribute="wire_amount", lifecycle="superseded")
+    admin = MemAdminService(projection=fake)
+    res = admin.update_fact(USER, fid, value="$85,000")
+    assert res["changed"] is True and res["projection"] == "skipped"
+    assert "lifecycle=superseded" in (res["warning"] or "")
+    assert fake.delete_calls == [] and fake.upsert_calls == []
+    assert admin.get_fact(USER, fid)["value"] == "$85,000"  # SQLite 仍生效
+
+
+def test_delete_current_row_uses_canonical_key(tmp_memory_db: Path) -> None:
+    fake = FakeProjection()
+    fid = _add_fact(key="transfer_amount", attribute="wire_amount")
+    admin = MemAdminService(projection=fake)
+    res = admin.delete_fact(USER, fid)
+    assert res["projection"] == "synced"
+    assert fake.delete_calls[-1] == {
+        "user_id": USER,
+        "category": "finance",
+        "keys": ["wire_amount"],
+    }
+    assert fake.upsert_calls == []  # 无存活同键行 → 只删不插
+
+
+def test_delete_non_current_row_skips_projection(tmp_memory_db: Path) -> None:
+    fake = FakeProjection()
+    fid = _add_fact(key="wire_amount", attribute="wire_amount", lifecycle="historical")
+    admin = MemAdminService(projection=fake)
+    res = admin.delete_fact(USER, fid)
+    assert res["projection"] == "skipped"
+    assert "lifecycle=historical" in (res["warning"] or "")
+    assert fake.delete_calls == [] and fake.upsert_calls == []
+
+
+def test_delete_current_row_keeps_surviving_same_signature(tmp_memory_db: Path) -> None:
+    """D4 前脏数据：同收敛键还有活着的 current 行 → 以存活行重写，不误删向量。"""
+    fake = FakeProjection()
+    keep = _add_fact(key="wire_amount", attribute="wire_amount", value="$100,000")
+    drop = _add_fact(key="transfer_amount", attribute="wire_amount", value="$85,000")
+    admin = MemAdminService(projection=fake)
+    admin.delete_fact(USER, drop)
+    # 存活行（wire_amount=$100,000）被重新写回同一收敛键
+    assert fake.delete_calls[-1]["keys"] == ["wire_amount"]
+    assert fake.upsert_calls[-1][0]["value"] == "$100,000"
+    assert fake.upsert_calls[-1][0]["key"] == "wire_amount"
+    assert admin.get_fact(USER, keep)["value"] == "$100,000"
+
+
+def test_rebuild_projection_only_projects_current_rows(tmp_memory_db: Path) -> None:
+    """重建投影只投 current：superseded/historical 不得回到注入窗口。"""
+    fake = FakeProjection()
+    _add_fact(key="transfer_amount", attribute="wire_amount", value="$95,000")
+    _add_fact(
+        key="wire_amount", attribute="wire_amount", value="$100,000",
+        lifecycle="superseded",
+    )
+    _add_fact(
+        key="wire_amount", attribute="wire_amount", value="$85,000",
+        lifecycle="historical",
+    )
+    admin = MemAdminService(projection=fake)
+    res = admin.rebuild_projection(USER)
+    assert res["synced"] == 1 and res["projection"] == "synced"
+    records = fake.upsert_calls[-1]
+    assert [r["value"] for r in records] == ["$95,000"]
+    assert records[0]["key"] == "wire_amount"  # 收敛键，非原始 key
+    assert fake.delete_calls[-1] == {"user_id": USER, "category": None, "keys": None}
+
+
+def test_upsert_fact_new_row_carries_d4_fields(tmp_memory_db: Path) -> None:
+    """手工新增必须显式落 D4 身份字段，否则投影收敛键退化成空串。"""
+    fake = FakeProjection()
+    admin = MemAdminService(projection=fake)
+    fid = admin.upsert_fact(
+        USER,
+        category="finance",
+        key="wire_amount",
+        fact="电汇金额 $95,000",
+        value="$95,000",
+    )["fact_id"]
+    row = admin.get_fact(USER, fid)
+    assert row["key"] == "wire_amount"
+    from os_mem.infra.storage.mem_storage import MemoryDatabase
+
+    with Session(MemoryDatabase().get_engine()) as session:
+        orm = session.exec(
+            select(StructuredMemory).where(StructuredMemory.id == fid)
+        ).one()
+        assert orm.entity_ref == "SELF"
+        assert orm.attribute == "wire_amount"
+        assert orm.lifecycle == "current"
+    assert fake.delete_calls[-1]["keys"] == ["wire_amount"]
+    assert fake.upsert_calls[-1][0]["key"] == "wire_amount"
+
+
+def test_upsert_fact_prefers_current_row_over_superseded(tmp_memory_db: Path) -> None:
+    """同键多行（版本链）时改 current 行：不得把 superseded 的值同步进投影。"""
+    fake = FakeProjection()
+    current_fid = _add_fact(
+        key="email", fact="新邮箱", value="new@email.com", category="contact"
+    )
+    superseded_fid = _add_fact(
+        key="email", fact="旧邮箱", value="old@email.com", category="contact",
+        lifecycle="superseded",
+    )
+    admin = MemAdminService(projection=fake)
+    res = admin.upsert_fact(
+        USER, category="contact", key="email", fact="人工订正", value="fixed@email.com"
+    )
+    assert res["created"] is False and res["projection"] == "synced"
+    assert res["fact_id"] == current_fid  # 命中的是 current 行
+    assert admin.get_fact(USER, current_fid)["value"] == "fixed@email.com"
+    assert admin.get_fact(USER, superseded_fid)["value"] == "old@email.com"  # 未被波及
+    assert fake.upsert_calls[-1][0]["value"] == "fixed@email.com"

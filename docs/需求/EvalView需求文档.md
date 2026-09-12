@@ -899,7 +899,7 @@ GET    /api/cases/{case_id}/diff?version_from=v0.1   返回 name/query/expected_
 5. **投影不变量**（A 批后；D4-2 起收敛键升级）：Milvus 恒为每 `(user, category, 收敛键)` 一条 current，
    收敛键 = `projection_key(entity_ref, attribute)`（SELF 实体即裸 attribute，非 SELF 带 `<实体>|<属性>` 前缀）。
    手工管理操作不得破坏它——故**编辑不允许改身份字段**（改身份 = 先删旧事实、再新增新键，两步显式完成）。
-   当前手工路径尚未跟随这次收敛键升级，是已知缺口，见 13.9-7。
+   手工管理路径已对齐（2026-09-12 修复：删改按收敛键、非 current 行不进投影、重建只投 current），见 13.9-7。
 6. 投影行 `updated_at` 是 **naive UTC ISO 字符串**（`datetime.utcnow().isoformat()`）；SQLite 时间戳同为 naive UTC。
    手工写入投影必须沿用同一格式，前端显示经 `schemas._utc_iso` 标注 UTC。
 7. conv_meta 状态机：COMPLETED = 该会话已提取入库，重跑评测**跳过 ingest**（记忆缓存门禁）。
@@ -922,12 +922,15 @@ GET    /api/cases/{case_id}/diff?version_from=v0.1   返回 name/query/expected_
 
 | 操作 | SQLite（权威，先做） | 投影（尽力，后做） | 备注 |
 |---|---|---|---|
-| 新增事实 | INSERT（新 uuid） | delete(user,cat,[key]) 幂等 → embed → add | key/category 允许与既有键共存（同键即覆盖旧值语义） |
-| 编辑事实 | UPDATE fact/value/confidence；`previous_fact`=旧 fact；updated_at=now；created_at 不动 | delete(user,cat,[key]) → embed 新 fact → add | 身份字段不可改（13.3-3） |
-| 删除单条 | DELETE 行 | delete(user,cat,[key]) | 幂等（投影无该键=0 删除，无害） |
+| 新增事实 | INSERT（新 uuid，显式落 D4 身份字段） | delete(user,cat,[收敛键]) 幂等 → embed → add | key/category 允许与既有键共存（同键即覆盖旧值语义）；`attribute=key`、实体 SELF、lifecycle current |
+| 编辑事实 | UPDATE fact/value/confidence；`previous_fact`=旧 fact；updated_at=now；created_at 不动 | delete(user,cat,[收敛键]) → embed 新 fact → add | 身份字段不可改（13.3-3）；非 current 行只落 SQLite（projection=skipped） |
+| 删除单条 | DELETE 行 | delete(user,cat,[收敛键])；同收敛键还有存活 current 行则以存活行重写 | 幂等（投影无该键=0 删除，无害）；非 current 行不进投影 → 只删 SQLite |
 | 清空（仅事实） | DELETE 该 user 全部 struct_memories | delete(user) 全量 | 保留 conv_messages 原文与 conv_meta 状态 |
 | 清空并允许重提取 | 同上 + conv_meta 该 user 行 status→PENDING | delete(user) 全量 | 下次 ingest/评测从 conv_messages 原文重新抽取（LLM 费用，UI 警示） |
-| 重建投影 | 无 | delete(user) → embed_batch 全量 → add | 每用户手动入口；修复一切投影漂移 |
+| 重建投影 | 无 | delete(user) → embed_batch（**仅 current 行**）→ add | 每用户手动入口；修复一切投影漂移 |
+
+> **收敛键** = `projection_key(entity_ref, attribute)`，与落库管线共用同一实现（`os_mem.extractor.utils.normalize`）；
+> `attribute` 为空的历史行退回裸 `key`。superseded / historical 行不进投影（D4-3）。
 
 写接口统一返回：`{ ok, operation, sqlite, projection: "synced"|"failed"|"noop", warning? }`，前端据此 Toast。
 
@@ -990,11 +993,15 @@ uvicorn 冒烟 create/update/delete 投影均 synced、零残留。
 
 **测试计划（无 LLM，可自由跑）**：`tests/unit/test_mem_admin_service.py`（tmp sqlite 建业务表 +
 fake vector_store/vectorizer 注入）：
-- 编辑：previous_fact 归档 / updated_at 刷新 / 投影 delete(user,cat,[key]) + embed 1 次 + add 1 次，参数正确；
+- 编辑：previous_fact 归档 / updated_at 刷新 / 投影 delete(user,cat,[收敛键]) + embed 1 次 + add 1 次，参数正确；
 - 新增 / 删除单条：SQLite 行与投影调用对应；删除不存在的键幂等；
 - clear：仅事实 vs + conv_meta→PENDING（断言 PENDING、原文行保留）；
-- rebuild：delete(user) → embed_batch(全量) → add，顺序与数量正确；
+- rebuild：delete(user) → embed_batch(仅 current 行) → add，顺序与数量正确；
 - 投影失败分支：fake raise → 返回 ok + projection=failed + warning，SQLite 已提交不回滚。
+- **D4 收敛键一致性（2026-09-12 追加 10 例，27 passed）**：编辑/删除按
+  `projection_key(entity_ref, attribute)`（含非 SELF 实体前缀、`attribute` 空行退回裸 key）；
+  非 current 行只落 SQLite 且返回 `skipped` + 警示；删除 current 行时同收敛键的存活行被重写回投影；
+  `rebuild` 只投 current；手工新增显式落 D4 身份字段；同键多行时 `upsert_fact` 优先改 current 行。
 
 FastAPI 层薄（组装参数 → 调服务），以单测覆盖服务为主；真实 uvicorn 冒烟在联调批做（curl 本机 8765，
 只读/写测试用户数据，不碰真实 case 记忆，或先在临时 `MEMORY_DB_PATH` 上起一个验证进程）。
@@ -1017,19 +1024,34 @@ FastAPI 层薄（组装参数 → 调服务），以单测覆盖服务为主；�
 5. **本机 memos.db 用例定义表为空**（test_case_definitions 0 行）→ 用例页当前没数据；不影响记忆页，
    互链功能在定义存在（开发机）时才生效。
 6. open：事实编辑后 confidence 由人给（0-1 默认保留原值）；是否要审计「管理操作日志」（v1 不做，靠 git/回忆）。
-7. **【待修】管理窗口与 D4 收敛键不一致（2026-09-12 发现）**：
-   - D4-1/D4-2 起，管线写入 Milvus 的投影 key = `projection_key(entity_ref, attribute)`
-     （canonical attribute；非 SELF 实体带 `<实体>|<属性>` 前缀），且只投影 `lifecycle=current` 行（D4-3）。
-   - 而管理窗口的投影同步仍按**原始 key 列**操作：`_row_to_projection_record()` 写 `key=row.key`、
-     `update_fact`/`delete_fact` 按 `[row.key]` 删除、`rebuild_projection()` 不做 `lifecycle` 过滤
-     （`src/os_mem/admin/mem_admin_service.py:305`、`:432`、`:451`、`:504`）。
-   - 后果：① 编辑/删除一条事实后，管线留下的 canonical 投影行**删不掉** → 新旧值并存注入；
-     ② 手工新增/编辑写入的是裸 key 投影行；③ 「重建投影」会把该用户投影键**退化为裸 key**，
-     并把 superseded / historical 行一起投回，撤销 D4-1/D4-3 的收敛。
-   - 影响面：只作用于「手工管理过的用户 / 点过重建的用户」，评测管线路径本身不受影响；
-     但评测前若手工动过记忆，投影即脏。
-   - 修法（待定）：窗口复用 `projection_key`、删改按收敛键、rebuild 只读 `lifecycle='current'`，
-     并补 fake projection 单测锁定。
+7. **【已修 2026-09-12】管理窗口与 D4 收敛键不一致**（原症状：投影同步按**原始 key 列**操作）：
+   - 修复前：`_row_to_projection_record()` 写 `key=row.key`、`update_fact`/`delete_fact` 按 `[row.key]`
+     删、`rebuild_projection()` 不做 `lifecycle` 过滤 → 编辑/删除删不掉管线留下的 canonical 投影行
+     （新旧值并存注入）；「重建投影」把投影键退化为裸 key 并把 superseded / historical 行一起投回，
+     撤销 D4-1/D4-3 的收敛。影响面只限「手工管理过 / 点过重建的用户」，评测管线路径不受影响。
+   - 修法（`src/os_mem/admin/mem_admin_service.py`）：
+     - `_projection_key_of(row)` 统一收敛键 = `projection_key(entity_ref, attribute)`，**与管线共用同一实现**
+       （`os_mem.extractor.utils.normalize`，纯函数、不建连，不另造口径）；`attribute` 为空的历史行退回裸
+       `key`，避免收敛键退化成空串；
+     - 新增/编辑/删除的投影删改全部改用收敛键；`upsert_fact` 新增行显式落 `attribute=key`、实体 SELF、
+       lifecycle current；
+     - 非 current 行（superseded/historical）**不进投影**：编辑/删除只落 SQLite，返回 `projection="skipped"`
+       + 警示文案（避免把旧值写进 current 的向量）；
+     - 同键多行（版本链）时 `upsert_fact` 优先改 current 行；删除 current 行时若同收敛键还有存活的
+       current 行（D4 前脏数据），以存活行重写该键，而不是把向量删掉；
+     - `rebuild_projection()` 加 `lifecycle='current'` 过滤。
+   - 验证：`tests/unit/test_mem_admin_service.py` 追加 10 例（收敛键/canonical attribute、非 SELF 实体前缀、
+     历史行兜底、非 current 跳过、存活行重写、重建只投 current、新增行 D4 字段、同键优先 current），
+     27 passed；全量 `tests/unit` 272 passed。
+8. **【open】镜像导出/导入不带 D4 身份字段**：`export_user_data()` 的 `struct_memories` 载荷仍是旧列
+   （无 `entity_ref`/`attribute`/`lifecycle`/`source_started_at`/`version`/`supersedes_id`），跨机
+   `import_memory_batch()` 后这些列回到默认值 → 收敛键退化为原始 key、实体归属与版本链丢失
+   （13.9-7 的兜底保证「不写错键」，但跨机一致性仍会退化）。建议载荷升版（带 D4 列 + `schema_version`）
+   并在导入侧原样恢复；改前需确认 `方案-评测记录跨机同步.md` 与现有导出文件格式的兼容策略。
+9. **【open】界面不显示 lifecycle / entity / attribute**：`list_facts` / `_fact_to_dict` 不返回 D4 字段
+   （也不按 lifecycle 过滤），用户看到的是「扁平事实列表」，其中可能混着 superseded / historical 行；
+   此时编辑会返回 `projection="skipped"` + 警示（行为正确），但界面无法解释原因、也无法定位是版本链的哪一版。
+   建议把 `lifecycle`/`entity_ref`/`attribute` 透出到 `MemoryFactItem`，事实表格加版本标记 / 筛选 / 默认只看 current。
 
 ### 13.10 决策记录（含被否方案）
 
