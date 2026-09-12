@@ -350,12 +350,13 @@ class StructuredMemService:
           原样复用并复测收益。
         """
         from os_mem.core.retrieve import (
+            RETRIEVAL_FETCH_MULTIPLIER,
             apply_retrieval_strategies,
         )
         from os_mem.infra.p2check import mask_pii
 
         # 放大取回：去重/配额收敛后仍需足够不同 key 填满 top_k（无条件生效）
-        fetch_k = top_k * 3
+        fetch_k = top_k * RETRIEVAL_FETCH_MULTIPLIER
         masked_query = mask_pii(query)
         query_embedding: list[float] = []
         try:
