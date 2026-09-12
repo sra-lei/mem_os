@@ -2,7 +2,8 @@
 
 > 状态：**v1 已实现并验证（11/20 → 14/20）；v2 重构为单一职责策略链、去除 Enable 开关，
 > 行为不变并已复测**（2026-09-07，layer1 struct/assert/top_k=15）
-> 对应代码：`src/os_mem/core/retrieval_strategies.py`
+> 对应代码：`src/os_mem/core/retrieve/strategies/`（2026-09-12 由单体
+> `core/retrieval_strategies.py` 拆为单一职责包）
 > 目的：解决 layer1 struct 评测"库里事实完备但 top-15 注入覆盖不足 → 召回率低"的检索侧瓶颈，
 > 并记录"为什么区分型 verbatim 策略优先于提取侧收敛（C）与提取收紧（B）"的决策依据。
 
@@ -103,7 +104,7 @@ return window[:top_k]
 
 ### 4.3 变更点与口径（v2 重构：单一职责策略链，无 Enable 开关）
 
-- 改动仅限 `retrieval_strategies.py`（策略层）与调用方 `struc_mem_service.py`
+- 改动仅限 `core/retrieve/strategies/`（策略层）与调用方 `struc_mem_service.py`
   （fetch 放大取回改为无条件生效）；
 - 数值 token 口径与 `tests/eval/judge/impl/assert_judger.py` /
   `tests/audit_run_attribution.py` 对齐（金额/代码/卡片/≥4 位数字，归一化去 $ 千分位连字符）；

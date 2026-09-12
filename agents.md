@@ -34,10 +34,10 @@ MemOS 是一个评测驱动的 **Agent 用户记忆系统**：跨会话记住用
 src/os_mem/         记忆系统核心（import 前缀 os_mem.）——不依赖评测侧
 ├── configs/mem_settings.py    记忆侧配置：DEEPSEEK_*(提取用)、embedding_dim、MEMORY_DB_PATH
 ├── core/
-│   ├── mem_provider/          Provider 实现：base_provider / struct_provider / full_provider
+│   ├── provider/              Provider 实现：base_provider / struct_provider / full_provider
 │   ├── services/              业务服务：struc_mem_service / conv_meta_service / note_mem_service
 │   ├── state_machine.py       不可逆线性状态机（PENDING→…→COMPLETED / FAILED）
-│   ├── retrieval_strategies.py 检索注入策略链（单一职责策略、无 Enable 开关）
+│   ├── retrieve/strategies/   检索注入策略链（单一职责策略、无 Enable 开关）
 │   ├── guide/                 实现指南骨架：sanitizer（日志脱敏）
 ├── entries/mem_models.py      SQLModel 表：Message(conv_messages) / StructuredMemory(struct_memories) / ConversationMeta(conv_meta)
 ├── extraction/                记忆提取域（2026-09-08 迁自 utils）：

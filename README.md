@@ -26,12 +26,12 @@ v0.3 双轨 full 编排 A 批已落地（conv_meta 状态机 + 会话原文必�
 
 ## 特性
 
-- **记忆实现三 provider（`src/os_mem/core/mem_provider/`）**
+- **记忆实现三 provider（`src/os_mem/core/provider/`）**
   - `base`：会话原文全文 + BM25 检索（v0.1 基础回忆）
   - `struct`：LLM 事实提取 → SQLite `struct_memories` 先写（**权威源**）→ Milvus/Zilliz 混合向量（dense + sparse BM25 → RRF）后写
   - `full`：双轨编排（同步快通道 <1s 返回 + struct 异步 worker，B 批待实现）
 - **会话原文必落库**：`conv_messages` 逐条持久化（冲突键 user+session+seq、旧值归档）+ `conv_meta` 处理状态机（CAS 认领 / 租约 / 崩溃重试，零新依赖——无 Redis/Celery）
-- **检索注入策略链**（`core/retrieval_strategies.py`）：固定链 v2（verbatim 区分准入——结构化优先，仅放行携带窗口未覆盖数值的 verbatim 兜底句），无开关、无条件生效
+- **检索注入策略链**（`core/retrieve/strategies/`）：固定链 v2（verbatim 区分准入——结构化优先，仅放行携带窗口未覆盖数值的 verbatim 兜底句），无开关、无条件生效
 - **评测框架**：pytest 全链路 60 YAML（`tests/eval/` 运行库）+ 100+ 项离线单测（`tests/unit/`，无需任何 key）+ 离线三层归因审计工具
 - **可复现性**：`--record-db` 时每次 run 落 `config_snapshot`（4 处 prompt 内容指纹），跑分 ↔ prompt 版本一一挂钩，改 prompt 无需手维护版本号
 - **评测看板（EvalView）**：FastAPI + React（Vite），运行记录 / 通过率 / 失败对比 / Token 统计
@@ -132,10 +132,10 @@ src/
 ├── os_mem/                     # 记忆系统核心（导入用 os_mem. 前缀）
 │   ├── configs/                # mem_settings（DB 路径 / Milvus 端点 / 模型 / 提取上限…）
 │   ├── core/
-│   │   ├── mem_provider/       # base_provider / struct_provider / full_provider（记忆实现三档）
+│   │   ├── provider/           # base_provider / struct_provider / full_provider（记忆实现三档）
 │   │   ├── services/           # note_mem_service（原文 upsert）/ struc_mem_service（事实入库）/ conv_meta_service（状态机）
 │   │   ├── state_machine.py    # conv_meta 线性状态机（CAS 认领 + 租约 + 重试）
-│   │   ├── retrieval_strategies.py   # 检索注入策略链（verbatim 区分准入，固定链 v2）
+│   │   ├── retrieve/strategies/  # 检索注入策略链（verbatim 区分准入，固定链 v2）
 │   │   └── guide/              # sanitizer（日志脱敏）
 │   ├── entries/                # SQLModel 表：conv_messages / struct_memories / conv_meta（conv_memories 已退役）
 │   ├── extractor/              # 记忆提取域：fact_extractor（LLM 结构化任务执行器）/ regular_extractor（正则兜底+R1 覆盖剪枝）/ extraction_core（provider 无关恢复循环）/ llm_util（默认模型画像）/ callers/（framework：ExtractionCaller 协议+分发工厂；deepseek_caller：DeepSeek 实现 + prompt 模板/渲染/指纹）/ model/models（数据类）/ utils/（extract_utils 共享纯函数 · token_utils 精确信息 token 口径 · normalize D4 key 归一）
@@ -214,7 +214,7 @@ cp .env.example .env   # 键值与下方一致，编辑填入 API Key
 ## 开发说明
 
 - **依赖方向**：`os_mem` 不依赖 `testing`/`eval`；`eval` 只依赖 `os_mem` + 第三方；`tests` 是唯一同时碰两者的胶水（pyproject `pythonpath=["src","tests"]`）
-- **judge 结构**（拆包于 `tests/eval/judge/`）：判分 token 规则在 `assert_judger.py`，与 `retrieval_strategies.py`、`audit_run_attribution.py` 三处有同步义务（口径注释内写明）
+- **judge 结构**（拆包于 `tests/eval/judge/`）：判分 token 规则在 `assert_judger.py`，与 `core/retrieve/strategies/verbatim_utils.py`、`audit_run_attribution.py` 三处有同步义务（口径注释内写明）
 - **日志**：`os_mem` 统一 logger（stderr INFO + `logs/app-*.jsonl` DEBUG 按天轮转）；含 PII 内容入日志前必须 sanitize/mask
 - **评测库纪律**：`memos.db`/`memories.db` 均不入 git；本地改动过 db 时 pull 会被拒（冲突）——备份到 /tmp → `git checkout -- <db>` → pull → 还原
 - **调试开关**：`testing/services/store_service.py` 的 `_db_off` 可关闭评测结果落库（纯跑流程调试）
