@@ -1,6 +1,13 @@
 from typing import Any
 
-from .verbatim_utils import _hit_tokens, _is_verbatim
+from os_mem.extractor.utils.token_utils import fact_tokens
+
+from .verbatim_utils import _is_verbatim
+
+
+def _hit_tokens(hit: dict[str, Any]) -> set[str]:
+    fact = hit.get('fact') or ''
+    return fact_tokens(f'{fact} {hit.get("value") or ""}')
 
 
 # ---------------------------------------------------------------------- #
