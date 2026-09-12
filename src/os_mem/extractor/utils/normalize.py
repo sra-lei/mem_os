@@ -94,6 +94,8 @@ _PROPER_NOUN_STOPWORDS = frozenset({
     "september", "october", "november", "december",
     "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
     "customer", "client", "agent", "account", "total", "monthly", "annual",
+    # 课表缩写（15 选课实测噪声：MWF/TR/TTh 被当成了专名）
+    "mwf", "mw", "tr", "tth", "tt", "wf",
 })
 
 
@@ -102,6 +104,22 @@ def attribute_policy(category: str, attribute: str) -> str:
     if (category, attribute) in _MULTI_VALUED_PAIRS:
         return POLICY_MULTI_VALUED
     return POLICY_FUNCTIONAL
+
+
+def _policy_base(category: str, attribute: str) -> str:
+    """策略判定的基名：复合属性名按其**多值基名**判定。
+
+    ``investment_account_balance`` → ``investment_account``（多值）；
+    ``wire_amount`` → 自身（无多值基名 → functional）。
+    **注意**：这里只影响「是否允许按实例切分」的判定，
+    **不改变落库的 attribute**（属性名保持原样，避免意外的属性归并）。
+    """
+    if (category, attribute) in _MULTI_VALUED_PAIRS:
+        return attribute
+    for base in _MULTI_VALUED_ATTRS_BY_CATEGORY.get(category, ()):
+        if attribute.startswith(base + "_"):
+            return base
+    return attribute
 
 
 # 按 category 分组的**长前缀优先**列表（防 `course_` 吞掉 `course_schedule_xxx`）
@@ -118,11 +136,19 @@ def _norm_instance(text: str) -> str:
     return cleaned[:40]
 
 
-def _instance_from_key(key: str, attribute: str) -> Optional[str]:
+def _instance_from_key(key: str, attribute: str, text: str) -> Optional[str]:
     """P3：key 形如 ``<attribute>_<实例名>`` → 剥出实例名（中文场景的关键路径）。
 
     LLM 只提供字符串，**系统决定它放在实体维度**（裁决仍是确定性代码）。
-    剩余部分为空、或本身是生命周期词 → 不剥离（防误吞）。
+
+    三重护栏（缺一不可，否则会把**复合属性名**误当实例名）：
+
+    1. 剩余部分非空，且**不是生命周期词**（`medication_current`）；
+    2. **证伪护栏**：剩余部分必须在事实文本中**确实出现**——
+       `medication_lisinopril` + "User takes Lisinopril" ✓；
+       而 `medication_supply` / `investment_account_balance` 的剩余段在文本里
+       找不到 → 判定为复合属性名，**不剥离**（零词表，不依赖枚举限定词）；
+    3. 剩余部分为纯数字/过短（<2 字符）→ 不剥离。
     """
     prefix = f"{attribute}_"
     if not key.startswith(prefix):
@@ -131,7 +157,55 @@ def _instance_from_key(key: str, attribute: str) -> Optional[str]:
     if not rest or rest in _LIFECYCLE_WORDS:
         return None
     norm = _norm_instance(rest)
-    return norm or None
+    if len(norm.replace(" ", "")) < 2:
+        return None
+    # 证伪护栏①：属性限定词（复合属性名的后半段）不是实例名
+    if norm in _ATTRIBUTE_QUALIFIERS:
+        return None
+    # 证伪护栏②：实例名必须在事实文本中确实出现
+    if not _appears_as_instance(norm, text):
+        return None
+    return norm
+
+
+# 属性**限定词**（复合属性名的后半段）——零散但**封闭**的词表。
+#
+# 这是本方案唯一的残留词表：它约束的是「**属性名**的构词」（有限、稳定），
+# 而不是「实例名」空间（无限、会漂移）——后者正是 alias 表失败的根源。
+# 例：`credit_card_balance` / `medication_supply` 的后半段是限定词，不是实例。
+_ATTRIBUTE_QUALIFIERS = frozenset({
+    "balance", "balances", "supply", "supplies", "amount", "total", "subtotal",
+    "date", "dates", "status", "state", "number", "num", "name", "type", "kind",
+    "rate", "rates", "plan", "plans", "count", "level", "city", "address",
+    "email", "phone", "provider", "frequency", "dose", "dosage", "purpose",
+    "source", "note", "notes", "detail", "details", "value", "id", "code",
+    "score", "scores", "term", "terms", "year", "month", "day", "time", "times",
+    "duration", "cost", "costs", "price", "fee", "fees", "payment", "payments",
+    "interest", "category", "description", "summary", "limit", "limits",
+    "minimum", "maximum", "start", "end", "due", "age", "height", "weight",
+    "gender", "location", "venue", "method", "mode", "option", "options",
+    "reason", "result", "results", "item", "items", "list", "group", "team",
+    "class", "version", "language", "brand", "model", "size", "color",
+    "quantity", "unit", "units", "schedule", "registration", "enrollment",
+    "history", "level_name",
+})
+
+_CJK_RE = re.compile(r"[\u4e00-\u9fff]")
+
+
+def _appears_as_instance(instance: str, text: str) -> bool:
+    """实例名是否确实出现在事实文本中（空白不敏感、大小写不敏感）。
+
+    - 含中日韩字符 → 直接按子串判定（这些文字没有大小写线索，中文场景的关键）；
+    - 拉丁字母 → 去空白后按子串判定（`psychology101` 匹配 `Psychology 101`）。
+    """
+    if not instance or not text:
+        return False
+    if _CJK_RE.search(instance):
+        return instance in text
+    compact = instance.replace(" ", "").lower()
+    hay = re.sub(r"\s+", "", text).lower()
+    return bool(compact) and compact in hay
 
 
 def _instance_from_text(text: str) -> Optional[str]:
@@ -226,12 +300,16 @@ def normalize_key(
 
     # D4-2 v2 P3：key 形如 `<多值属性>_<实例名>` → 剥出实例名，属性归到 `<多值属性>`
     # （必须先于 alias 查询：alias 表不认识带实例后缀的 key；长前缀优先防误吞）
+    # 护栏：`bare` 本身若是已知多值属性（如 `course_registration`）→ 不剥离，
+    # 否则会被更短的 `course_` 前缀吞掉后半段。
     instance_hint: Optional[str] = None
-    for _attr in _MULTI_VALUED_ATTRS_BY_CATEGORY.get(category, ()):
-        inst = _instance_from_key(bare, _attr)
-        if inst:
-            bare, instance_hint = _attr, inst
-            break
+    _known_attrs = _MULTI_VALUED_ATTRS_BY_CATEGORY.get(category, ())
+    if bare not in _known_attrs:
+        for _attr in _known_attrs:
+            inst = _instance_from_key(bare, _attr, f"{fact or ''} {value or ''}")
+            if inst:
+                bare, instance_hint = _attr, inst
+                break
 
     canonical = _CANONICAL_ALIASES.get((category, bare))
     if canonical is None:
@@ -288,10 +366,11 @@ def resolve_entity(
         return f"{_ENTITY_KIND_ID}:{m.group(1)}"
 
     # P3 / P2：仅多值属性允许按实例切分（安全阀）
-    if attribute and attribute_policy(category, attribute) == POLICY_MULTI_VALUED:
+    base = _policy_base(category, attribute)
+    if base and attribute_policy(category, base) == POLICY_MULTI_VALUED:
         inst = instance or _instance_from_text(text)
         if inst:
-            return _instance_entity(attribute, inst)
+            return _instance_entity(base, inst)
 
     return SELF_ENTITY
 

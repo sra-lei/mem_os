@@ -98,6 +98,60 @@ def test_p3_bare_attribute_has_no_instance():
 
 
 # --------------------------------------------------------------------------- #
+#  回归护栏：复合属性名不得被误当实例名（2026-09-12 三用例实测出的三处垃圾实体）
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize(
+    "category,key,fact",
+    [
+        # 实测：曾产出 DRUG:supply
+        ("health", "medication_supply", "User has about two weeks' worth of medication left"),
+        # 实测：曾产出 ACCT:balance（P3a 也抽不到 → 应回落 SELF）
+        ("finance", "investment_account_balance", "User has about $285,000 in a 401k"),
+        # 实测：曾产出 COURSE:registration（`course_registration` 本身就在白名单里）
+        (
+            "education",
+            "course_registration",
+            "User is registered for Psychology 101 with Professor Williams, section 03",
+        ),
+    ],
+)
+def test_p3_compound_attribute_is_not_stripped(category, key, fact):
+    """剩余段在事实文本里找不到 → 判定为复合属性名，不剥离（零词表护栏）。"""
+    nk = _sig(category, key, fact)
+    suffix = key.split("_", 1)[1]
+    assert suffix not in nk.entity_ref.lower()
+
+
+def test_p3_positive_guard_keeps_real_instance():
+    """反面对照：实例名确实出现在文本中 → 正常剥离。"""
+    nk = _sig("health", "medication_lisinopril", "User takes Lisinopril 10 milligrams once daily")
+    assert nk.entity_ref == "DRUG:lisinopril"
+    assert nk.attribute == "medication"
+
+
+def test_p3_comes_before_p3a_when_suffix_is_a_real_instance():
+    """`credit_card_balance` + "Amex … balance"：balance 是小写限定词 → P3 被挡，
+    由 P3a 正确抽出 Amex（实测曾误产出 CARD:balance）。"""
+    nk = _sig("finance", "credit_card_balance", "User's Amex has about $1,100 balance")
+    assert nk.entity_ref == "CARD:amex"
+
+    # 反面对照：同一限定词在小写文本里出现 → 不得成为实体
+    nk2 = _sig("finance", "credit_card_balance", "User's balance is $1,100")
+    assert nk2.entity_ref == SELF_ENTITY
+
+
+def test_p3a_takes_over_when_p3_blocked():
+    """P3 被护栏挡下后，P3a 专名抽取接管（11 房贷实测路径）。"""
+    nk = _sig(
+        "finance", "investment_account_balance",
+        "User has a Vanguard brokerage account with about $125,000",
+    )
+    assert nk.entity_ref == "ACCT:vanguard"
+    nk2 = _sig("finance", "credit_card_balance", "User has a Visa credit card with a $2,300 balance")
+    assert nk2.entity_ref == "CARD:visa"
+
+
+# --------------------------------------------------------------------------- #
 #  P2：专名抽取（仅多值属性，恰好一个才采用）
 # --------------------------------------------------------------------------- #
 def test_p2_single_proper_noun_becomes_instance():
