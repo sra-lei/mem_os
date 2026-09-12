@@ -1,10 +1,13 @@
 # D4 方案：实体归属与 as-of 版本裁决
 
-> 状态：**D4-1/D4-3 已实施，D4-4 已回放验证**（2026-09-09 起）：收敛签名已升级为
-> `(entity_ref, attribute, lifecycle)`（`extractor/normalize.py` 的 `normalize_key` +
+> 状态：**D4-0/1/3 已实施，D4-4 已回放验证**；**D4-2「实体维度」已独立成册并落地 v1**
+> （2026-09-12，见 [`方案-D4-2-实体解析器.md`](方案-D4-2-实体解析器.md)——形式化线索 + 多值属性 + 实例实体）；
+> D4-1.5（提取期 attribute 锚定）与 D4-5（全量复测）待做。收敛签名已升级为
+> `(entity_ref, attribute, lifecycle)`（`extractor/utils/normalize.py` 的 `normalize_key` +
 > `core/services/memory_versioning.py` 的 `plan_versioning`）；投影只镜像 SQLite 回读的
-> lifecycle=current 赢家、投影 key=canonical attribute；旧的批内 `_converge_by_key` 已删除
-> （2026-09-10，commit 8f82058）。D4-2 实体解析仍为 SELF 占位，D4-5 全量复测待跑。
+> lifecycle=current 赢家、投影 key=`projection_key(entity, attribute)`；旧的批内 `_converge_by_key`
+> 已删除（2026-09-10，commit 8f82058）。
+> **本文只负责「签名模型 / as-of 裁决 / 投影」主干；实体解析的细则一律进 D4-2 分册，避免重复。**
 > 关联：layer2=5/20 最大结构性瓶颈；`docs/方案/方案-记忆更新收敛与Milvus投影一致性.md`（批内收敛已做，跨会话裁决=本方案）
 > 红线：**裁决逻辑必须是确定性系统代码，不依赖 LLM 思考能力**（用户 2026-09-09 明确要求）
 
