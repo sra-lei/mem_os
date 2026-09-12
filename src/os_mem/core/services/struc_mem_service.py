@@ -5,6 +5,7 @@ from datetime import datetime
 
 from sqlmodel import select
 
+from os_mem.core.retrieve import get_retriever
 from os_mem.core.services.conv_meta_service import (
     STATUS_EXTRACTING,
     STATUS_SAVING_SQLITE,
@@ -341,47 +342,18 @@ class StructuredMemService:
     ) -> list[StructuredMemory]:
         """根据 query 检索结构化记忆（混合检索 + 元数据过滤）。
 
-        检索注入层（见 os_mem.core.retrieve.strategies，2026-09-12 简化）：
-        - 宽窗取回：候选直接放到覆盖全库（RETRIEVAL_WIDE_FETCH_K），不再
-          「放大再收敛」——旧的 top_k × 3 放大系数已废除；
-        - 注入窗口由**字符预算**（INJECTION_CHAR_BUDGET）控制，不再是 top_k 条数；
-        - 链上只剩 1 号噪声闸门（形式干扰句），2/3/4/5 号已移出链（实测 no-op /
-          配额失去对象），详见 docs/方案/方案-检索注入简化-宽窗替代策略链.md。
+        检索执行与注入装配已下沉到 `os_mem.core.retrieve`
+        （`Retrieval` / `get_retriever`）：
+        - 宽窗取回：候选直接放到覆盖全库（`RETRIEVAL_WIDE_FETCH_K`），不再
+          「放大再收敛」——旧的 `RETRIEVAL_FETCH_MULTIPLIER` 已废除；
+        - 注入窗口由**字符预算**（`INJECTION_CHAR_BUDGET`）控制，不再是 top_k 条数；
+        - **策略链已清空**（`STRATEGY_CHAIN == []`）：2/3/4/5 号实测 no-op / 配额失去
+          对象，1 号在 5 轮端到端里未显示收益 → 只保留「结构化在前 + 预算内全入」。
+        - 详见 docs/方案/方案-检索注入简化-宽窗替代策略链.md §六-续。
         """
-        from os_mem.core.retrieve import (
-            RETRIEVAL_WIDE_FETCH_K,
-            apply_retrieval_strategies,
-        )
-        from os_mem.infra.p2check import mask_pii
+        # 检索 + 装配 + 预算截断（返回即可直接注入）
+        hits = _retriever.retrieve(query, top_k, user_id)
 
-        # 宽窗取回：单 case 库内约 46 行，256 足以覆盖全库
-        fetch_k = max(top_k, RETRIEVAL_WIDE_FETCH_K)
-        masked_query = mask_pii(query)
-        query_embedding: list[float] = []
-        try:
-            query_embedding = self.vectorizer.embed(query)
-        except Exception as e:
-            _logger.error(f'query 向量化失败 user={user_id} query={masked_query}: {e}')
-
-        hits = (
-            self.vector_store.search(
-                query_embedding,
-                query_text=query,
-                top_k=fetch_k,
-                user_id=user_id,
-            )
-            or []
-        )
-        if not hits:
-            _logger.warning(f'struct 检索无命中 user={user_id} query={masked_query}')
-
-        # 检索注入后处理：噪声闸门 + 结构化优先 + 字符预算截断
-        hits = apply_retrieval_strategies(query, hits, top_k)
-
-        _logger.info(
-            f'  获取结构化记忆: {len(hits)} 条'
-            f'（fetch={fetch_k} 预算制）'
-        )
         memories: list[StructuredMemory] = []
         allowed = {'id', 'fact', 'category', 'key', 'value', 'user_id', 'updated_at'}
         for hit in hits:
@@ -394,6 +366,7 @@ class StructuredMemService:
 _llm_client = get_llm_client()
 _vectorizer = get_vectorizer()
 _vector_store = get_memory_vector_store()
+_retriever = get_retriever()
 _structured_mem_service = None
 
 
@@ -407,13 +380,15 @@ def get_structured_mem_service() -> StructuredMemService:
 
 
 # ========================================================================= #
-#  检索注入链（固定加载，无开关）—— 实现唯一控制点在
-#  os_mem/core/retrieve/strategies/base_strategy.py 的 STRATEGY_CHAIN。
-#  2026-09-12 简化：链上只剩 1 号 VerbatimNoiseFilter（形式干扰句闸门）；
-#  StructuredKeyDedup / RedundantVerbatimFilter / VerbatimQuota / StructuredQuota
-#  已移出链（实测 no-op / 配额失去对象），类暂留待对照确认后删除。
+#  检索链路已迁至 os_mem/core/retrieve/：
+#  - 检索执行 + 注入装配：retrieve/strategies_retriever.py（Retrieval / get_retriever，
+#    宽窗取回 + 结构化优先 + 字符预算）；
+#  - 策略组件（协议 + 各策略类，当前不在链路中）：retrieve/strategies/。
+#  2026-09-12 简化：STRATEGY_CHAIN 清空——2/3/4/5 号实测 no-op / 配额失去对象，
+#  1 号在 5 轮端到端里未显示收益（依据：无证据支持 + 更简单，非"已证明有害"）。
 #  历史验证（2026-09-07，layer1 struct/assert/top_k=15）：
 #  5 段链 v1 区分准入 11/20 → 14/20（run_c887cb12 → run_c087f9ee），覆盖漏 30→18 ——
 #  该收益来自「固定窄窗内把 verbatim 载体放进窗口」，宽窗后自动兑现。
+#  端到端对照（2026-09-12）：现链 13/20 → 宽窗 16~19/20（见方案 §六-续）。
 #  基线对比不靠运行时开关：用旧版本代码跑同 run，或对 run 落库结果对照。
 # ========================================================================= #

@@ -1,28 +1,32 @@
-"""检索注入单测（os_mem/core/retrieve/strategies/）。
+"""检索注入单测（装配在 os_mem/core/retrieve/strategies_retriever.py）。
 
-注入链（2026-09-12 简化后）：**链已清空** —— 宽窗取回（RETRIEVAL_WIDE_FETCH_K）
-+ 终装配（结构化在前、verbatim 补位）+ 字符预算截断（INJECTION_CHAR_BUDGET）。
+2026-09-12 简化后：**链已清空**（`STRATEGY_CHAIN == []`）—— 检索侧只做
+宽窗取回（`RETRIEVAL_WIDE_FETCH_K`）+ 终装配（结构化在前、verbatim 补位）
++ 字符预算截断（`INJECTION_CHAR_BUDGET`）。
 
-1/2/3/4/5 号已全部移出链（实测 no-op / 配额失去对象 / 删整句有害，见
-docs/方案/方案-检索注入简化-宽窗替代策略链.md §1.4 与 §六-续），类与组件单测
-暂留，待 ≥2 轮确认后随模块删除。
+1/2/3/4/5 号已全部移出链：2/3 号实测 no-op、4/5 号配额失去对象、1 号在 5 轮
+端到端里未显示收益（带闸门 16/20 落在零闸门 16~19 波动区间内，依据是"无证据
+支持 + 更简单"）。各策略类与组件单测暂留 `strategies/` 包，待更多轮次或 layer2
+验证后随模块删除。见 docs/方案/方案-检索注入简化-宽窗替代策略链.md §六-续。
 
 覆盖：
 - 组件级：1/2/3/4/5 号各自单一职责仍成立（噪声判定/去重/冗余剔除/双配额）
-- 链级（apply_retrieval_strategies）：零闸门 + 结构化优先 + 预算内全入
+- 链级（apply_retrieval_strategies）：零闸门 + 结构化优先 + 预算内全入 + 预算截断
 
 不依赖真实 Milvus / LLM / 存储 —— 纯函数输入输出。
 """
 from __future__ import annotations
 
-from os_mem.core.retrieve.strategies import (
+from os_mem.core.retrieve import (
     STRATEGY_CHAIN,
+    apply_retrieval_strategies,
+)
+from os_mem.core.retrieve.strategies import (
     RedundantVerbatimFilter,
     StructuredKeyDedup,
     StructuredQuota,
     VerbatimNoiseFilter,
     VerbatimQuota,
-    apply_retrieval_strategies,
 )
 
 
@@ -283,4 +287,55 @@ class TestStrategyChain:
         # 预算充裕：全入
         out2 = apply_retrieval_strategies('q', hits, top_k=3, budget_chars=10_000)
         assert len(out2) == 3
+
+
+# ------------------------------------------------------------------ #
+#  检索执行器接线（回归：Retrieval.retrieve 必须"宽窗取回 + 装配 + 预算"）
+# ------------------------------------------------------------------ #
+class TestRetrievalWiring:
+    """2026-09-12 重构曾把 `apply_retrieval_strategies` 从检索链路里漏掉
+    （`Retrieval.retrieve` 只返回原始 hits）→ 结构化优先与预算护栏双双失效。
+    本用例用假 vectorizer/store 锁住接线。"""
+
+    def test_retrieve_uses_wide_fetch_and_assembles(self) -> None:
+        from os_mem.core.retrieve import RETRIEVAL_WIDE_FETCH_K, Retrieval
+
+        class _FakeVectorizer:
+            def embed(self, text: str) -> list[float]:
+                return [0.0] * 4
+
+        class _FakeStore:
+            def __init__(self) -> None:
+                self.fetch_calls: list[int] = []
+
+            def search(self, vec, query_text=None, top_k=None, user_id=None):
+                self.fetch_calls.append(top_k)
+                # 故意把 verbatim 排在前面，检验装配是否把结构化提到前面
+                return [
+                    _vb('Traditional IRA has $127,845 in Fidelity.'),
+                    _hit('用户地址 Maple St', 'contact', 'address'),
+                ]
+
+        store = _FakeStore()
+        out = Retrieval(_FakeVectorizer(), store).retrieve('q', 3, 'u1')
+
+        assert store.fetch_calls == [RETRIEVAL_WIDE_FETCH_K]  # 宽窗，而非 top_k=3
+        assert len(out) == 2
+        assert out[0]['key'] == 'address'  # 结构化在前
+        assert out[1]['key'].startswith('verbatim_')
+
+    def test_retrieve_trims_by_budget(self) -> None:
+        from os_mem.core.retrieve import Retrieval, trim_to_budget
+
+        class _FakeVectorizer:
+            def embed(self, text: str) -> list[float]:
+                return [0.0] * 4
+
+        class _FakeStore:
+            def search(self, vec, query_text=None, top_k=None, user_id=None):
+                return [_hit('X' * 200, 'finance', f'k{i}') for i in range(3)]
+
+        out = Retrieval(_FakeVectorizer(), _FakeStore()).retrieve('q', 3, 'u1')
+        assert len(out) == 3  # 默认预算（12k 字符）下全入
+        assert len(trim_to_budget(out, budget_chars=250)) == 1  # 预算生效
 
