@@ -23,8 +23,10 @@ from loguru import logger  # noqa: E402
 
 logger.remove()
 
-from os_mem.extractor.regular_extractor import RegularExtractor  # noqa: E402
-from os_mem.extractor.utils.token_utils import fact_tokens  # noqa: E402
+from os_mem.core.extract.extractor.regular_extractor import (
+    RegularExtractor,  # noqa: E402
+)
+from os_mem.core.extract.utils.token_utils import fact_tokens  # noqa: E402
 
 DB = ROOT / "src/os_mem/data/memories.db"
 prefix = sys.argv[1] if len(sys.argv) > 1 else "layer1"

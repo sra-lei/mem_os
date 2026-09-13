@@ -12,7 +12,7 @@
 三层归一防线中的 L2（确定性入库归一）。alias 词表刻意保守——只收已实测确认的
 同义簇，拿不准的不归一（保留独立行=旧行为，不会更差）；泛化交 L3 离线聚类。
 
-归一结果数据类 ``NormalizedKey`` 统一放 ``extractor/model/models.py``（提取域
+归一结果数据类 ``NormalizedKey`` 统一放 ``core/extract/model/models.py``（提取域
 数据类单一存放点）；本模块只放归一函数/词表/生命周期常量。
 """
 from __future__ import annotations
@@ -20,7 +20,7 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-from os_mem.extractor.model.models import NormalizedKey
+from os_mem.core.extract.model import NormalizedKey
 
 # 缺省实体：用户本人（D4-2 前所有事实归 SELF）
 SELF_ENTITY = "SELF"

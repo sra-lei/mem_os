@@ -16,13 +16,13 @@ import time
 
 import yaml
 
-from os_mem.extractor.callers.deepseek_caller import (
-    build_extract_complete,
-    build_repair_messages,
+from os_mem.core.extract.callers.deepseek_caller import (
+    REPAIR_PROMPT,
+    build_caller,
 )
-from os_mem.extractor.fact_extractor import FactExtractor
-from os_mem.extractor.regular_extractor import _NUMERIC_TOKENS
-from os_mem.extractor.utils.token_utils import fact_tokens
+from os_mem.core.extract.extractor.fact_extractor import FactExtractor
+from os_mem.core.extract.extractor.regular_extractor import _NUMERIC_TOKENS
+from os_mem.core.extract.utils.token_utils import fact_tokens
 from os_mem.infra.llm import get_llm_client
 from os_mem.vocab import render_categories_section
 
@@ -103,15 +103,16 @@ CANDIDATE_V15_SYSTEM = """你是一个信息提取助手，从对话中提取值
 
 
 class CandidateComplete:
-    """候选 prompt 的 complete 适配（outcome + repair，与线上 _ExtractComplete 同构）。"""
+    """候选 prompt 的 complete 适配（outcome + repair，与线上 DeepSeekExtractionCaller 同构）。"""
 
     def __init__(self, client, system_text: str = CANDIDATE_V15_SYSTEM) -> None:
         self._client = client
         self._response_format = {"type": "json_object"}
         from os_mem.configs.mem_settings import memory_settings
 
+        self._max_facts = memory_settings.DEEPSEEK_EXTRACT_MAX_FACTS
         self._system = system_text.replace(
-            "{max_facts}", str(memory_settings.DEEPSEEK_EXTRACT_MAX_FACTS)
+            "{max_facts}", str(self._max_facts)
         ).replace("{categories_section}", render_categories_section())
 
     def _messages(self, dialog_text: str) -> list[dict[str, str]]:
@@ -129,8 +130,17 @@ class CandidateComplete:
         return self.outcome(dialog_text).content
 
     def repair(self, partial_json: str) -> str:
+        system = (
+            REPAIR_PROMPT
+            + f"\n\n（注意：完整输出仍受 {self._max_facts} 条事实上限约束，"
+            + "若原输出已接近上限，优先保留前面更重要的条目。）"
+        )
+        repair_messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": f"待修复的 JSON：\n\n{partial_json}"},
+        ]
         return self._client.chat(
-            build_repair_messages(partial_json), response_format=self._response_format
+            repair_messages, response_format=self._response_format
         )
 
 
@@ -216,7 +226,6 @@ def run_arm(session_text: str, complete_factory, label: str) -> dict:
 
 
 def main() -> None:
-    client = get_llm_client()
     # 变体：compare = 三臂（旧/v1/v15）同 5 段；v1/v15 = 单臂候选
     # 注意：client 已关思考（DEEPSEEK_THINKING=False）——v1/v1.5 早期判废数据
     # 是思考模式 ON 下测的（思考劣化输出污染了 prompt 文本对比），需关思考重测
@@ -224,7 +233,7 @@ def main() -> None:
     compare = variant == "compare"
     if compare:
         factories = {
-            "old": build_extract_complete,
+            "old": build_caller,
             "v1": lambda c: CandidateComplete(c, CANDIDATE_SYSTEM),  # noqa: E731
             "v15": lambda c: CandidateComplete(c, CANDIDATE_V15_SYSTEM),  # noqa: E731
         }

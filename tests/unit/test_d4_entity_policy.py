@@ -9,18 +9,18 @@ from __future__ import annotations
 
 import pytest
 
-from os_mem.core.services.memory_versioning import (
-    IncomingFact,
-    collapse_same_signature,
-    plan_versioning,
-)
-from os_mem.extractor.utils.normalize import (
+from os_mem.core.extract.utils.normalize import (
     POLICY_FUNCTIONAL,
     POLICY_MULTI_VALUED,
     SELF_ENTITY,
     attribute_policy,
     normalize_key,
     projection_key,
+)
+from os_mem.core.services.memory_versioning import (
+    IncomingFact,
+    collapse_same_signature,
+    plan_versioning,
 )
 from os_mem.models.mem_models import MemoryFact
 

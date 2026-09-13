@@ -6,7 +6,7 @@
   实现：client 创建 + 通用 ``chat`` / ``chat_outcome``。
 - 任务侧内容（如事实提取的 ``SYSTEM_PROMPT``、消息拼装、业务级重试/解析）
   一律不在本模块内 —— 事实提取的 prompt 与适配见
-  ``os_mem.extractor.callers.deepseek_caller``（把任意满足 ``ChatClient`` 的实例
+  ``os_mem.core.extract.callers.deepseek_caller``（把任意满足 ``ChatClient`` 的实例
   适配成提取链路需要的 ``complete(dialog_text)`` 回调）。
 
 截断语义（2026-09-09 方案：事实提取鲁棒性与成本优化）：
@@ -35,6 +35,7 @@ from os_mem.infra.logger import get_logger
 
 _logger = get_logger('os_mem.infra.llm.deepseek')
 
+_CLIENT_NAME = 'deepseek'
 
 class DeepSeekClient:
     """DeepSeek（OpenAI 兼容）客户端：``ChatClient`` 契约的实现。
@@ -47,6 +48,10 @@ class DeepSeekClient:
             api_key=memory_settings.DEEPSEEK_API_KEY,
             base_url=memory_settings.DEEPSEEK_BASE_URL,
         )
+
+    def client_name(self) -> str:
+        """返回 client 名称（用于日志、遥测、降级策略等）。"""
+        return _CLIENT_NAME
 
     def chat(
         self,

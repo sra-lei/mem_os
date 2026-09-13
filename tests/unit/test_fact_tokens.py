@@ -4,7 +4,7 @@
 （百分比、时刻、日期都是有效用户信息，必须可表达、可覆盖比对）。
 eval judge 在 tests/eval/judge 下持有自己的独立副本。
 """
-from os_mem.extractor.utils.token_utils import fact_tokens, norm_token
+from os_mem.core.extract.utils.token_utils import fact_tokens, norm_token
 
 
 class TestFactTokens:

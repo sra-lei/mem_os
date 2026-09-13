@@ -11,13 +11,13 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from os_mem.core.extract.extractor.regular_extractor import RegularExtractor
+from os_mem.core.extract.utils.normalize import normalize_key
 from os_mem.core.services.memory_versioning import (
     IncomingFact,
     collapse_same_signature,
     plan_versioning,
 )
-from os_mem.extractor.regular_extractor import RegularExtractor
-from os_mem.extractor.utils.normalize import normalize_key
 from os_mem.models.mem_models import MemoryFact
 
 

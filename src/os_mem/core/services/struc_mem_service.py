@@ -5,6 +5,11 @@ from datetime import datetime
 
 from sqlmodel import select
 
+from os_mem.core.extract.callers.base_caller import build_extraction_caller
+from os_mem.core.extract.extractor.fact_extractor import FactExtractor
+from os_mem.core.extract.extractor.regular_extractor import RegularExtractor
+from os_mem.core.extract.utils.extract_utils import dedup_facts
+from os_mem.core.extract.utils.normalize import projection_key
 from os_mem.core.retrieve import get_retriever
 from os_mem.core.services.conv_meta_service import (
     STATUS_EXTRACTING,
@@ -16,12 +21,6 @@ from os_mem.core.services.memory_versioning import (
     current_attribute_touches,
 )
 from os_mem.entries.mem_models import StructuredMemory
-from os_mem.extractor.callers.framework import build_extraction_caller
-from os_mem.extractor.fact_extractor import FactExtractor
-from os_mem.extractor.llm_util import build_default_profile
-from os_mem.extractor.regular_extractor import RegularExtractor
-from os_mem.extractor.utils.extract_utils import dedup_facts
-from os_mem.extractor.utils.normalize import projection_key
 from os_mem.infra.llm import ChatClient, get_llm_client
 from os_mem.infra.logger import get_logger
 from os_mem.infra.storage import (
@@ -37,7 +36,7 @@ from os_mem.models.mem_models import MemoryFact
 _logger = get_logger('os_mem.struc_mem')
 
 # 事实提取执行器（校验/分段/去重/编排；数字兜底/R1 剪枝在 RegularExtractor）——
-# 提取域见 os_mem/extractor/
+# 提取域见 os_mem/core/extract/
 _extractor = FactExtractor()
 
 
@@ -49,12 +48,11 @@ class StructuredMemService:
         vector_store: MemoryVectorStore,
     ) -> None:
         self.client = client
-        # provider 自愈提取 caller（prompt/恢复策略见 os_mem/extractor/callers、
+        # provider 自愈提取 caller（prompt/恢复策略见 os_mem/core/extract/callers、
         # deepseek_caller；validate 由 FactExtractor 注入——任务侧只见干净 extract 契约）。
-        # 画像：build_default_profile() 从 settings 现值固化（max_facts 渲染进
+        # 调参：caller 直接读 settings 现值（max_facts 渲染进
         # prompt、chunk_caps 供任务层分段）。
-        self._profile = build_default_profile()
-        self._caller = build_extraction_caller(client, profile=self._profile)
+        self._caller = build_extraction_caller(client)
         self.vectorizer = vectorizer
         self.vector_store = vector_store
 
@@ -186,7 +184,7 @@ class StructuredMemService:
         on_stage：可选阶段回调 —— 每个处理阶段「开始前」调用一次，参数为目标状态名
         （EXTRACTING / SAVING_SQLITE / SAVING_VECTOR），由调用方（StructProvider）
         接入会话处理状态机；为 None 时保持旧行为（不追踪）。
-        事实抽取逻辑见 ``os_mem.extractor.fact_extractor.FactExtractor``。
+        事实抽取逻辑见 ``os_mem.core.extract.extractor.fact_extractor.FactExtractor``。
 
         投影收敛（A 批，见 docs/方案/方案-记忆更新收敛与Milvus投影一致性.md）：
         Milvus 是投影（SQLite 为权威源）；写入前先把本批 facts 按 (category, key)
@@ -205,7 +203,6 @@ class StructuredMemService:
         llm_facts: list[MemoryFact] = _extractor.extract_structured_facts(
             dialog_text,
             caller=self._caller,
-            chunk_caps=self._profile.chunk_caps,
         )
         t_extract = time.perf_counter()
         # 提取账（观测/校准/成本记账）：本次会话的调用·截断·repair·降级·token 统计

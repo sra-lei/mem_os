@@ -15,8 +15,8 @@ ORM 表（越权、绕过领域规则）。本模块是 os_mem 对外的**管理
 模块 import 无重副作用：顶层不构造 LLM / Milvus client（投影对象 lazy，
 见 ``MemAdminService._projection``），import 链只经过 os_mem/__init__
 （settings + logger）、infra.storage（类引用，不建立连接）与
-extractor.utils.normalize（纯函数模块：D4 收敛键单一来源，extractor 包的
-``__init__`` 是纯文档、不 re-export 任何执行器）——三者都不建连。
+core.extract.utils.normalize（纯函数模块：D4 收敛键单一来源，core/extract 包的
+``__init__`` 仅 re-export 无重副作用的 ExtractionCore）——都不建连。
 """
 from __future__ import annotations
 
@@ -29,15 +29,15 @@ from sqlalchemy import delete as sa_delete
 from sqlalchemy import update as sa_update
 from sqlmodel import Session, func, or_, select
 
+from os_mem.core.extract.utils.normalize import (
+    LIFECYCLE_CURRENT,
+    projection_key,
+)
 from os_mem.entries.mem_models import (
     ConversationMeta,
     FactCategory,
     Message,
     StructuredMemory,
-)
-from os_mem.extractor.utils.normalize import (
-    LIFECYCLE_CURRENT,
-    projection_key,
 )
 
 # ========================================================================== #

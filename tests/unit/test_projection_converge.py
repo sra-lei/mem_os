@@ -21,7 +21,7 @@ import pytest
 #  verbatim 兜底句 key：内容指纹（B 批）
 # ------------------------------------------------------------------ #
 def test_verbatim_fingerprint_same_sentence_same_key() -> None:
-    from os_mem.extractor.regular_extractor import RegularExtractor
+    from os_mem.core.extract.extractor.regular_extractor import RegularExtractor
 
     dialog = '{"role":"user","content":"My claim number is CLM-2024-894327."}'
     f1 = RegularExtractor.fallback_numeric_facts(dialog)
@@ -32,7 +32,7 @@ def test_verbatim_fingerprint_same_sentence_same_key() -> None:
 
 
 def test_verbatim_fingerprint_distinct_sentences_distinct_keys() -> None:
-    from os_mem.extractor.regular_extractor import RegularExtractor
+    from os_mem.core.extract.extractor.regular_extractor import RegularExtractor
 
     dialog = (
         '{"role":"user","content":"Claim CLM-2024-894327."}\n'
@@ -46,7 +46,7 @@ def test_verbatim_fingerprint_distinct_sentences_distinct_keys() -> None:
 
 def test_verbatim_no_shared_aggregate_key() -> None:
     """回归：不得再出现聚合的 'verbatim_record' 共享 key。"""
-    from os_mem.extractor.regular_extractor import RegularExtractor
+    from os_mem.core.extract.extractor.regular_extractor import RegularExtractor
 
     dialog = (
         '{"role":"assistant","content":"Blood work $285 and X-ray $420."}\n'

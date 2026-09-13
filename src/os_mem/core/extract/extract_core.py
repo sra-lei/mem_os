@@ -2,7 +2,7 @@
 
 本模块只承载「怎么跟某个模型要到合法结果」的恢复循环骨架——具体能力
 （generate / repair_fn / dedup_fn / split_fn / max_split_depth）由构造注入，
-供各 provider 内部策略拼装（见 ``callers/framework.py`` 与
+供各 provider 内部策略拼装（见 ``callers/base_caller.py`` 与
 ``callers/deepseek_caller.py``）。
 """
 
@@ -10,14 +10,14 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from os_mem.extractor.utils.extract_utils import (
-    MAX_TRUNC_SPLIT_DEPTH,
+from os_mem.core.extract.utils.extract_utils import (
     empty_extraction_stats,
 )
 from os_mem.infra.logger import get_logger
 
 _logger = get_logger('os_mem.extractor.extraction_core')
 
+MAX_TRUNC_SPLIT_DEPTH = 1
 
 class ExtractionCore:
     """单段提取的模型恢复循环。
@@ -53,13 +53,12 @@ class ExtractionCore:
         repair_fn: Callable[[str], str] | None = None,
         dedup_fn: Callable[[list], list] | None = None,
         split_fn: Callable[[str], tuple[str, str] | None] | None = None,
-        max_split_depth: int = MAX_TRUNC_SPLIT_DEPTH,
     ) -> None:
         self._generate = generate
         self._repair_fn = repair_fn
         self._dedup_fn = dedup_fn
         self._split_fn = split_fn
-        self._max_split_depth = max_split_depth
+        self._max_split_depth = MAX_TRUNC_SPLIT_DEPTH
 
     def extract(
         self,

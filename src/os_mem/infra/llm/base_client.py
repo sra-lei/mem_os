@@ -4,7 +4,7 @@
 - ``os_mem.infra.llm.deepseek_client.DeepSeekClient`` 是当前
   DeepSeek（OpenAI 兼容）实现；
 - 未来接入 LLM 网关时提供另一个满足该契约的实现即可，
-  业务侧（``os_mem.extractor.callers.deepseek_caller``、``core/services/struc_mem_service``）无需改动。
+  业务侧（``os_mem.core.extract.callers.deepseek_caller``、``core/services/struc_mem_service``）无需改动。
 - 实例化与多实现降级（``LLM_PROVIDERS`` 配置、failover）入口见
   ``os_mem.infra.llm.factory``。
 
@@ -37,7 +37,10 @@ class ChatOutcome:
 
 class ChatClient(Protocol):
     """通用 LLM chat 能力契约 —— 网关可替换实现只需满足该接口。"""
-
+    def client_name(self) -> str:
+        """返回 client 名称（用于日志、遥测、降级策略等）。"""
+        ...
+        
     def chat(
         self,
         messages: list[Message],

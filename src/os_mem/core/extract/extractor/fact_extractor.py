@@ -1,17 +1,17 @@
 """事实提取执行器（FactExtractor）—— 结构化记忆提取链路的确定性内聚封装。
 
-归属：``os_mem.extractor`` 记忆提取域。定位：被编排的**领域执行器**——不属
+归属：``os_mem.core.extract`` 记忆提取域。定位：被编排的**领域执行器**——不属
 utils 小工具（它是提取链路核心），也不属 core 业务编排（编排在
 core/services/struc_mem_service，存储/网络副作用为零，LLM 通过注入的
 ``complete(text) -> raw_json`` 回调（旧路径，测试/AB 脚本用）或 provider 自愈
-caller（``extract(dialog_text, *, validate)`` 干净契约，见 callers/framework.py；
+caller（``extract(dialog_text, *, validate)`` 干净契约，见 callers/base_caller.py；
 恢复策略=provider 内部代码）使用，便于单测与替换）：
 
 - ``validate_response``   ：LLM 原始输出清洗（markdown 围栏/包装格式）与校验
   （分类白名单、confidence 边界、非法 JSON → 空列表触发重试）
 - ``chunk_dialog``        ：长对话按消息分段 + 段间冗余重叠（边界信息不切丢）
 - ``extract_chunk``       ：单段提取（薄委托兼容层——repair 续写/截断切段/整段
-  重试等恢复策略收敛于 ``extraction_core.ExtractionCore``）
+  重试等恢复策略收敛于 ``extract_core.ExtractionCore``）
 - ``extract_structured_facts``：分段编排（短对话单次 / 长对话并行）+ 全失败降级
   （可注入 provider 自愈 caller：每段走 ``caller.extract(dialog_text, *, validate)``）
 - 去重等共享纯函数收敛在 ``utils.extract_utils``（``dedup_facts`` 为模块级
@@ -37,14 +37,13 @@ from typing import Any
 from pydantic import ValidationError
 
 from os_mem.configs.mem_settings import memory_settings
-from os_mem.extractor.extraction_core import ExtractionCore
-from os_mem.extractor.model.models import ChunkCaps
-from os_mem.extractor.utils.extract_utils import (
+from os_mem.core.extract import ExtractionCore
+from os_mem.core.extract.model.models import ChunkCaps
+from os_mem.core.extract.utils.extract_utils import (
     EXTRACTION_STATS_KEYS,
-    MAX_TRUNC_SPLIT_DEPTH,
     dedup_facts,
 )
-from os_mem.extractor.utils.extract_utils import (
+from os_mem.core.extract.utils.extract_utils import (
     split_text_midpoint as _split_text_midpoint,
 )
 from os_mem.infra.logger import get_logger
@@ -105,7 +104,7 @@ class FactExtractor:
         self._complete = complete
         # 提取过程统计（线程安全；供编排方按「调用前后快照差」记账，见
         # StrucMemService 提取账日志 —— 校准分段参数/成本记账用）。
-        # keys：恢复循环遥测共享自 os_mem.extractor.utils.extract_utils.EXTRACTION_STATS_KEYS
+        # keys：恢复循环遥测共享自 os_mem.core.extract.utils.extract_utils.EXTRACTION_STATS_KEYS
         # （llm_calls/trunc_empties/split_recursions/repair_calls/repair_ok +
         # in_tokens/out_tokens token 记账），degrade_rows 属任务层语义由本实例追加
         self._stats_lock = threading.Lock()
@@ -182,13 +181,17 @@ class FactExtractor:
         是硬约束，而产出需求由「事实条数 ≈ 消息数」决定——仅按字符切会漏掉
         「消息密集但每条短」的段（layer2 中长会话崩因），仅按消息切会漏掉
         「少数超长消息」；两维 OR 语义使两盲区互不穿透。
+
+        分段上限入参优先，None → memory_settings 现值（默认画像 ChunkCaps）。
         """
         max_chars = max_chars or memory_settings.DEEPSEEK_EXTRACT_MAX_CHARS
         max_msgs = (
-            max_msgs if max_msgs is not None else memory_settings.DEEPSEEK_EXTRACT_MAX_MSGS
+            max_msgs if max_msgs is not None
+            else memory_settings.DEEPSEEK_EXTRACT_MAX_MSGS
         )
         overlap = (
-            overlap if overlap is not None else memory_settings.DEEPSEEK_EXTRACT_OVERLAP
+            overlap if overlap is not None
+            else memory_settings.DEEPSEEK_EXTRACT_OVERLAP
         )
         messages = dialog_text.split('\n')
         if len(dialog_text) <= max_chars and len(messages) <= max_msgs:
@@ -229,7 +232,7 @@ class FactExtractor:
         """消息中点对半切（截断空返回的切段递归用）。
 
         少于 2 条消息或任一侧为空 → None（不可切）。
-        实现收拢于 ``os_mem.extractor.utils.extract_utils.split_text_midpoint``
+        实现收拢于 ``os_mem.core.extract.utils.extract_utils.split_text_midpoint``
         （caller 切段递归与任务侧共用同一实现，单一实现防漂移）。
         """
         return _split_text_midpoint(text)
@@ -245,11 +248,11 @@ class FactExtractor:
         .. warning::
             本方法与 ``complete`` 旧回调路径**仅供评测/测试工具使用**（单测
             fake complete、scripts/ab_extract_prompt.py），不是正式 provider
-            扩展点——新 provider 实现 ``callers.framework.ExtractionCaller``
+            扩展点——新 provider 实现 ``callers.base_caller.ExtractionCaller``
             caller 契约。
 
         恢复循环（repair 续写 / 截断对半切段 / 整段重试）收敛于
-        ``os_mem.extractor.extraction_core.ExtractionCore``。本方法保留旧签名作为兼容层：
+        ``os_mem.core.extract.extract_core.ExtractionCore``。本方法保留旧签名作为兼容层：
         把 ``complete`` 的鸭子能力（``outcome`` / ``__call__`` / ``repair``，缺哪个
         退哪个）包成低层 ``generate`` 喂给核心，并把核心返回的遥测累加进实例计数
         （stats_snapshot/stats_delta 口径不变）。纯 ``__call__`` 无 outcome/repair
@@ -262,7 +265,6 @@ class FactExtractor:
             repair_fn=getattr(complete_fn, 'repair', None),
             dedup_fn=dedup_facts,
             split_fn=self._split_text,
-            max_split_depth=MAX_TRUNC_SPLIT_DEPTH,
         )
         facts, stats = core.extract(
             text, validate=self.validate_response, retries=retries

@@ -1,17 +1,17 @@
 """提取域数据类（纯数据，无策略/行为）—— 单一存放点。
 
-归属：``os_mem.extractor`` 记忆提取域。本模块收拢提取域内各模块的数据类，
+归属：``os_mem.core.extract`` 记忆提取域。本模块收拢提取域内各模块的数据类，
 与承载行为的模块分离：
 
 - ``NormalizedKey``：D4 key 归一结果（事实身份 = 实体/规范属性/生命周期），
   归一函数本身在 ``utils/normalize.py``；
 - ``CallResult``：单段提取结果契约（facts|None + 遥测 stats），恢复循环在
-  ``extraction_core.py``；
+  ``extract_core.py``；
 - ``ChunkCaps`` / ``ModelProfile``：模型数据画像（纯数据，刻意无策略字段——
-  恢复策略随各 caller 实现走），默认画像构造在 ``llm_util.py``。
+  恢复策略随各 caller 实现走）；默认值由 caller 直接读 memory_settings。
 
 依赖方向（无环）：models → utils.token_utils（stats 默认值）/ configs.mem_settings
-（ChunkCaps.from_settings）；不反向 import callers/extraction_core/normalize/
+（ChunkCaps.from_settings）；不反向 import callers/extract_core/normalize/
 fact_extractor。
 """
 
@@ -20,7 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from os_mem.configs.mem_settings import memory_settings
-from os_mem.extractor.utils.extract_utils import empty_extraction_stats
+from os_mem.core.extract.utils.extract_utils import empty_extraction_stats
 
 
 # --------------------------------------------------------------------------- #
@@ -85,8 +85,8 @@ class ModelProfile:
     - ``caller``：provider 内自愈实现标识（策略注册点；v1 仅 'deepseek'）；
     - ``max_output_tokens`` / ``temperature``：单次调用输出预算与温度（数据）；
     - ``max_facts``：单次（每段）提取事实上限——渲染进 system/repair prompt 的
-      {max_facts} 占位（``callers.deepseek_caller.build_extract_messages`` /
-      ``build_repair_messages``）；
+      {max_facts} 占位（``callers.deepseek_caller`` 的 ``outcome()`` /
+      ``repair()`` 渲染）；
     - ``chunk_caps``：输入分段上限（任务层 ``chunk_dialog`` 取此供给）。
 
     Python dataclass 要求无默认字段在前，故必填的 ``max_output_tokens`` /

@@ -30,8 +30,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'src'))
 
+from os_mem.core.extract.utils.token_utils import fact_tokens  # noqa: E402
 from os_mem.core.retrieve.strategies import VerbatimNoiseFilter  # noqa: E402
-from os_mem.extractor.utils.token_utils import fact_tokens  # noqa: E402
 
 HEADER = '## 关于用户的长久记忆'
 MEM_DB = ROOT / 'src/os_mem/data/memories.db'

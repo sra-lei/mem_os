@@ -10,12 +10,12 @@ from pathlib import Path
 import pytest
 from sqlmodel import Session, func, select
 
-from os_mem.entries.mem_models import FactCategory
-from os_mem.extractor.callers.deepseek_caller import (
+from os_mem.core.extract.callers.deepseek_caller import (
     SYSTEM_PROMPT,
-    build_extract_messages,
+    DeepSeekExtractionCaller,
 )
-from os_mem.extractor.fact_extractor import FactExtractor
+from os_mem.core.extract.extractor.fact_extractor import FactExtractor
+from os_mem.entries.mem_models import FactCategory
 from os_mem.infra.storage.mem_storage import MemoryDatabase
 from os_mem.vocab import (
     CATEGORY_SEED,
@@ -149,13 +149,33 @@ def test_deactivate_category_affects_validation_and_prompt(tmp_db: Path) -> None
     assert "finance" not in render_categories_section()
 
 
-def test_build_extract_messages_renders_categories_section(tmp_db: Path) -> None:
+class _CapturingChatClient:
+    """记录 chat_outcome 收到的 messages 的假 client（无网络）。"""
+
+    def __init__(self) -> None:
+        self.last_messages: list[dict[str, str]] | None = None
+
+    def client_name(self) -> str:
+        return 'deepseek'
+
+    def chat_outcome(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        response_format: dict | None = None,
+    ) -> None:
+        self.last_messages = messages
+
+
+def test_caller_outcome_renders_categories_section(tmp_db: Path) -> None:
     # 模板保留占位（test_prompt_fp 依赖 {max_facts} 仍在模板）
     assert "{categories_section}" in SYSTEM_PROMPT
-    msgs = build_extract_messages("你好")
-    system = msgs[0]["content"]
+    client = _CapturingChatClient()
+    DeepSeekExtractionCaller(client).outcome("你好")
+    assert client.last_messages is not None
+    system = client.last_messages[0]["content"]
     # 渲染完成：无占位残留，双语列表出现
     assert "{categories_section}" not in system
     assert "{max_facts}" not in system
     assert "category 从以下列表选择：personal（个人）, contact（联系方式）" in system
-    assert msgs[1]["content"].startswith("请从以下对话中提取结构化事实")
+    assert client.last_messages[1]["content"].startswith("请从以下对话中提取结构化事实")

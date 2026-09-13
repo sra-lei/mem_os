@@ -1,11 +1,10 @@
-"""默认提取画像 + 观测增强（token 记账）单元测试（方案 §4 步骤 3-4）。
+"""caller 直读 settings + 观测增强（token 记账）单元测试。
 
 覆盖（不依赖真实 LLM / Milvus）：
-  - ``build_default_profile`` / ``ChunkCaps.from_settings``：默认画像 = settings 现值；
-  - ``build_extract_messages(max_facts=...)``：{max_facts} 入参优先渲染；
-  - ``DeepSeekExtractionCaller(profile=...)``：profile.max_facts 渲染进
+  - ``ChunkCaps.from_settings``：默认分段上限 = settings 现值；
+  - ``DeepSeekExtractionCaller``：settings 的 max_facts 渲染进
     system/repair prompt（fake client 捕获 messages 断言）；
-  - ``extract_structured_facts(chunk_caps=...)``：分段上限由画像 caps 供给
+  - ``extract_structured_facts(chunk_caps=...)``：分段上限由 caps 供给任务层
     （fake complete 计数断言被切多段）；
   - token 记账：恢复核心按 generate 三元组的 usage_tokens 累计 in/out
     （含截断空返回烧计入）；caller 从 outcome.usage 映射 token 数。
@@ -15,18 +14,13 @@
 """
 from __future__ import annotations
 
-from dataclasses import replace
 from types import SimpleNamespace
 
 from os_mem.configs.mem_settings import memory_settings
-from os_mem.extractor.callers.deepseek_caller import (
-    DeepSeekExtractionCaller,
-    build_extract_messages,
-)
-from os_mem.extractor.extraction_core import ExtractionCore
-from os_mem.extractor.fact_extractor import FactExtractor
-from os_mem.extractor.llm_util import build_default_profile
-from os_mem.extractor.model.models import ChunkCaps
+from os_mem.core.extract.callers.deepseek_caller import DeepSeekExtractionCaller
+from os_mem.core.extract.extract_core import ExtractionCore
+from os_mem.core.extract.extractor.fact_extractor import FactExtractor
+from os_mem.core.extract.model.models import ChunkCaps
 from os_mem.infra.llm.base_client import ChatOutcome
 
 _VALID_FACTS = (
@@ -36,18 +30,9 @@ _VALID_FACTS = (
 
 
 # ------------------------------------------------------------------ #
-#  默认画像 = settings 现值
+#  ChunkCaps：默认分段上限 = settings 现值
 # ------------------------------------------------------------------ #
-class TestDefaultProfile:
-    def test_default_profile_fields_match_settings(self) -> None:
-        p = build_default_profile()
-        assert p.provider == 'deepseek'
-        assert p.caller == 'deepseek'
-        assert p.model == memory_settings.DEEPSEEK_MODEL
-        assert p.max_output_tokens == memory_settings.DEEPSEEK_MAX_TOKENS
-        assert p.temperature == memory_settings.DEEPSEEK_TEMPERATURE
-        assert p.max_facts == memory_settings.DEEPSEEK_EXTRACT_MAX_FACTS
-
+class TestChunkCapsSettings:
     def test_chunk_caps_from_settings_matches_settings(self) -> None:
         caps = ChunkCaps.from_settings()
         assert caps.max_chars == memory_settings.DEEPSEEK_EXTRACT_MAX_CHARS
@@ -56,24 +41,7 @@ class TestDefaultProfile:
 
 
 # ------------------------------------------------------------------ #
-#  prompt 渲染：{max_facts} 入参优先
-# ------------------------------------------------------------------ #
-class TestPromptMaxFacts:
-    def _system_content(self, dialog_text: str, max_facts: int | None) -> str:
-        messages = build_extract_messages(dialog_text, max_facts=max_facts)
-        system = next(m for m in messages if m['role'] == 'system')
-        return system['content']
-
-    def test_explicit_max_facts_rendered(self) -> None:
-        assert '最多输出 42 条' in self._system_content('对话文本', max_facts=42)
-
-    def test_default_max_facts_from_settings(self) -> None:
-        default_text = self._system_content('对话文本', max_facts=None)
-        assert f'最多输出 {memory_settings.DEEPSEEK_EXTRACT_MAX_FACTS} 条' in default_text
-
-
-# ------------------------------------------------------------------ #
-#  caller：画像 max_facts 渲染进 prompt（fake client 捕获 messages）
+#  caller：settings 的 max_facts 渲染进 prompt（fake client 捕获 messages）
 # ------------------------------------------------------------------ #
 class CapturingChatClient:
     """记录 chat / chat_outcome 收到的 messages 的假 client（无网络）。"""
@@ -86,6 +54,9 @@ class CapturingChatClient:
         self.usage = usage
         self.finish_reason = finish_reason
         self.last_messages: list[dict[str, str]] | None = None
+
+    def client_name(self) -> str:
+        return 'deepseek'
 
     def chat_outcome(
         self,
@@ -108,39 +79,34 @@ class CapturingChatClient:
         return _VALID_FACTS
 
 
-class TestCallerProfilePrompt:
+class TestCallerPrompt:
     def _system(self, messages: list[dict[str, str]]) -> str:
         return next(m for m in messages if m['role'] == 'system')['content']
 
-    def test_generate_renders_profile_max_facts(self) -> None:
-        """画像 max_facts=33 → _generate 发出的 system prompt 含「最多 33 条」。"""
+    def test_generate_renders_settings_max_facts(self) -> None:
+        """settings 的 max_facts → _generate 发出的 system prompt 含「最多 N 条」。"""
         client = CapturingChatClient()
-        profile = replace(build_default_profile(), max_facts=33)
-        caller = DeepSeekExtractionCaller(client, profile=profile)
+        caller = DeepSeekExtractionCaller(client)
         content, finish_reason, usage_tokens = caller._generate('对话文本')
         assert content == _VALID_FACTS
         assert finish_reason == 'stop'
         assert usage_tokens is None  # 假 client 无 usage → None
         assert client.last_messages is not None
-        assert '最多输出 33 条' in self._system(client.last_messages)
+        assert (
+            f'最多输出 {memory_settings.DEEPSEEK_EXTRACT_MAX_FACTS} 条'
+            in self._system(client.last_messages)
+        )
 
-    def test_repair_renders_profile_max_facts(self) -> None:
-        """repair prompt 同样按画像 max_facts 约束（默认=settings，逐字节等价）。"""
+    def test_repair_renders_settings_max_facts(self) -> None:
+        """repair prompt 同样按 settings 的 max_facts 约束。"""
         client = CapturingChatClient()
-        caller = DeepSeekExtractionCaller(client, profile=replace(
-            build_default_profile(), max_facts=33,
-        ))
+        caller = DeepSeekExtractionCaller(client)
         caller.repair('{"facts": [')
         assert client.last_messages is not None
-        assert '33 条事实上限约束' in self._system(client.last_messages)
-
-    def test_default_profile_path_matches_old_rendering(self) -> None:
-        """不传 profile → 渲染结果与 build_extract_messages 无参渲染逐字节一致。"""
-        client = CapturingChatClient()
-        caller = DeepSeekExtractionCaller(client)  # profile=None → 默认画像
-        caller._generate('对话文本')
-        baseline = build_extract_messages('对话文本')  # 旧无参渲染
-        assert client.last_messages == baseline
+        assert (
+            f'{memory_settings.DEEPSEEK_EXTRACT_MAX_FACTS} 条事实上限约束'
+            in self._system(client.last_messages)
+        )
 
 
 # ------------------------------------------------------------------ #
@@ -276,7 +242,7 @@ class TestCallerUsageLedger:
         """extract_structured_facts caller 路径把 token 记入实例计数（提取账口径）。"""
         usage = SimpleNamespace(prompt_tokens=40, completion_tokens=9)
         client = CapturingChatClient(usage=usage)
-        from os_mem.extractor.callers.framework import build_extraction_caller
+        from os_mem.core.extract.callers.base_caller import build_extraction_caller
 
         caller = build_extraction_caller(client)
         fx = FactExtractor()

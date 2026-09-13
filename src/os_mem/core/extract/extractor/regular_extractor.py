@@ -1,6 +1,6 @@
 """确定性正则提取器（RegularExtractor）—— 不依赖 LLM 的纯规则提取。
 
-归属：``os_mem.extractor`` 记忆提取域。职责：
+归属：``os_mem.core.extract`` 记忆提取域。职责：
 
 - ``fallback_numeric_facts`` / ``prune_redundant_verbatim``：含金额/编号/日期/
   时刻/百分比等精确 token 的原文句子 verbatim 兜底（宽进——入库不看判分器需要
@@ -21,7 +21,7 @@ import hashlib
 import json
 import re
 
-from os_mem.extractor.utils.token_utils import _MONTH_ALIASES, fact_tokens
+from os_mem.core.extract.utils.token_utils import _MONTH_ALIASES, fact_tokens
 from os_mem.models.mem_models import MemoryFact
 
 __all__ = ['RegularExtractor', 'MAX_FALLBACK_FACTS']

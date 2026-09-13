@@ -1,6 +1,6 @@
 """提取域共享纯函数与常量（单一实现源，消歧用）。
 
-归属：``os_mem.extractor`` 记忆提取域。本模块只放**无副作用**的纯函数与常量，
+归属：``os_mem.core.extract`` 记忆提取域。本模块只放**无副作用**的纯函数与常量，
 供任务层（fact_extractor.py）与 provider 自愈 caller（callers/）共用——
 两侧**不得各自再实现副本**，改这里即同步两侧语义：
 
@@ -28,7 +28,7 @@ from __future__ import annotations
 # 恢复循环遥测 keys（与 FactExtractor 实例计数一致；degrade_rows 属任务层，
 # 由 fact_extractor 实例计数在共享 keys 之外自行追加）。
 # in_tokens / out_tokens：每次 generate 后由恢复核心按 usage 累计（None→0），
-# 递归/重试全路径自然计入——见 extraction_core.ExtractionCore 与方案 §4 步骤 4 观测增强。
+# 递归/重试全路径自然计入——见 extract_core.ExtractionCore 与方案 §4 步骤 4 观测增强。
 EXTRACTION_STATS_KEYS = (
     'llm_calls',
     'trunc_empties',
@@ -39,9 +39,6 @@ EXTRACTION_STATS_KEYS = (
     'out_tokens',
 )
 
-# 单段提取恢复循环的切段递归最大层数（每层把段再切半，≤1 层已足够收敛输出预算）
-MAX_TRUNC_SPLIT_DEPTH = 1
-
 
 def empty_extraction_stats() -> dict[str, int]:
     """恢复循环遥测计数的零值 dict（keys 与 FactExtractor 实例计数一致；
@@ -49,7 +46,7 @@ def empty_extraction_stats() -> dict[str, int]:
 
     CallResult.stats 的 default_factory 与 callers 恢复循环共用此单一实现源。
     in_tokens / out_tokens：每次 generate 后由恢复核心按 usage 累计（None→0），
-    递归/重试全路径自然计入——见 extraction_core.ExtractionCore 与方案 §4
+    递归/重试全路径自然计入——见 extract_core.ExtractionCore 与方案 §4
     步骤 4 观测增强。
     """
     return {key: 0 for key in EXTRACTION_STATS_KEYS}

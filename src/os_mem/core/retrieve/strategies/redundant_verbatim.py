@@ -1,6 +1,6 @@
 from typing import Any
 
-from os_mem.extractor.utils.token_utils import fact_tokens
+from os_mem.core.extract.utils.token_utils import fact_tokens
 
 from .verbatim_utils import _is_verbatim
 

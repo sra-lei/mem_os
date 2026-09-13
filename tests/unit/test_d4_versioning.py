@@ -9,15 +9,15 @@ from datetime import datetime
 
 import pytest
 
+from os_mem.core.extract.utils.normalize import (
+    LIFECYCLE_CURRENT,
+    LIFECYCLE_HISTORICAL,
+    normalize_key,
+)
 from os_mem.core.services.memory_versioning import (
     ExistingVersion,
     IncomingFact,
     plan_versioning,
-)
-from os_mem.extractor.utils.normalize import (
-    LIFECYCLE_CURRENT,
-    LIFECYCLE_HISTORICAL,
-    normalize_key,
 )
 
 

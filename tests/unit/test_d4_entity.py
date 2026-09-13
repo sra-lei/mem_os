@@ -12,17 +12,17 @@ from datetime import datetime
 
 import pytest
 
+from os_mem.core.extract.utils.normalize import (
+    SELF_ENTITY,
+    normalize_key,
+    projection_key,
+    resolve_entity,
+)
 from os_mem.core.services.memory_versioning import (
     ExistingVersion,
     IncomingFact,
     current_attribute_touches,
     plan_versioning,
-)
-from os_mem.extractor.utils.normalize import (
-    SELF_ENTITY,
-    normalize_key,
-    projection_key,
-    resolve_entity,
 )
 from os_mem.models.mem_models import MemoryFact
 
