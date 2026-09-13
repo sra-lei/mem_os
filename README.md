@@ -13,7 +13,7 @@ v0.3 双轨 full 编排 A 批已落地（conv_meta 状态机 + 会话原文必�
 ## 系列文章（公众号「一文·AI账」）
 
 项目演进过程以《MemOS》系列同步记录在公众号「一文·AI账」，用真实评测数据复盘每一轮"改了什么、为什么、代价是什么"。
-合集入口：[MemOS 系列合集](https://mp.weixin.qq.com/mp/appmsgalbum?__biz=Mzg3MzE4MjMxNw==&action=getalbum&album_id=4659590571668488194)（共 8 篇，建议按序阅读）：
+合集入口：[MemOS 系列合集](https://mp.weixin.qq.com/mp/appmsgalbum?__biz=Mzg3MzE4MjMxNw==&action=getalbum&album_id=4659590571668488194)（共 9 篇，建议按序阅读）：
 
 1. [MemOS01-纯净版](https://mp.weixin.qq.com/s?__biz=Mzg3MzE4MjMxNw==&mid=2247483697&idx=1&sn=5053f0db7219a63e3469b1ae400ea1d3&chksm=cee2a433f9952d25081e50d07a8688b8cd3c2d09a732288205bcd694ae19b66abb3cc408f29f)
 2. [MemOS 02，我换了混合检索，反而比 BM25 低 10 个点](https://mp.weixin.qq.com/s?__biz=Mzg3MzE4MjMxNw==&mid=2247483711&idx=1&sn=89e9a3021a7003c69d122d13abedd172&chksm=cee2a43df9952d2b31e6d2d8de741db847b74404142db7d83d50bdd17149e0db8eb61eaafbd6)
@@ -23,6 +23,7 @@ v0.3 双轨 full 编排 A 批已落地（conv_meta 状态机 + 会话原文必�
 6. [MemOS 06，检索不是捞得越多越好——窗开大了一倍，答全率反而掉了](https://mp.weixin.qq.com/s/KJ6qSR9n92VvBYa_SBpHdw)
 7. [MemOS 07，库形态全达标的那一轮——通过率反而从 70% 掉到 50%](https://mp.weixin.qq.com/s/PF3vf0BwaZ_Kiwv1Pfi_Vg)
 8. [MemOS 08，分数没涨，跑一趟从两个半小时变成二十来分钟](https://mp.weixin.qq.com/s/At_txa5kMDYs0nUb-953ug)
+9. [MemOS 09，分数涨了，涨的那几道是删出来的](https://mp.weixin.qq.com/s/eQO4bS3bolSPv4LAdV2Asg)
 
 ## 特性
 
