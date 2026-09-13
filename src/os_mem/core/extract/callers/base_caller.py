@@ -1,7 +1,7 @@
-
 # ------------------------------------------------------------------ #
 #  caller 协议（任务侧只依赖此契约，不认识具体 provider 实现）
 # ------------------------------------------------------------------ #
+import importlib
 from collections.abc import Callable
 from typing import Protocol
 
@@ -25,7 +25,7 @@ class ExtractionCaller(Protocol):
 _logger = get_logger('os_mem.extractor.callers.framework')
 
 # ------------------------------------------------------------------ #
-#  工厂：按 profile.caller 分发到具体 provider 实现（lazy import 防环）
+#  工厂：按 client.client_name() 分发到具体 provider 实现（lazy import 防环）
 # ------------------------------------------------------------------ #
 # caller 标识 → 具体实现模块路径（新增 provider 在此登记，上层不动）。
 _CALLER_IMPL_MODULES = {
@@ -53,7 +53,5 @@ def build_extraction_caller(
             f'未登记的 caller 实现（{caller_name}），回退 deepseek caller'
         )
         module_path = _CALLER_IMPL_MODULES['deepseek']
-    import importlib
-
     module = importlib.import_module(module_path)
     return module.build_caller(client)

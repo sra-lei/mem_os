@@ -198,7 +198,7 @@ class StructuredMemService:
         if on_stage:
             on_stage(STATUS_EXTRACTING)
         # LLM 结构化提取（分段/并行/降级，见 FactExtractor；调用经 provider 自愈
-        # caller；分段上限取 profile.chunk_caps——默认 = settings 现值）
+        # caller；分段上限取 ChunkCaps.from_settings() = settings 现值）
         stats_before = _extractor.stats_snapshot()
         llm_facts: list[MemoryFact] = _extractor.extract_structured_facts(
             dialog_text,

@@ -1,3 +1,3 @@
-from .models import CallResult, ModelProfile, NormalizedKey
+from .models import CallResult, ChunkCaps, NormalizedKey
 
-__all__ = ['ModelProfile', 'CallResult', 'NormalizedKey']
+__all__ = ['CallResult', 'ChunkCaps', 'NormalizedKey']

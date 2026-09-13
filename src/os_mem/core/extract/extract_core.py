@@ -29,8 +29,10 @@ class ExtractionCore:
       截断空返回等一切路径同样计入，递归/重试自然累计）；
     - ``repair_fn(partial_json) -> str``：修复/续写（可选；无则解析失败走整段重试）；
     - ``dedup_fn(facts) -> facts``：切段两半结果合并去重；
-    - ``split_fn(text) -> (left, right) | None``：截断空返回的对半切段；
-    - ``max_split_depth``：切段递归最大层数（默认 1）。
+    - ``split_fn(text) -> (left, right) | None``：截断空返回的对半切段。
+
+    切段递归最大层数为本模块常量 ``MAX_TRUNC_SPLIT_DEPTH``（固定 1：每层把段
+    再切半，1 层已足够收敛输出预算）。
 
     恢复语义：
     - llm_calls 每次 generate +1（含递归切段调用）；

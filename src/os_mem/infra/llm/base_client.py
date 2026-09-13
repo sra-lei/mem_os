@@ -34,13 +34,12 @@ class ChatOutcome:
     usage: Any | None = None
 
 
-
 class ChatClient(Protocol):
     """通用 LLM chat 能力契约 —— 网关可替换实现只需满足该接口。"""
     def client_name(self) -> str:
         """返回 client 名称（用于日志、遥测、降级策略等）。"""
         ...
-        
+
     def chat(
         self,
         messages: list[Message],
@@ -49,4 +48,19 @@ class ChatClient(Protocol):
         retries: int = 3,
     ) -> str:
         """把完整 ``messages`` 交给 LLM，返回首个非空 content（重试后仍空返回 ""）。"""
+        ...
+
+    def chat_outcome(
+        self,
+        messages: list[Message],
+        *,
+        response_format: dict[str, Any] | None = None,
+        retries: int = 3,
+    ) -> ChatOutcome:
+        """与 ``chat`` 同输入，但返回完整 ``ChatOutcome``（保留 finish_reason / usage）。
+
+        上层（事实提取恢复循环）依赖 finish_reason 区分「输出预算截断」
+        （length，确定性失败，路由到切段）与真偶发空返回（整段重试），故为
+        必备方法而非可选能力；``chat`` 可由本方法薄包装实现。
+        """
         ...

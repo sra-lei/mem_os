@@ -7,8 +7,9 @@
   归一函数本身在 ``utils/normalize.py``；
 - ``CallResult``：单段提取结果契约（facts|None + 遥测 stats），恢复循环在
   ``extract_core.py``；
-- ``ChunkCaps`` / ``ModelProfile``：模型数据画像（纯数据，刻意无策略字段——
-  恢复策略随各 caller 实现走）；默认值由 caller 直接读 memory_settings。
+- ``ChunkCaps``：模型输入分段数据画像（纯数据，刻意无策略字段——
+  恢复策略随各 caller 实现走）；默认值由 ``from_settings()`` 直读
+  memory_settings。
 
 依赖方向（无环）：models → utils.token_utils（stats 默认值）/ configs.mem_settings
 （ChunkCaps.from_settings）；不反向 import callers/extract_core/normalize/
@@ -68,35 +69,9 @@ class ChunkCaps:
 
     @classmethod
     def from_settings(cls) -> ChunkCaps:
-        """读 memory_settings 现值构造（settings 即默认画像的单一数据源）。"""
+        """读 memory_settings 现值构造（settings 即分段上限的单一数据源）。"""
         return cls(
             max_chars=memory_settings.DEEPSEEK_EXTRACT_MAX_CHARS,
             max_msgs=memory_settings.DEEPSEEK_EXTRACT_MAX_MSGS,
             overlap=memory_settings.DEEPSEEK_EXTRACT_OVERLAP,
         )
-
-
-@dataclass(frozen=True)
-class ModelProfile:
-    """模型数据画像（frozen 纯数据，无策略字段——策略随 caller 实现走）。
-
-    字段语义：
-    - ``provider`` / ``model``：提供方与模型名（注册表 key = f'{provider}:{model}'）；
-    - ``caller``：provider 内自愈实现标识（策略注册点；v1 仅 'deepseek'）；
-    - ``max_output_tokens`` / ``temperature``：单次调用输出预算与温度（数据）；
-    - ``max_facts``：单次（每段）提取事实上限——渲染进 system/repair prompt 的
-      {max_facts} 占位（``callers.deepseek_caller`` 的 ``outcome()`` /
-      ``repair()`` 渲染）；
-    - ``chunk_caps``：输入分段上限（任务层 ``chunk_dialog`` 取此供给）。
-
-    Python dataclass 要求无默认字段在前，故必填的 ``max_output_tokens`` /
-    ``temperature`` / ``max_facts`` / ``chunk_caps`` 排在带默认的字段之前。
-    """
-
-    max_output_tokens: int
-    temperature: float
-    max_facts: int
-    chunk_caps: ChunkCaps
-    provider: str = 'deepseek'
-    model: str = ''
-    caller: str = 'deepseek'

@@ -17,10 +17,10 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from os_mem.configs.mem_settings import memory_settings
+from os_mem.core.extract import ExtractionCore
 from os_mem.core.extract.callers.deepseek_caller import DeepSeekExtractionCaller
-from os_mem.core.extract.extract_core import ExtractionCore
 from os_mem.core.extract.extractor.fact_extractor import FactExtractor
-from os_mem.core.extract.model.models import ChunkCaps
+from os_mem.core.extract.model import ChunkCaps
 from os_mem.infra.llm.base_client import ChatOutcome
 
 _VALID_FACTS = (

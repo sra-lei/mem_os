@@ -8,10 +8,11 @@
   （截断空返回的切段递归用）；少于 2 条消息或任一侧为空 → None（不可切）；
 - ``dedup_facts(facts) -> facts``：按 ``(category, key, value)`` 去重
   （caller 切段两半合并 / 任务层跨段去重共用）；
-- ``MAX_TRUNC_SPLIT_DEPTH``：单段恢复循环的切段递归最大层数（每层把段再
-  切半，≤1 层已足够收敛输出预算）；
 - ``EXTRACTION_STATS_KEYS``：恢复循环遥测 keys（``empty_extraction_stats`` 与
   任务层实例计数共用；任务层计数另含任务语义的 ``degrade_rows``，见 fact_extractor）。
+
+切段递归最大层数常量 ``MAX_TRUNC_SPLIT_DEPTH`` 紧邻恢复循环定义在
+``extract_core.py``（不在本模块）。
 
 精确信息 token 抽取口径（``fact_tokens`` / ``norm_token``）在 ``token_utils.py``
 （金额/编号/卡号/≥4 位数字/百分比/时刻/日期；通用口径不看齐判分器）——提取侧 R1

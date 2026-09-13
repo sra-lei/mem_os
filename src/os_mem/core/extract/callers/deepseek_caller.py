@@ -111,14 +111,9 @@ class DeepSeekExtractionCaller:
     def __init__(
         self, client: ChatClient
     ) -> None:
-        # prompt 模板固定用本模块的 SYSTEM_PROMPT/REPAIR_PROMPT 单源（历史画像里
-        # 曾预留 system_prompt/repair_prompt 覆盖字段，零消费已移除）。
-        self.model = memory_settings.DEEPSEEK_MODEL
-        self.max_output_tokens = memory_settings.DEEPSEEK_MAX_TOKENS
-        self.temperature = memory_settings.DEEPSEEK_TEMPERATURE
-        self.max_chars = memory_settings.DEEPSEEK_EXTRACT_MAX_CHARS
-        self.max_msgs = memory_settings.DEEPSEEK_EXTRACT_MAX_MSGS
-        self.overlap = memory_settings.DEEPSEEK_EXTRACT_OVERLAP
+        # prompt 模板固定用本模块的 SYSTEM_PROMPT/REPAIR_PROMPT 单源；
+        # max_facts 渲染进 prompt，其余调参（model/temperature/输出预算）由
+        # client 调用时直读 memory_settings，分段上限由任务层读 ChunkCaps。
         self._max_facts = memory_settings.DEEPSEEK_EXTRACT_MAX_FACTS
         self._client = client
         self._response_format = {'type': 'json_object'}
@@ -159,8 +154,8 @@ class DeepSeekExtractionCaller:
     def outcome(self, dialog_text: str) -> ChatOutcome:
         """带 finish_reason 的提取调用（截断路由需要；兼容旧 _ExtractComplete）。
 
-        client 支持 ``chat_outcome`` 时返回完整 outcome（含 finish_reason，length
-        截断可由恢复循环识别）；否则退回 ``chat`` 包一层（无 finish 信息）。
+        直接走 ``client.chat_outcome``——``chat_outcome`` 是 ChatClient 协议的
+        必备方法，finish_reason=length 由恢复循环识别并路由到对半切段。
         """
         from os_mem.vocab import render_categories_section
         # prompt 渲染 / 兼容适配 / 指纹
@@ -171,21 +166,13 @@ class DeepSeekExtractionCaller:
                 '{categories_section}', render_categories_section()
             )
         )
-        messages =  [
+        messages = [
             {'role': 'system', 'content': system},
             {'role': 'user', 'content': f'请从以下对话中提取结构化事实：\n\n{dialog_text}'},
         ]
-        chat_outcome = getattr(self._client, 'chat_outcome', None)
-        if chat_outcome is not None:
-            return chat_outcome(
-                messages,
-                response_format=self._response_format,
-            )
-        return ChatOutcome(
-            self._client.chat(
-                messages,
-                response_format=self._response_format,
-            )
+        return self._client.chat_outcome(
+            messages,
+            response_format=self._response_format,
         )
 
     def __call__(self, dialog_text: str) -> str:
@@ -203,7 +190,7 @@ class DeepSeekExtractionCaller:
             {'role': 'user', 'content': f'待修复的 JSON：\n\n{partial_json}'},
         ]
         return self._client.chat(
-           repair_message,response_format=self._response_format,
+            repair_message, response_format=self._response_format,
         )
 
 

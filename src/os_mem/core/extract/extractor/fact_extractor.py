@@ -23,7 +23,8 @@ caller（``extract(dialog_text, *, validate)`` 干净契约，见 callers/base_c
 命名规范：本包遵守"变量不用纯缩写"硬规则（snake_case 全称，如 signature /
 tokens / kept_facts），新增代码保持同水准。常量与默认值来自 memory_settings 或
 显式参数；与 caller 共享的纯函数/常量（split_text_midpoint / dedup_facts /
-MAX_TRUNC_SPLIT_DEPTH / 统计 keys）见 ``utils.extract_utils``。
+统计 keys）见 ``utils.extract_utils``，切段递归层数见
+``extract_core.MAX_TRUNC_SPLIT_DEPTH``。
 """
 
 from __future__ import annotations
@@ -32,13 +33,13 @@ import json
 import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any
 
 from pydantic import ValidationError
 
 from os_mem.configs.mem_settings import memory_settings
 from os_mem.core.extract import ExtractionCore
-from os_mem.core.extract.model.models import ChunkCaps
+from os_mem.core.extract.callers.base_caller import ExtractionCaller
+from os_mem.core.extract.model import ChunkCaps
 from os_mem.core.extract.utils.extract_utils import (
     EXTRACTION_STATS_KEYS,
     dedup_facts,
@@ -284,7 +285,7 @@ class FactExtractor:
 
     def _extract_chunk_via_caller(
         self,
-        caller: Any,
+        caller: ExtractionCaller,
         chunk_text: str,
         retries: int,
     ) -> list[MemoryFact]:
@@ -305,7 +306,7 @@ class FactExtractor:
         dialog_text: str,
         retries: int = 2,
         complete: Callable[[str], str] | None = None,
-        caller: Any | None = None,
+        caller: ExtractionCaller | None = None,
         chunk_caps: ChunkCaps | None = None,
     ) -> list[MemoryFact]:
         """对整段对话提取结构化事实（分段 + 并行 + 全失败降级）。

@@ -16,6 +16,7 @@ from os_mem.core.extract.callers.deepseek_caller import (
 )
 from os_mem.core.extract.extractor.fact_extractor import FactExtractor
 from os_mem.entries.mem_models import FactCategory
+from os_mem.infra.llm.base_client import ChatOutcome
 from os_mem.infra.storage.mem_storage import MemoryDatabase
 from os_mem.vocab import (
     CATEGORY_SEED,
@@ -102,9 +103,9 @@ def test_fallback_when_table_empty(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(MemoryDatabase, "db_path", db_file)
     MemoryDatabase._engines.clear()
     from sqlalchemy import text
+    from sqlmodel import SQLModel
 
     from os_mem.entries.mem_models import ConversationMeta, Message, StructuredMemory
-    from sqlmodel import SQLModel
 
     engine = MemoryDatabase().get_engine()
     SQLModel.metadata.create_all(
@@ -163,8 +164,9 @@ class _CapturingChatClient:
         messages: list[dict[str, str]],
         *,
         response_format: dict | None = None,
-    ) -> None:
+    ) -> ChatOutcome:
         self.last_messages = messages
+        return ChatOutcome('')
 
 
 def test_caller_outcome_renders_categories_section(tmp_db: Path) -> None:
