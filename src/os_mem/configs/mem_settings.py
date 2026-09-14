@@ -42,6 +42,24 @@ class MemorySetting(BaseSettings):
     DEEPSEEK_EXTRACT_MAX_FACTS: int = Field(default=60, ge=1)
 
     # ------------------------------------------------------------------
+    # D4-1.5 提取期属性锚定（方案 §8.3-1）：把该 user 已有 canonical attribute
+    # 词表（权威源 = struct_memories 的 current 行）注入提取 prompt，要求
+    # 「同实体同属性必须复用清单里的 key」——治跨会话泛词漂移
+    # （case12 实证：同一桩电汇 wire_amount → 退化写成 amount）。
+    # 纯上下文约束，不依赖运行时模型推理；裁决仍是确定性系统代码。
+    #
+    # 默认 False（保守不改线上提取行为）。A/B（2026-09-14，layer2 上轮 15 个
+    # 失败用例）实测：复用率 26% → 52%、新属性面 271 → 207（机制成立），
+    # 但 prompt tokens +23.9%、平均数字保真 85.7% → 82.8%（单轮），
+    # 故**先不默认开启**；端到端 layer2 复测（D4-5）做单变量对照后再定。
+    # 开启方式：.env 设 EXTRACT_ATTRIBUTE_HINTS=true（config_snapshot 已记状态）。
+    # 见 docs/实验/实验记录-D4-1.5属性锚定AB-2026-09-14.md
+    # ------------------------------------------------------------------
+    EXTRACT_ATTRIBUTE_HINTS: bool = Field(default=False)
+    # 注入词表条数上限（超出按 (category, attribute) 稳定排序截断，防 prompt 膨胀）
+    EXTRACT_ATTRIBUTE_HINTS_MAX: int = Field(default=60, ge=1)
+
+    # ------------------------------------------------------------------
     # LLM client 编排（os_mem.infra.llm 工厂，见 infra/llm/factory.py）
     # ------------------------------------------------------------------
     # 有序 provider 列表（逗号分隔，顺序即优先级）。第一个为主路，其余为降级备胎；

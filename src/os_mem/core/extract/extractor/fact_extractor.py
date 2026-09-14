@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import json
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from pydantic import ValidationError
@@ -288,15 +288,20 @@ class FactExtractor:
         caller: ExtractionCaller,
         chunk_text: str,
         retries: int,
+        attribute_hints: Sequence[tuple[str, str]] | None = None,
     ) -> list[MemoryFact]:
         """caller 模式单段提取（长对话并行 worker）：注入任务侧校验并回收遥测。
 
-        caller 须满足 ``extract(dialog_text, *, validate, retries) -> CallResult``
-        契约（见 models.CallResult）；facts 为 None = 全败（等效旧 extract_chunk
-        返回 []，上层降级逻辑不变）。
+        caller 须满足 ``extract(dialog_text, *, validate, retries,
+        attribute_hints) -> CallResult`` 契约（见 models.CallResult）；facts 为
+        None = 全败（等效旧 extract_chunk 返回 []，上层降级逻辑不变）。
+        ``attribute_hints`` 只对 caller 路径有效（旧 complete 路径无 prompt 控制权）。
         """
         result = caller.extract(
-            chunk_text, validate=self.validate_response, retries=retries
+            chunk_text,
+            validate=self.validate_response,
+            retries=retries,
+            attribute_hints=attribute_hints,
         )
         self._absorb_stats(result.stats)
         return result.facts or []
@@ -308,6 +313,7 @@ class FactExtractor:
         complete: Callable[[str], str] | None = None,
         caller: ExtractionCaller | None = None,
         chunk_caps: ChunkCaps | None = None,
+        attribute_hints: Sequence[tuple[str, str]] | None = None,
     ) -> list[MemoryFact]:
         """对整段对话提取结构化事实（分段 + 并行 + 全失败降级）。
 
@@ -320,6 +326,11 @@ class FactExtractor:
         （ChunkCaps.from_settings()，默认路径与现状逐字节等价）；显式传入时
         caller 与 complete 两条路径共用同一分段调用点（方案 §4 步骤 3：
         分段上限改由 profile.chunk_caps 供给任务层）。
+
+        ``attribute_hints``：D4-1.5 跨会话属性锚定词表（(category, attribute)
+        序列，权威源见 StrucMemService.read_attribute_vocabulary）——逐段透传给
+        caller 渲染进 prompt；仅 caller 路径生效（complete 路径是评测/测试兼容层），
+        缺省 None = 无锚定（与旧行为等价）。
 
         提取回调二选一（caller 优先；恢复策略=provider 内部代码，见
         docs/方案/方案-提取任务与LLM模型画像解耦.md）：
@@ -343,7 +354,10 @@ class FactExtractor:
             # 短对话：单次提取（原有重试 + 降级）
             if caller is not None:
                 result = caller.extract(
-                    dialog_text, validate=self.validate_response, retries=retries
+                    dialog_text,
+                    validate=self.validate_response,
+                    retries=retries,
+                    attribute_hints=attribute_hints,
                 )
                 self._absorb_stats(result.stats)
                 facts = result.facts or []
@@ -363,7 +377,11 @@ class FactExtractor:
             if caller is not None:
                 future_map = {
                     executor.submit(
-                        self._extract_chunk_via_caller, caller, chunk, retries
+                        self._extract_chunk_via_caller,
+                        caller,
+                        chunk,
+                        retries,
+                        attribute_hints,
                     ): index
                     for index, chunk in enumerate(chunks, 1)
                 }

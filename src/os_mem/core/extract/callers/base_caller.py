@@ -2,7 +2,7 @@
 #  caller 协议（任务侧只依赖此契约，不认识具体 provider 实现）
 # ------------------------------------------------------------------ #
 import importlib
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Protocol
 
 from os_mem.core.extract.model import CallResult
@@ -19,6 +19,7 @@ class ExtractionCaller(Protocol):
         *,
         validate: Callable[[str], list],
         retries: int = 2,
+        attribute_hints: Sequence[tuple[str, str]] | None = None,
     ) -> CallResult: ...
 
 

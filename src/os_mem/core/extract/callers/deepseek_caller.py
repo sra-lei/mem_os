@@ -27,7 +27,8 @@ infra.llm.base_client / utils.prompt_fp / vocab（函数内延迟 import）。�
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
+from functools import partial
 
 from os_mem.configs.mem_settings import memory_settings
 from os_mem.core.extract import ExtractionCore
@@ -77,6 +78,13 @@ SYSTEM_PROMPT = """你是一个信息提取助手，从对话中提取值得长�
    - "Weekly tuition is $617.50 (Emma $325 + Olivia $292.50)"
 5. **叙述宁缺毋滥**：非精确的叙述性信息只保留确有长期价值的，拿不准的不提取；
    不提取对话中的过程性描述、客套与瞬时内容。精确值条目优先占位，单次最多输出 {max_facts} 条。
+6. **跨会话属性复用**：若下方「已有属性清单」中已有与本次事实**同一实体、同一属性**的 key，
+   必须沿用该 key，禁止为它发明近义新 key（清单里已有 `wire_amount`，就不要再写
+   `amount` / `transfer_amount`）。清单里没有的、或语义并不相同的，再自拟精确 key；
+   同一属性全程只用一个 key。
+
+## 已有属性清单（该用户历史记忆里的属性名，供跨会话复用）
+{attribute_hints_section}
 
 ## 输出格式（JSON 对象，facts 为数组）
 {"facts": [{"fact": "User's checking account number is 4429853327", "category": "finance", "key": "checking_account_number", "value": "4429853327", "confidence": 0.9}]}
@@ -98,6 +106,42 @@ REPAIR_PROMPT = """你是 JSON 修复助手。以下是事实提取任务产生�
 # 使「某次跑分」与「当时提取 prompt 的内容」可对照（见 utils.prompt_fp）。
 SYSTEM_PROMPT_FINGERPRINT = fingerprint(SYSTEM_PROMPT)
 REPAIR_PROMPT_FINGERPRINT = fingerprint(REPAIR_PROMPT)
+
+# 无历史属性时 {attribute_hints_section} 的中性占位：模板恒定（指纹只随模板变），
+# 空词表 = 行为退化为「key 自拟」，不产生任何锚定约束。
+_ATTRIBUTE_HINTS_EMPTY = '（暂无历史属性；自拟 key 后请保持稳定复用。）'
+
+
+def render_attribute_hints_section(
+    attribute_hints: Sequence[tuple[str, str]] | None,
+) -> str:
+    """把「该 user 已有 canonical attribute 词表」渲染成 prompt 段（D4-1.5）。
+
+    ``attribute_hints`` 为 ``(category, attribute)`` 序列——权威源是
+    ``struct_memories`` 的 lifecycle=current 行（读侧在 StrucMemService，
+    本函数只做纯渲染，便于单测）。按 category 分组、组内字典序输出，
+    空/无效一律回落中性占位（模板恒定，无词表 = 无锚定约束）。
+
+    只提供**字符串上下文**，不含任何判断逻辑：要不要复用、复用哪条，
+    由模型按其语义判断产出 key，系统的裁决仍是确定性代码（红线）。
+    """
+    if not attribute_hints:
+        return _ATTRIBUTE_HINTS_EMPTY
+    grouped: dict[str, list[str]] = {}
+    for category, attribute in attribute_hints:
+        name = str(attribute or '').strip()
+        if not name:
+            continue
+        bucket = grouped.setdefault(str(category or 'other'), [])
+        if name not in bucket:
+            bucket.append(name)
+    if not grouped:
+        return _ATTRIBUTE_HINTS_EMPTY
+    return '\n'.join(
+        f'{category}: {", ".join(sorted(attributes))}'
+        for category, attributes in sorted(grouped.items())
+    )
+
 
 class DeepSeekExtractionCaller:
     """DeepSeek 自愈提取 caller：恢复策略=代码（prompt 模板/渲染就在本模块）。
@@ -131,15 +175,41 @@ class DeepSeekExtractionCaller:
         *,
         validate: Callable[[str], list],
         retries: int = 2,
+        attribute_hints: Sequence[tuple[str, str]] | None = None,
     ) -> CallResult:
-        facts, stats = self._core.extract(dialog_text, validate=validate, retries=retries)
+        """单段提取。
+
+        ``attribute_hints``：该 user 已有 canonical attribute 词表（D4-1.5
+        跨会话锚定），仅作 prompt 上下文——为空则完全走旧路径。
+        """
+        core = self._core_for(attribute_hints)
+        facts, stats = core.extract(dialog_text, validate=validate, retries=retries)
         return CallResult(facts=facts, stats=stats)
+
+    def _core_for(
+        self, attribute_hints: Sequence[tuple[str, str]] | None
+    ) -> ExtractionCore:
+        """按次取恢复核心：无词表复用长期持有的实例（旧路径逐字节等价）；
+        有词表则现绑一个（generate 闭包住词表）——避免共享可变状态被
+        长对话并行分段竞争（词表是本次调用级参数，不是 caller 状态）。
+        """
+        if not attribute_hints:
+            return self._core
+        return ExtractionCore(
+            generate=partial(self._generate, attribute_hints=attribute_hints),
+            repair_fn=self.repair,
+            dedup_fn=dedup_facts,
+            split_fn=split_text_midpoint,
+        )
 
     # ---- 低层能力：走 outcome() 单一调用路径，抽取 usage 三元组 ---- #
     def _generate(
-        self, dialog_text: str
+        self,
+        dialog_text: str,
+        *,
+        attribute_hints: Sequence[tuple[str, str]] | None = None,
     ) -> tuple[str, str | None, tuple[int, int] | None]:
-        outcome = self.outcome(dialog_text)
+        outcome = self.outcome(dialog_text, attribute_hints=attribute_hints)
         # usage 口径与旧 _ExtractComplete/AB Recorder 一致（getattr 容错缺属性按 0）；
         # 恢复核心对每次 generate 累计 token 数（None → 0），见方案 §4 步骤 4。
         usage_tokens: tuple[int, int] | None = None
@@ -151,11 +221,20 @@ class DeepSeekExtractionCaller:
         return outcome.content, outcome.finish_reason, usage_tokens
 
     # ---- 旧鸭子接口（AB Recorder / 旧调用方兼容） ------------------- #
-    def outcome(self, dialog_text: str) -> ChatOutcome:
+    def outcome(
+        self,
+        dialog_text: str,
+        *,
+        attribute_hints: Sequence[tuple[str, str]] | None = None,
+    ) -> ChatOutcome:
         """带 finish_reason 的提取调用（截断路由需要；兼容旧 _ExtractComplete）。
 
         直接走 ``client.chat_outcome``——``chat_outcome`` 是 ChatClient 协议的
         必备方法，finish_reason=length 由恢复循环识别并路由到对半切段。
+
+        ``attribute_hints``：D4-1.5 跨会话属性锚定词表（(category, attribute)
+        序列），渲染进 system prompt 的「已有属性清单」段；缺省 None =
+        无锚定（清单段回落中性占位）。
         """
         from os_mem.vocab import render_categories_section
         # prompt 渲染 / 兼容适配 / 指纹
@@ -164,6 +243,9 @@ class DeepSeekExtractionCaller:
                 '{max_facts}', str(self._max_facts)
             ).replace(
                 '{categories_section}', render_categories_section()
+            ).replace(
+                '{attribute_hints_section}',
+                render_attribute_hints_section(attribute_hints),
             )
         )
         messages = [

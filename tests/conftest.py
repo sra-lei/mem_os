@@ -334,6 +334,8 @@ def _flush_eval_case(holder: dict[str, Any]) -> None:
             # 提取模型画像（provider:model）——与 core/extract caller 的
             # settings 现值口径同源，跑分可回溯当时提取画像/模型（方案 §4 步骤 4）
             'extraction_profile': f'deepseek:{memory_settings.DEEPSEEK_MODEL}',
+            # D4-1.5 提取期属性锚定开关（prompt 行为变更，跑分须可回溯是否开启）
+            'extract_attribute_hints': memory_settings.EXTRACT_ATTRIBUTE_HINTS,
         }
         if provider == 'struct':
             # 结构化的检索口径（宽窗/预算/链状态）——base provider 不走该路径，故不记

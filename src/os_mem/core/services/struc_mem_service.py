@@ -5,6 +5,7 @@ from datetime import datetime
 
 from sqlmodel import select
 
+from os_mem.configs.mem_settings import memory_settings
 from os_mem.core.extract.callers.base_caller import build_extraction_caller
 from os_mem.core.extract.extractor.fact_extractor import FactExtractor
 from os_mem.core.extract.extractor.regular_extractor import RegularExtractor
@@ -38,6 +39,62 @@ _logger = get_logger('os_mem.struc_mem')
 # 事实提取执行器（校验/分段/去重/编排；数字兜底/R1 剪枝在 RegularExtractor）——
 # 提取域见 os_mem/core/extract/
 _extractor = FactExtractor()
+
+
+# 锚定词表里不该出现的属性：兜底/降级行的 key 自身就是内容载体（raw_conversation /
+# verbatim_*），复用它只会让后续会话也走兜底形态，无跨会话复用价值。
+_HINT_EXCLUDED_ATTRIBUTE_PREFIXES = ('verbatim_', 'raw_conversation')
+
+
+def read_attribute_vocabulary(
+    user_id: str,
+    *,
+    max_items: int | None = None,
+) -> list[tuple[str, str]]:
+    """读该 user 已落库的 canonical attribute 词表（D4-1.5 提取期属性锚定）。
+
+    权威源 = SQLite ``struct_memories`` 的 ``lifecycle=current`` 行（Milvus 只是
+    投影，不作读源）；按 (category, attribute) 稳定排序后按 ``max_items`` 截断
+    （缺省取 settings ``EXTRACT_ATTRIBUTE_HINTS_MAX``，防 prompt 膨胀）。
+
+    只读查询、绝不建表/迁移；任何异常一律回落空词表并告警——提取**不得**因锚定
+    词表读取失败而中断（空词表 = 无锚定约束，等价旧行为）。
+
+    为什么读 current 而不含 historical/superseded：单值属性的历史版本（如
+    ``original_wire_amount``）带生命周期前缀，模型按 current 名复用即可由
+    L2 归一器把 ``original_*`` 归到 historical 独立签名；把历史名也塞进清单反而
+    诱导模型给现值加历史前缀。
+    """
+    try:
+        with get_session() as session:
+            rows = session.exec(
+                select(StructuredMemory.category, StructuredMemory.attribute)
+                .where(
+                    StructuredMemory.user_id == user_id,
+                    StructuredMemory.lifecycle == 'current',
+                )
+                .distinct()
+            ).all()
+    except Exception as error:
+        _logger.warning(
+            f'  属性锚定语表读取失败（本次不锚定）user={user_id}: {error}'
+        )
+        return []
+
+    vocabulary = sorted(
+        {
+            (str(category or 'other'), str(attribute))
+            for category, attribute in rows
+            if attribute
+            and not str(attribute).startswith(_HINT_EXCLUDED_ATTRIBUTE_PREFIXES)
+        }
+    )
+    limit = (
+        max_items
+        if max_items is not None
+        else memory_settings.EXTRACT_ATTRIBUTE_HINTS_MAX
+    )
+    return vocabulary[:limit]
 
 
 class StructuredMemService:
@@ -197,12 +254,21 @@ class StructuredMemService:
 
         if on_stage:
             on_stage(STATUS_EXTRACTING)
+        # D4-1.5 提取期属性锚定：把该 user 已有 canonical attribute 词表带进提取
+        # prompt（治跨会话泛词漂移 wire_amount→amount）。开关关闭 → None =
+        # 旧行为（prompt 清单段回落中性占位）。只读权威库，失败回落空词表。
+        attribute_hints = (
+            read_attribute_vocabulary(conversation.user_id)
+            if memory_settings.EXTRACT_ATTRIBUTE_HINTS
+            else None
+        )
         # LLM 结构化提取（分段/并行/降级，见 FactExtractor；调用经 provider 自愈
         # caller；分段上限取 ChunkCaps.from_settings() = settings 现值）
         stats_before = _extractor.stats_snapshot()
         llm_facts: list[MemoryFact] = _extractor.extract_structured_facts(
             dialog_text,
             caller=self._caller,
+            attribute_hints=attribute_hints,
         )
         t_extract = time.perf_counter()
         # 提取账（观测/校准/成本记账）：本次会话的调用·截断·repair·降级·token 统计
@@ -214,6 +280,7 @@ class StructuredMemService:
             f'repair={extract_stats["repair_calls"]}'
             f'(成功 {extract_stats["repair_ok"]}) '
             f'降级行={extract_stats["degrade_rows"]} '
+            f'锚定语表={len(attribute_hints or [])} '
             f'in_tok={extract_stats["in_tokens"]} '
             f'out_tok={extract_stats["out_tokens"]} '
             f'{(t_extract - t0) * 1000:.0f}ms'
