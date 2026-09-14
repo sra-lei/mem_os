@@ -2,7 +2,10 @@
 
 > 状态：**D4-0/1/3 已实施，D4-4 已回放验证**；**D4-2「实体维度」已独立成册并落地 v1**
 > （2026-09-12，见 [`方案-D4-2-实体解析器.md`](方案-D4-2-实体解析器.md)——形式化线索 + 多值属性 + 实例实体）；
-> D4-1.5（提取期 attribute 锚定）与 D4-5（全量复测）待做。收敛签名已升级为
+> D4-1.5（提取期 attribute 锚定）**已实施、默认关**（A/B 见
+> [`实验记录-D4-1.5属性锚定AB-2026-09-14.md`](../实验/实验记录-D4-1.5属性锚定AB-2026-09-14.md)；
+> 方案 [`方案-D4-1.5-提取期属性锚定.md`](方案-D4-1.5-提取期属性锚定.md)）；
+> D4-5（全量复测）待做。收敛签名已升级为
 > `(entity_ref, attribute, lifecycle)`（`extractor/utils/normalize.py` 的 `normalize_key` +
 > `core/services/memory_versioning.py` 的 `plan_versioning`）；投影只镜像 SQLite 回读的
 > lifecycle=current 赢家、投影 key=`projection_key(entity, attribute)`；旧的批内 `_converge_by_key`
