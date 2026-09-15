@@ -44,6 +44,11 @@ class ExtractionCore:
       递归 extract → dedup 合并 → 非空返回；两半仍全空 → 返回 None（不再整段
       重试，交上层降级）；不可切 → trunc_empties+1 返回 None；
     - 空 + 非 length（或无 finish 信息）→ 整段重试循环。
+
+    实现分解（``_recover`` 只留「整段重试」骨架，单次尝试的分支下沉到
+    ``_attempt_once`` 一族方法，避免多层嵌套）：
+    ``_recover`` → ``_attempt_once`` → ``_recover_empty`` / ``_recover_malformed``
+    →（截断可切段时）``_split_and_extract``。
     """
 
     def __init__(
@@ -81,95 +86,165 @@ class ExtractionCore:
         depth: int,
         stats: dict[str, int],
     ) -> list | None:
-        """恢复循环（stats 跨递归共享累计）。"""
+        """恢复循环骨架（stats 跨递归共享累计）：每次尝试要么终局、要么再试一次。
+
+        单次尝试内部的判定（截断切段 / repair 续写 / 偶发空返回）见
+        ``_attempt_once``；抛错与「本次尝试无效」都只消耗一次 retry。
+        """
         for attempt in range(retries):
             try:
-                raw_json, finish_reason, usage_tokens = self._generate(text)
-                stats['llm_calls'] += 1
-                # usage token 记账：generate 一旦成功返回即累计（含截断空返回；
-                # None → 0）。递归/重试全路径经本函数，自然计入同一 stats。
-                if usage_tokens is not None:
-                    input_tokens, output_tokens = usage_tokens
-                    stats['in_tokens'] += input_tokens
-                    stats['out_tokens'] += output_tokens
-                facts = validate(raw_json)
-                if facts:
-                    return facts
-                if not raw_json or not raw_json.strip():
-                    if (
-                        finish_reason == 'length'
-                        and depth < self._max_split_depth
-                        and self._split_fn is not None
-                    ):
-                        halves = self._split_fn(text)
-                        if halves is not None:
-                            stats['trunc_empties'] += 1
-                            stats['split_recursions'] += 1
-                            left, right = halves
-                            # 两半各以 retries=1 递归（不再整段重试）
-                            left_facts = (
-                                self._recover(
-                                    left, validate, retries=1, depth=depth + 1,
-                                    stats=stats,
-                                )
-                                or []
-                            )
-                            right_facts = (
-                                self._recover(
-                                    right, validate, retries=1, depth=depth + 1,
-                                    stats=stats,
-                                )
-                                or []
-                            )
-                            merged = left_facts + right_facts
-                            if self._dedup_fn is not None:
-                                merged = self._dedup_fn(merged)
-                            if merged:
-                                return merged
-                            # 两半仍全空：截断为确定性失败，整段再试无信息增益，
-                            # 直接放弃该段交给上层降级（不再走 retries 整段重试）
-                            _logger.warning(
-                                f'截断空返回，对半切段仍全空（depth={depth}），'
-                                '放弃该段（降级）'
-                            )
-                            return None
-                        stats['trunc_empties'] += 1
-                        _logger.warning(
-                            f'截断空返回且不可切段（depth={depth}），'
-                            '放弃该段（降级）'
-                        )
-                        return None
-                    # 真偶发空返回（无 finish 信息或非 length）
-                    _logger.warning(
-                        f'第 {attempt + 1} 次提取返回空'
-                        f'（finish={finish_reason}），整段重试中...'
-                    )
-                    continue
-                # 非空但解析失败：尝试 repair 续写（若注入）
-                if self._repair_fn is not None:
-                    try:
-                        _logger.warning(
-                            f'第 {attempt + 1} 次输出解析失败，尝试 repair 续写 '
-                            f'（len={len(raw_json)}）...'
-                        )
-                        stats['repair_calls'] += 1
-                        repaired_json = self._repair_fn(raw_json)
-                        repaired_facts = validate(repaired_json)
-                        if repaired_facts:
-                            stats['repair_ok'] += 1
-                            _logger.info(
-                                f'repair 成功: {len(repaired_facts)} 条'
-                                f'（原始 len={len(raw_json)}'
-                                f' → 修复 len={len(repaired_json)}）'
-                            )
-                            return repaired_facts
-                        _logger.warning('repair 输出仍解析失败，回退整段重试')
-                    except Exception as error:
-                        _logger.error(f'repair 调用失败，回退整段重试: {error}')
-                else:
-                    _logger.warning(
-                        f'第 {attempt + 1} 次提取验证失败，整段重试中...'
-                    )
+                done, facts = self._attempt_once(
+                    text, validate, attempt + 1, depth, stats
+                )
             except Exception as error:
                 _logger.error(f'Attempt {attempt + 1} failed: {error}')
+                continue
+            if done:
+                return facts
         return None
+
+    def _attempt_once(
+        self,
+        text: str,
+        validate: Callable[[str], list],
+        attempt_no: int,
+        depth: int,
+        stats: dict[str, int],
+    ) -> tuple[bool, list | None]:
+        """单次 generate + validate；返回 ``(是否终局, facts)``。
+
+        - ``(True, facts)``：拿到终局结果（含「确定性失败、放弃该段」的 facts=None）；
+        - ``(False, None)``：本次尝试无效，交 ``_recover`` 整段重试。
+        """
+        raw_json, finish_reason, usage_tokens = self._generate(text)
+        stats['llm_calls'] += 1
+        # usage token 记账：generate 一旦成功返回即累计（含截断空返回；None → 0）。
+        # 递归/重试全路径经本方法，自然计入同一 stats。
+        self._count_usage(stats, usage_tokens)
+        facts = validate(raw_json)
+        if facts:
+            return True, facts
+        if not raw_json or not raw_json.strip():
+            return self._recover_empty(
+                text, validate, attempt_no, depth, finish_reason, stats
+            )
+        return self._recover_malformed(raw_json, validate, attempt_no, stats)
+
+    def _recover_empty(
+        self,
+        text: str,
+        validate: Callable[[str], list],
+        attempt_no: int,
+        depth: int,
+        finish_reason: str | None,
+        stats: dict[str, int],
+    ) -> tuple[bool, list | None]:
+        """空返回：仅「截断(length) + 已注入切段能力 + 未到深度上限」走对半递归。
+
+        三个条件任一不满足 → 与偶发空返回同路：整段重试（老实现的条件短路顺序
+        即如此——未注入 split_fn、或递归到深度上限时的截断空返回都还会再试一次，
+        不能当成确定性失败直接放弃）。切段能力存在但切不出两半（单行等）→
+        ``trunc_empties`` 计数后放弃该段。
+        """
+        split_fn = self._split_fn
+        if (
+            finish_reason != 'length'
+            or split_fn is None
+            or depth >= self._max_split_depth
+        ):
+            _logger.warning(
+                f'第 {attempt_no} 次提取返回空'
+                f'（finish={finish_reason}），整段重试中...'
+            )
+            return False, None
+        halves = split_fn(text)
+        stats['trunc_empties'] += 1
+        if halves is None:
+            _logger.warning(
+                f'截断空返回且不可切段（depth={depth}），'
+                '放弃该段（降级）'
+            )
+            return True, None
+        stats['split_recursions'] += 1
+        merged = self._split_and_extract(halves, validate, depth, stats)
+        if merged:
+            return True, merged
+        # 两半仍全空：截断为确定性失败，整段再试无信息增益，
+        # 直接放弃该段交给上层降级（不再走 retries 整段重试）
+        _logger.warning(
+            f'截断空返回，对半切段仍全空（depth={depth}），'
+            '放弃该段（降级）'
+        )
+        return True, None
+
+    def _split_and_extract(
+        self,
+        halves: tuple[str, str],
+        validate: Callable[[str], list],
+        depth: int,
+        stats: dict[str, int],
+    ) -> list:
+        """截断段的两个半段各以 retries=1 递归提取（不再整段重试）后合并去重。"""
+        left, right = halves
+        left_facts = (
+            self._recover(
+                left, validate, retries=1, depth=depth + 1, stats=stats,
+            )
+            or []
+        )
+        right_facts = (
+            self._recover(
+                right, validate, retries=1, depth=depth + 1, stats=stats,
+            )
+            or []
+        )
+        merged = left_facts + right_facts
+        if self._dedup_fn is not None:
+            merged = self._dedup_fn(merged)
+        return merged
+
+    def _recover_malformed(
+        self,
+        raw_json: str,
+        validate: Callable[[str], list],
+        attempt_no: int,
+        stats: dict[str, int],
+    ) -> tuple[bool, list | None]:
+        """非空但解析失败：尝试 repair 续写（若注入）；否则回退整段重试。"""
+        if self._repair_fn is None:
+            _logger.warning(
+                f'第 {attempt_no} 次提取验证失败，整段重试中...'
+            )
+            return False, None
+        try:
+            _logger.warning(
+                f'第 {attempt_no} 次输出解析失败，尝试 repair 续写 '
+                f'（len={len(raw_json)}）...'
+            )
+            stats['repair_calls'] += 1
+            repaired_json = self._repair_fn(raw_json)
+            repaired_facts = validate(repaired_json)
+            if repaired_facts:
+                stats['repair_ok'] += 1
+                _logger.info(
+                    f'repair 成功: {len(repaired_facts)} 条'
+                    f'（原始 len={len(raw_json)}'
+                    f' → 修复 len={len(repaired_json)}）'
+                )
+                return True, repaired_facts
+            _logger.warning('repair 输出仍解析失败，回退整段重试')
+        except Exception as error:
+            _logger.error(f'repair 调用失败，回退整段重试: {error}')
+        return False, None
+
+    @staticmethod
+    def _count_usage(
+        stats: dict[str, int],
+        usage_tokens: tuple[int, int] | None,
+    ) -> None:
+        """usage token 记账（None → 0，不写 stats）。"""
+        if usage_tokens is None:
+            return
+        input_tokens, output_tokens = usage_tokens
+        stats['in_tokens'] += input_tokens
+        stats['out_tokens'] += output_tokens

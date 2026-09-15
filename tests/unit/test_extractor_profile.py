@@ -252,3 +252,112 @@ class TestCallerUsageLedger:
         assert delta['in_tokens'] == 40
         assert delta['out_tokens'] == 9
         assert delta['llm_calls'] == 1
+
+
+# ------------------------------------------------------------------ #
+#  恢复分支语义锁定（重构 extract_core._recover 分层后回填）
+# ------------------------------------------------------------------ #
+def _seq_generate(seq: list[tuple[str, str | None, tuple[int, int] | None]]):
+    """按序列依次返回；(content, finish_reason, usage_tokens)。"""
+    calls = {'n': 0, 'texts': []}
+
+    def generate(text: str):
+        calls['texts'].append(text)
+        item = seq[min(calls['n'], len(seq) - 1)]
+        calls['n'] += 1
+        return item
+
+    return generate, calls
+
+
+class TestCoreRecoveryBranches:
+    def test_length_empty_without_split_fn_retries_whole_segment(self) -> None:
+        """截断空返回但未注入切段能力 → 仍走整段重试（不是确定性放弃）。"""
+        generate, calls = _seq_generate([('', 'length', None)])
+        core = ExtractionCore(generate=generate)  # 无 split_fn
+        facts, stats = core.extract(
+            '对话文本', validate=FactExtractor.validate_response, retries=2
+        )
+        assert facts is None
+        assert stats['llm_calls'] == 2
+        assert stats['trunc_empties'] == 0
+
+    def test_length_empty_unsplittable_abandons_segment(self) -> None:
+        """注入了切段但切不出两半（单行等）→ trunc_empties+1 后放弃该段。"""
+        generate, calls = _seq_generate([('', 'length', None)])
+        core = ExtractionCore(generate=generate, split_fn=lambda text: None)
+        facts, stats = core.extract(
+            '对话文本', validate=FactExtractor.validate_response, retries=3
+        )
+        assert facts is None
+        assert stats['llm_calls'] == 1
+        assert stats['trunc_empties'] == 1
+
+    def test_length_empty_split_merges_halves_and_dedups(self) -> None:
+        """截断可切段 → 两半各 retries=1 递归 + 合并去重，不再整段重试。"""
+        generate, calls = _seq_generate([
+            ('', 'length', (10, 0)),
+            (_VALID_FACTS, 'stop', (1, 1)),
+            (_VALID_FACTS, 'stop', (2, 2)),
+        ])
+        dedup_seen: list[int] = []
+
+        def dedup(facts: list) -> list:
+            dedup_seen.append(len(facts))
+            return facts[:1]  # 两半同一条 → 去重到 1
+
+        core = ExtractionCore(
+            generate=generate, split_fn=lambda text: ('左半', '右半'), dedup_fn=dedup
+        )
+        facts, stats = core.extract(
+            '对话文本', validate=FactExtractor.validate_response, retries=2
+        )
+        assert facts and len(facts) == 1
+        assert calls['texts'] == ['对话文本', '左半', '右半']
+        assert dedup_seen == [2]
+        assert stats['llm_calls'] == 3
+        assert stats['trunc_empties'] == 1
+        assert stats['split_recursions'] == 1
+        assert (stats['in_tokens'], stats['out_tokens']) == (13, 3)
+
+    def test_depth_limit_truncation_retries_without_split(self) -> None:
+        """递归半段（depth=max）再遇截断空返回 → 不再切段、仍整段重试一次。"""
+        generate, calls = _seq_generate([('', 'length', None)])
+        split_calls: list[str] = []
+
+        def split_fn(text: str):
+            split_calls.append(text)
+            return ('左半', '右半')
+
+        core = ExtractionCore(generate=generate, split_fn=split_fn)
+        facts, stats = core.extract(
+            '对话文本', validate=FactExtractor.validate_response, retries=1
+        )
+        assert facts is None
+        assert split_calls == ['对话文本']  # 半段没再切
+        assert stats['llm_calls'] == 3  # 整段 + 两半各一次
+        assert stats['trunc_empties'] == 1
+        assert stats['split_recursions'] == 1
+
+    def test_malformed_repair_success_is_terminal(self) -> None:
+        """非空解析失败 → repair 拿到合法结果即终局（不再整段重试）。"""
+        generate, calls = _seq_generate([('不是 json', 'stop', (5, 5))])
+        core = ExtractionCore(generate=generate, repair_fn=lambda raw: _VALID_FACTS)
+        facts, stats = core.extract(
+            '对话文本', validate=FactExtractor.validate_response, retries=2
+        )
+        assert facts
+        assert stats['llm_calls'] == 1
+        assert stats['repair_calls'] == 1
+        assert stats['repair_ok'] == 1
+
+    def test_malformed_without_repair_retries_whole_segment(self) -> None:
+        """无 repair 能力 → 每次解析失败都只消耗一次 retry。"""
+        generate, calls = _seq_generate([('不是 json', 'stop', (5, 5))])
+        core = ExtractionCore(generate=generate)
+        facts, stats = core.extract(
+            '对话文本', validate=FactExtractor.validate_response, retries=2
+        )
+        assert facts is None
+        assert stats['llm_calls'] == 2
+        assert stats['repair_calls'] == 0
